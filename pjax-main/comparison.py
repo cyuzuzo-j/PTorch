@@ -1,9 +1,8 @@
 import argparse
-import csv
 import os
 import time
 from datetime import datetime
-
+from pjax.optim import BipartiteOptimizer
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -19,6 +18,9 @@ from flax import linen
 
 import pjax
 from pjax import nn, optim
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 
 # --- Model Definitions ---
@@ -239,7 +241,7 @@ class RNN_pjax(nn.Module):
 
 
 # --- Benchmark Function ---
-def benchmark(model, optimizer, dataset, seed, margin_loss, patience=10, eval_every=100, max_steps=0):
+def benchmark(model, optimizer, dataset, seed, margin_loss, patience=10, eval_every=100, max_steps=5000):
     """Benchmark a model-optimizer combination on a dataset.
 
     Args:
@@ -254,7 +256,7 @@ def benchmark(model, optimizer, dataset, seed, margin_loss, patience=10, eval_ev
 
     Returns:
         dict: comprehensive results including final validation accuracy, training time,
-            convergence step, validation history, and training statistics.
+            convergence step, validation history, training statistics, and training loss history.
     """
 
     key = jax.random.key(seed)
@@ -277,10 +279,10 @@ def benchmark(model, optimizer, dataset, seed, margin_loss, patience=10, eval_ev
                 logits = model.apply(params, x)
                 return optax.softmax_cross_entropy_with_integer_labels(logits, y).mean()
 
-            _, grad = jax.value_and_grad(loss_fn)(params)
+            loss, grad = jax.value_and_grad(loss_fn)(params)
             updates, opt_state = optimizer.update(grad, opt_state)
             new_params = optax.apply_updates(params, updates)
-            return new_params, opt_state
+            return new_params, opt_state, loss
 
         step_fn = step_fn_linen
 
@@ -297,14 +299,14 @@ def benchmark(model, optimizer, dataset, seed, margin_loss, patience=10, eval_ev
                     return pjax.margin_loss(pred, y_one_hot)
                 return pjax.cross_entropy(pred, y_one_hot)
 
+            loss = apply_fn(params)
             new_params = optimizer.update(apply_fn, params)[0]
-            return new_params, opt_state
+            return new_params, opt_state, loss
 
         step_fn = step_fn_pjax
 
-    step_fn = jax.jit(step_fn)
+    step_fn = step_fn
 
-    @jax.jit
     def eval_fn(params, x, y):
         pred = model.apply(params, x)  # x is already preprocessed
         if not isinstance(pred, jnp.ndarray):
@@ -319,6 +321,7 @@ def benchmark(model, optimizer, dataset, seed, margin_loss, patience=10, eval_ev
     best_step = 0
     eval_cycles_since_last_improvement = 0
     val_acc_history = []  # Store (step, val_acc, cumulative_train_time)
+    train_loss_history = []  # Store (step, loss)
     cumulative_train_time = 0.0
     step = 0
 
@@ -334,6 +337,8 @@ def benchmark(model, optimizer, dataset, seed, margin_loss, patience=10, eval_ev
                 val_accs = [eval_fn(params, jnp.array(x), jnp.array(y)) for x, y in val_dataloader]
                 current_val_acc = jnp.mean(jnp.array(val_accs))
                 val_acc_history.append((step, float(current_val_acc), cumulative_train_time))
+                # record training loss at this step (before increment)
+                train_loss_history.append((step, np.mean(val_accs)))
                 pbar.set_postfix(val_acc=f"{current_val_acc:.4f}", best_val_acc=f"{best_val_acc:.4f}")
 
                 if current_val_acc > best_val_acc:
@@ -348,6 +353,8 @@ def benchmark(model, optimizer, dataset, seed, margin_loss, patience=10, eval_ev
                 if eval_cycles_since_last_improvement >= patience:
                     print(f"\nEarly stopping triggered at step {step}. No improvement for {patience} evaluations.")
                     break
+                
+
 
             # --- Training Phase ---
             # Perform steps within one update cycle for pjax optimizers
@@ -355,13 +362,12 @@ def benchmark(model, optimizer, dataset, seed, margin_loss, patience=10, eval_ev
             # Get next batch from the training iterator
             x, y = next(train_iter_split)
             x, y = jnp.array(x), jnp.array(y)
-            # Use a unique key for each training step if needed, but often not necessary
-            # step_key, train_key = jax.random.split(train_key)
-            params, opt_state = step_fn(params, opt_state, x, y)
+            params, opt_state, loss = step_fn(params, opt_state, x, y)
             inner_step_end_time = time.perf_counter()
             if step > 0:
                 # we don't want to count the first step due to the jit compilation time
                 cumulative_train_time += inner_step_end_time - inner_step_start_time
+
 
             step += steps_per_update
             pbar.update(steps_per_update)
@@ -383,81 +389,53 @@ def benchmark(model, optimizer, dataset, seed, margin_loss, patience=10, eval_ev
     final_test_acc = jnp.mean(jnp.array(test_accs))
     print(f"Final test accuracy: {final_test_acc:.4f}")
 
-    return float(final_test_acc), float(best_val_acc), best_step, cumulative_train_time, val_acc_history, step
+    return float(final_test_acc), float(best_val_acc), best_step, cumulative_train_time, val_acc_history, step, train_loss_history
 
 
-# --- CSV Logging ---
-def log_results(filename, args, metrics):
-    file_exists = os.path.isfile(filename)
-    with open(filename, "a", newline="") as csvfile:
-        fieldnames = [
-            "timestamp",
-            "dataset",
-            "model_type",
-            "optimizer",
-            "hidden_features",
-            "skip",
-            "batch_size",
-            "learning_rate",
-            "steps_per_update",
-            "dm_beta",
-            "margin_loss",
-            "patience",
-            "eval_every",
-            "max_steps",
-            "num_runs",
-            "seq_len",
-            "test_acc_mean",
-            "test_acc_std",
-            "best_step_mean",
-            "best_step_std",
-            "total_time_mean",
-            "total_time_std",
-            "steps_to_conv_mean",
-            "steps_to_conv_std",
-            "time_to_conv_mean",
-            "time_to_conv_std",
-            "step_time_ms_mean",
-            "step_time_ms_std",
-        ]
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+# --- Plotting (replaces CSV logging) ---
+def plot_optimizer_errors(metrics_by_opt, args):
+    labels = list(metrics_by_opt.keys())
+    errors = [1.0 - metrics_by_opt[o]["test_acc_mean"] for o in labels]
+    yerr = [metrics_by_opt[o]["test_acc_std"] for o in labels]  # Std is same for error (1 - acc)
 
-        if not file_exists:
-            writer.writeheader()
+    plt.figure(figsize=(9, 4))
+    plt.bar(labels, errors, yerr=yerr, capsize=4, color="#4C78A8", alpha=0.85)
+    plt.ylabel("Error (1 - accuracy)")
+    plt.xlabel("Optimizer")
+    plt.title(f"{args.dataset} {args.model_type.upper()} error across optimizers (n={args.num_runs})")
+    plt.ylim(0.0, 1.0)
+    plt.grid(axis="y", alpha=0.3)
+    plt.tight_layout()
 
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        row = {
-            "timestamp": timestamp,
-            "dataset": args.dataset,
-            "model_type": args.model_type,
-            "optimizer": args.optimizer,
-            "hidden_features": str(args.hidden_features),
-            "skip": args.skip,
-            "batch_size": args.batch_size,
-            "learning_rate": args.learning_rate if args.optimizer in ["sgd", "adam"] else "N/A",
-            "steps_per_update": 1 if args.optimizer in ["sgd", "adam"] else args.steps_per_update,
-            "dm_beta": args.dm_beta if args.optimizer == "dm" else "N/A",
-            "margin_loss": args.margin_loss if args.optimizer not in ["sgd", "adam"] else "N/A",
-            "patience": args.patience,
-            "eval_every": args.eval_every,
-            "max_steps": args.max_steps,
-            "num_runs": args.num_runs,
-            "seq_len": args.seq_len if args.model_type == "rnn" else "N/A",  # Added seq_len value
-            "test_acc_mean": f"{metrics['test_acc_mean']:.6f}",
-            "test_acc_std": f"{metrics['test_acc_std']:.6f}",
-            "best_step_mean": f"{metrics['best_step_mean']:.2f}",
-            "best_step_std": f"{metrics['best_step_std']:.2f}",
-            "total_time_mean": f"{metrics['total_time_mean']:.4f}",
-            "total_time_std": f"{metrics['total_time_std']:.4f}",
-            "steps_to_conv_mean": f"{metrics['steps_to_conv_mean']:.2f}",
-            "steps_to_conv_std": f"{metrics['steps_to_conv_std']:.2f}",
-            "time_to_conv_mean": f"{metrics['time_to_conv_mean']:.4f}",
-            "time_to_conv_std": f"{metrics['time_to_conv_std']:.4f}",
-            "step_time_ms_mean": f"{metrics['step_time_ms_mean']:.4f}",
-            "step_time_ms_std": f"{metrics['step_time_ms_std']:.4f}",
-        }
-        writer.writerow(row)
-    print(f"Aggregated results logged to {filename}")
+    out_path = args.plot_file
+    out_dir = os.path.dirname(out_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    plt.savefig(out_path, dpi=160)
+    print(f"Saved optimizer error plot to {out_path}")
+
+
+def plot_optimizer_losses(loss_curves_by_opt, args):
+    # loss_curves_by_opt: dict[name] -> (steps: np.ndarray, mean: np.ndarray, std: np.ndarray)
+    plt.figure(figsize=(9, 4))
+    for name, (steps, means, stds) in loss_curves_by_opt.items():
+        plt.plot(steps, means, label=name)
+        if len(stds) == len(means):
+            plt.fill_between(steps, means - stds, means + stds, alpha=0.2)
+
+    plt.xlabel("Step")
+    plt.ylabel("Training loss")
+    plt.title(f"{args.dataset} {args.model_type.upper()} training loss vs step")
+    plt.grid(alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+
+    out_path = args.loss_plot_file
+    out_dir = os.path.dirname(out_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    plt.savefig(out_path, dpi=160)
+    print(f"Saved optimizer loss plot to {out_path}")
 
 
 # --- Main Execution ---
@@ -478,7 +456,14 @@ if __name__ == "__main__":
         type=str,
         default="dr",
         choices=["sgd", "adam", "ap", "dr", "dm", "ar", "cp"],
-        help="Optimizer to use.",
+        help="Optimizer to use (ignored if --optimizers is provided).",
+    )
+    parser.add_argument(
+        "--optimizers",
+        type=str,
+        nargs="+",
+        choices=["sgd", "adam", "ap","ap_mon", "ap_adam", "dr", "dr_mon","dm", "ar", "cp"],
+        help="List of optimizers to compare; if set, runs each and plots their errors.",
     )
     parser.add_argument("--hidden_features", type=int, nargs="+", default=[32, 32], help="List of hidden layer sizes.")
     parser.add_argument(
@@ -498,7 +483,7 @@ if __name__ == "__main__":
         default=False,
         help="Use threshold margin loss instead of cross-entropy for pjax optimizers.",
     )
-    parser.add_argument("--log_file", type=str, default="comparison_results.csv", help="CSV file to log results.")
+    # Removed --log_file (CSV export) in favor of plotting
     # Removed overfit_batches
     parser.add_argument(
         "--patience",
@@ -510,9 +495,21 @@ if __name__ == "__main__":
         "--num_runs", type=int, default=5, help="Number of runs with different seeds for statistical analysis."
     )
     parser.add_argument(
-        "--max_steps", type=int, default=0, help="Maximum number of training steps before stopping (0 for no limit)."
+        "--max_steps", type=int, default=5000, help="Maximum number of training steps before stopping (0 for no limit)."
     )
     parser.add_argument("--seq_len", type=int, default=64, help="Sequence length for RNN models (shakespeare dataset).")
+    parser.add_argument(
+        "--plot_file",
+        type=str,
+        default="optimizer_error.png",
+        help="Where to save the optimizer error plot.",
+    )
+    parser.add_argument(
+        "--loss_plot_file",
+        type=str,
+        default="optimizer_loss.png",
+        help="Where to save the optimizer loss vs step plot.",
+    )
 
     args = parser.parse_args()
 
@@ -553,150 +550,179 @@ if __name__ == "__main__":
     if args.model_type == "rnn" and args.dataset != "shakespeare":
         raise ValueError("RNN model type is only supported for the shakespeare dataset.")
 
-    # --- Run Benchmark Multiple Times ---
-    test_accuracies = []
-    best_steps = []
-    total_times = []
-    steps_to_convergence_list = []
-    times_to_convergence_list = []
-    all_step_times = []
+    # Select optimizers to run (support multiple for plotting)
+    optimizers_to_run = args.optimizers if args.optimizers else [args.optimizer]
 
-    print(f"\nRunning benchmark {args.num_runs} times...")
-    for i in range(args.num_runs):
-        seed = i
-        print(f"\n--- Run {i+1}/{args.num_runs} ---")
+    metrics_by_opt = {}
+    loss_curves_by_opt = {}
 
-        # --- Data Loading (Inside the loop with unique seed) ---
-        print(f"Loading dataset: {args.dataset} for run {i+1}")
-        if args.dataset == "MNIST":
-            data = MNISTDataModule(batch_size=args.batch_size, preload=True, seed=seed)
-        elif args.dataset == "CIFAR10":
-            data = CIFAR10DataModule(batch_size=args.batch_size, preload=True, seed=seed)
-        elif args.dataset == "HIGGS":
-            data = HIGGSDataModule(batch_size=args.batch_size, preload=False, seed=seed)
-        elif args.dataset == "shakespeare":
-            data = ShakespeareDataModule(batch_size=args.batch_size, seq_len=args.seq_len, preload=False, seed=seed)
-        else:
-            raise ValueError(f"Unknown dataset: {args.dataset}")
+    for opt_name in optimizers_to_run:
+        print(f"\n=== Optimizer: {opt_name} ===")
+        # --- Run Benchmark Multiple Times for this optimizer ---
+        test_accuracies = []
+        best_steps = []
+        total_times = []
+        steps_to_convergence_list = []
+        times_to_convergence_list = []
+        all_step_times = []
+        train_loss_histories_runs = []
 
-        # --- Model Selection (recreate model for each run) ---
-        print(
-            f"Creating model: {args.model_type.upper()} with hidden features {args.hidden_features}, skip: {args.skip}"
-        )
-        use_linen = args.optimizer in ["sgd", "adam"]
-        if args.model_type == "mlp":
-            if use_linen:
-                model = MLP(hidden_features=args.hidden_features, classes=num_classes, skip=args.skip)
+        print(f"\nRunning benchmark {args.num_runs} times...")
+        for i in range(args.num_runs):
+            seed = i
+            print(f"\n--- Run {i+1}/{args.num_runs} ---")
+
+            # --- Data Loading (Inside the loop with unique seed) ---
+            print(f"Loading dataset: {args.dataset} for run {i+1}")
+            if args.dataset == "MNIST":
+                data = MNISTDataModule(batch_size=args.batch_size, preload=True, seed=seed)
+            elif args.dataset == "CIFAR10":
+                data = CIFAR10DataModule(batch_size=args.batch_size, preload=True, seed=seed)
+            elif args.dataset == "HIGGS":
+                data = HIGGSDataModule(batch_size=args.batch_size, preload=False, seed=seed)
+            elif args.dataset == "shakespeare":
+                data = ShakespeareDataModule(batch_size=args.batch_size, seq_len=args.seq_len, preload=False, seed=seed)
             else:
-                model = MLP_pjax(
-                    hidden_features=args.hidden_features,
-                    in_features=input_features,
-                    classes=num_classes,
-                    skip=args.skip,
-                )
-        elif args.model_type == "cnn":
-            if use_linen:
-                model = CNN(hidden_features=args.hidden_features, classes=num_classes, skip=args.skip)
+                raise ValueError(f"Unknown dataset: {args.dataset}")
+
+            # --- Model Selection (recreate model for each run) ---
+            print(
+                f"Creating model: {args.model_type.upper()} with hidden features {args.hidden_features}, skip: {args.skip}"
+            )
+            use_linen = opt_name in ["sgd", "adam"]
+            if args.model_type == "mlp":
+                if use_linen:
+                    model = MLP(hidden_features=args.hidden_features, classes=num_classes, skip=args.skip)
+                else:
+                    model = MLP_pjax(
+                        hidden_features=args.hidden_features,
+                        in_features=input_features,
+                        classes=num_classes,
+                        skip=args.skip,
+                    )
+            elif args.model_type == "cnn":
+                if use_linen:
+                    model = CNN(hidden_features=args.hidden_features, classes=num_classes, skip=args.skip)
+                else:
+                    model = CNN_pjax(
+                        hidden_features=args.hidden_features,
+                        in_features=input_features,
+                        size_2d=size_2d,
+                        classes=num_classes,
+                        skip=args.skip,
+                    )
+            elif args.model_type == "rnn":
+                if use_linen:
+                    model = RNN(hidden_features=args.hidden_features, vocab_size=num_classes, skip=args.skip)
+                else:
+                    model = RNN_pjax(
+                        hidden_features=args.hidden_features,
+                        vocab_size=num_classes,
+                        skip=args.skip,
+                    )
+
+            # --- Optimizer Selection ---
+            print(f"Using optimizer: {opt_name}")
+            if opt_name == "sgd":
+                optimizer = optax.sgd(args.learning_rate)
+            elif opt_name == "adam":
+                optimizer = optax.adam(args.learning_rate)
+            elif opt_name == "ap":
+                optimizer = optim.AlternatingProjections(steps_per_update=args.steps_per_update)
+            elif opt_name == "ap_mon":
+                optimizer = optim.AlternatingProjectionsMonumentum(steps_per_update=args.steps_per_update)
+            elif opt_name == "dr":
+                optimizer = optim.DouglasRachford(steps_per_update=args.steps_per_update)
+            elif opt_name == "dr_mon":
+                optimizer = optim.DouglasRachfordMonumentum(steps_per_update=args.steps_per_update)
+            elif opt_name == "dm":
+                optimizer = optim.DifferenceMap(beta=args.dm_beta)
+            elif opt_name == "ar":
+                optimizer = optim.AlternatingReflections(steps_per_update=args.steps_per_update)
+            elif opt_name == "cp":
+                optimizer = optim.CyclicProjections(steps_per_update=args.steps_per_update)
             else:
-                model = CNN_pjax(
-                    hidden_features=args.hidden_features,
-                    in_features=input_features,
-                    size_2d=size_2d,
-                    classes=num_classes,
-                    skip=args.skip,
-                )
-        elif args.model_type == "rnn":
-            if use_linen:
-                model = RNN(hidden_features=args.hidden_features, vocab_size=num_classes, skip=args.skip)
-            else:
-                model = RNN_pjax(
-                    hidden_features=args.hidden_features,
-                    vocab_size=num_classes,
-                    skip=args.skip,
-                )
+                raise ValueError(f"Unknown optimizer: {opt_name}")
 
-        # --- Optimizer Selection ---
-        # Recreating optimizer is less critical unless it has state, but good practice
-        print(f"Using optimizer: {args.optimizer}")
-        if args.optimizer == "sgd":
-            optimizer = optax.sgd(args.learning_rate)
-        elif args.optimizer == "adam":
-            optimizer = optax.adam(args.learning_rate)
-        elif args.optimizer == "ap":
-            optimizer = optim.AlternatingProjections(steps_per_update=args.steps_per_update)
-        elif args.optimizer == "dr":
-            optimizer = optim.DouglasRachford(steps_per_update=args.steps_per_update)
-        elif args.optimizer == "dm":
-            optimizer = optim.DifferenceMap(beta=args.dm_beta)
-        elif args.optimizer == "ar":
-            optimizer = optim.AlternatingReflections(steps_per_update=args.steps_per_update)
-        elif args.optimizer == "cp":
-            optimizer = optim.CyclicProjections(steps_per_update=args.steps_per_update)
-        else:
-            raise ValueError(f"Unknown optimizer: {args.optimizer}")
+            # --- Run Benchmark for this seed ---
+            test_acc, best_val_acc, best_step, total_time, val_acc_history, step, train_loss_history = benchmark(
+                model,
+                optimizer,
+                data,
+                seed=seed,
+                margin_loss=args.margin_loss,
+                patience=args.patience,
+                eval_every=args.eval_every,
+                max_steps=args.max_steps,
+            )
 
-        # --- Run Benchmark for this seed ---
-        test_acc, best_val_acc, best_step, total_time, val_acc_history, step = benchmark(
-            model,
-            optimizer,
-            data,
-            seed=seed,
-            margin_loss=args.margin_loss,
-            patience=args.patience,
-            eval_every=args.eval_every,
-            max_steps=args.max_steps,
-        )
+            # --- Calculate Convergence Metrics ---
+            steps_to_convergence = np.nan
+            time_to_convergence = np.nan
+            if best_val_acc > 0:
+                target_acc = 0.99 * best_val_acc
+                for step_hist, acc_hist, time_hist in val_acc_history:
+                    if acc_hist >= target_acc:
+                        steps_to_convergence = step_hist
+                        time_to_convergence = time_hist
+                        break
 
-        # --- Calculate Convergence Metrics ---
-        steps_to_convergence = np.nan
-        time_to_convergence = np.nan
-        if best_val_acc > 0:  # Avoid division by zero or issues if no improvement
-            target_acc = 0.99 * best_val_acc  # convergence threshold: 99% of best validation accuracy
-            for step_hist, acc_hist, time_hist in val_acc_history:
-                if acc_hist >= target_acc:
-                    steps_to_convergence = step_hist
-                    time_to_convergence = time_hist
-                    break  # Found the first time it reached convergence target
+            # --- Store Results ---
+            test_accuracies.append(test_acc)
+            best_steps.append(best_step)
+            total_times.append(total_time)
+            steps_to_convergence_list.append(steps_to_convergence)
+            times_to_convergence_list.append(time_to_convergence)
+            all_step_times.append(total_time / step)
+            train_loss_histories_runs.append(train_loss_history)
 
-        # --- Store Results ---
-        test_accuracies.append(test_acc)
-        best_steps.append(best_step)
-        total_times.append(total_time)
-        steps_to_convergence_list.append(steps_to_convergence)
-        times_to_convergence_list.append(time_to_convergence)
-        all_step_times.append(total_time / step)
+            print(f"Run {i+1} finished. Test Acc: {test_acc:.4f}, Best Step: {best_step}, Total Time: {total_time:.2f}s")
+            print(
+                f"Steps to Convergence (99% of best val): {steps_to_convergence}, Time to Convergence: {time_to_convergence:.2f}s"
+            )
 
-        print(f"Run {i+1} finished. Test Acc: {test_acc:.4f}, Best Step: {best_step}, Total Time: {total_time:.2f}s")
-        print(
-            f"Steps to Convergence (99% of best val): {steps_to_convergence}, Time to Convergence: {time_to_convergence:.2f}s"
-        )
+        # --- Aggregate Results for this optimizer ---
+        metrics = {
+            "test_acc_mean": np.mean(test_accuracies),
+            "test_acc_std": np.std(test_accuracies),
+            "best_step_mean": np.mean(best_steps),
+            "best_step_std": np.std(best_steps),
+            "total_time_mean": np.mean(total_times),
+            "total_time_std": np.std(total_times),
+            "step_time_ms_mean": np.mean(all_step_times) * 1000,
+            "step_time_ms_std": np.std(all_step_times) * 1000,
+            "steps_to_conv_mean": np.nanmean(steps_to_convergence_list),
+            "steps_to_conv_std": np.nanstd(steps_to_convergence_list),
+            "time_to_conv_mean": np.nanmean(times_to_convergence_list),
+            "time_to_conv_std": np.nanstd(times_to_convergence_list),
+        }
+        metrics_by_opt[opt_name] = metrics
 
-    # --- Aggregate Results ---
-    metrics = {
-        "test_acc_mean": np.mean(test_accuracies),
-        "test_acc_std": np.std(test_accuracies),
-        "best_step_mean": np.mean(best_steps),
-        "best_step_std": np.std(best_steps),
-        "total_time_mean": np.mean(total_times),
-        "total_time_std": np.std(total_times),
-        "step_time_ms_mean": np.mean(all_step_times) * 1000,
-        "step_time_ms_std": np.std(all_step_times) * 1000,
-        # Use nanmean/nanstd for convergence metrics as they might be NaN if convergence wasn't reached
-        "steps_to_conv_mean": np.nanmean(steps_to_convergence_list),
-        "steps_to_conv_std": np.nanstd(steps_to_convergence_list),
-        "time_to_conv_mean": np.nanmean(times_to_convergence_list),
-        "time_to_conv_std": np.nanstd(times_to_convergence_list),
-    }
+        # Aggregate loss histories across runs at matching step indices
+        def _aggregate_loss_histories(histories):
+            buckets = {}
+            for hist in histories:
+                for s, l in hist:
+                    s = int(s)
+                    buckets.setdefault(s, []).append(float(l))
+            steps_sorted = sorted(buckets.keys())
+            means = np.array([np.mean(buckets[s]) for s in steps_sorted], dtype=float)
+            stds = np.array([np.std(buckets[s]) for s in steps_sorted], dtype=float)
+            return np.array(steps_sorted, dtype=int), means, stds
 
-    print("\n--- Aggregated Results ---")
-    print(f"Test Accuracy: {metrics['test_acc_mean']:.4f} +/- {metrics['test_acc_std']:.4f}")
-    print(f"Best Step: {metrics['best_step_mean']:.2f} +/- {metrics['best_step_std']:.2f}")
-    print(f"Total Training Time: {metrics['total_time_mean']:.2f}s +/- {metrics['total_time_std']:.2f}s")
-    print(f"Steps to Convergence: {metrics['steps_to_conv_mean']:.2f} +/- {metrics['steps_to_conv_std']:.2f}")
-    print(f"Time to Convergence: {metrics['time_to_conv_mean']:.2f}s +/- {metrics['time_to_conv_std']:.2f}s")
-    print(f"Time per Step: {metrics['step_time_ms_mean']:.2f}ms +/- {metrics['step_time_ms_std']:.2f}ms")
+        steps_arr, means_arr, stds_arr = _aggregate_loss_histories(train_loss_histories_runs)
+        loss_curves_by_opt[opt_name] = (steps_arr, means_arr, stds_arr)
 
-    # --- Log Results ---
-    log_results(args.log_file, args, metrics)
+        print("\n--- Aggregated Results ---")
+        print(f"[{opt_name}] Test Accuracy: {metrics['test_acc_mean']:.4f} +/- {metrics['test_acc_std']:.4f}")
+        print(f"[{opt_name}] Best Step: {metrics['best_step_mean']:.2f} +/- {metrics['best_step_std']:.2f}")
+        print(f"[{opt_name}] Total Training Time: {metrics['total_time_mean']:.2f}s +/- {metrics['total_time_std']:.2f}s")
+        print(f"[{opt_name}] Steps to Convergence: {metrics['steps_to_conv_mean']:.2f} +/- {metrics['steps_to_conv_std']:.2f}")
+        print(f"[{opt_name}] Time to Convergence: {metrics['time_to_conv_mean']:.2f}s +/- {metrics['time_to_conv_std']:.2f}s")
+        print(f"[{opt_name}] Time per Step: {metrics['step_time_ms_mean']:.2f}ms +/- {metrics['step_time_ms_std']:.2f}ms")
+
+    # --- Plot Results ---
+    plot_optimizer_errors(metrics_by_opt, args)
+    plot_optimizer_losses(loss_curves_by_opt, args)
 
     print("\nScript finished.")

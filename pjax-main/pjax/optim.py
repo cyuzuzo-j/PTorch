@@ -148,6 +148,8 @@ class Optimizer(ABC):
     def __init__(self, steps_per_update=50, change_projection_order=False):
         self.steps_per_update = steps_per_update
         self.change_projection_order = change_projection_order
+        self.uses_velocity = False
+        self.uses_variance = False  # added: allow second-moment state
 
     def update(self, fun, params: FrozenDict, steps_per_update=None):
         steps_per_update = steps_per_update or self.steps_per_update
@@ -175,15 +177,38 @@ class Optimizer(ABC):
         if self.change_projection_order:
             projections = projections[::-1]
 
-        # optimize
-        def step(inputs, _):
-            new_inputs = self._step(inputs, *projections)
-            # compute loss
-            diffs = [jnp.mean((x - y) ** 2) for x, y in zip(jax.tree.leaves(inputs), jax.tree.leaves(new_inputs))]
-            loss = sum(diffs) / len(diffs)
-            return new_inputs, loss
+        # initialize optional states
+        if self.uses_velocity:
+            velocity = jax.tree.map(lambda x: x * 0, inputs)
+        if self.uses_variance:
+            variance = jax.tree.map(lambda x: x * 0, inputs)
 
-        inputs, losses = jax.lax.scan(step, inputs, length=steps_per_update)
+        # optimize
+        def loss_fn(old, new):
+            diffs = [jnp.mean((x - y) ** 2) for x, y in zip(jax.tree.leaves(old), jax.tree.leaves(new))]
+            return sum(diffs) / len(diffs)
+
+        if self.uses_velocity and self.uses_variance:
+            def step(carry, _):
+                vars_, vel, var = carry
+                new_vars, new_vel, new_var = self._step(vars_, *projections, vel, var)
+                loss = loss_fn(vars_, new_vars)
+                return (new_vars, new_vel, new_var), loss
+            (inputs, velocity, variance), losses = jax.lax.scan(step, (inputs, velocity, variance), None, length=steps_per_update)
+        elif self.uses_velocity:
+            def step(carry, _):
+                vars_, vel = carry
+                new_vars, new_vel = self._step(vars_, *projections, vel)
+                loss = loss_fn(vars_, new_vars)
+                return (new_vars, new_vel), loss
+            (inputs, velocity), losses = jax.lax.scan(step, (inputs, velocity), None, length=steps_per_update)
+        else:
+            def step(carry, _):
+                vars_ = carry
+                new_vars = self._step(vars_, *projections)
+                loss = loss_fn(vars_, new_vars)
+                return new_vars, loss
+            inputs, losses = jax.lax.scan(step, inputs, None, length=steps_per_update)
 
         # update params
         new_params = {}
@@ -241,6 +266,31 @@ class AlternatingProjections(BipartiteOptimizer):
         return projection_b(projection_a(vars))
 
 
+class AlternatingProjectionsMonumentum(BipartiteOptimizer):
+    """Alternating projections optimizer for bipartite graphs.
+
+    Implements the classical alternating projections algorithm that alternately
+    projects onto two constraint sets.
+
+    Inherits all parameters from ``BipartiteOptimizer``.
+    """
+    def __init__(self, steps_per_update=50, change_projection_order=False):
+        super().__init__(steps_per_update, change_projection_order)
+        self.velocity = None
+        self.beta = 0
+        self.learning_rate = 1
+        self.uses_velocity = True
+        
+    def _step(self, vars, projection_a, projection_b, velocity):
+
+        vars_look_ahead = jax.tree.map(lambda x, d: x + 0.9*d , vars, velocity)
+        new_vars = projection_b(projection_a(vars_look_ahead))
+        velocity = jax.tree.map(lambda x, y: x - y, new_vars, vars)
+        #velocity = jax.tree.map(lambda x, y, v: self.beta*v + (1-self.beta)*(x - y), new_vars, vars, velocity)
+
+        return new_vars, velocity
+    
+
 class AlternatingReflections(BipartiteOptimizer):
     """Alternating reflections optimizer using reflection operators.
 
@@ -276,6 +326,7 @@ class DouglasRachford(BipartiteOptimizer):
         super().__init__(steps_per_update, change_projection_order)
         self.relaxation = relaxation
 
+
     def _step(self, vars, projection_a, projection_b):
         def reflection(projection, vars):
             return jax.tree.map(lambda x, y: 2.0 * x - y, projection(vars), vars)
@@ -285,6 +336,46 @@ class DouglasRachford(BipartiteOptimizer):
             vars,
             reflection(projection_b, reflection(projection_a, vars)),
         )
+
+
+class DouglasRachfordMonumentum(BipartiteOptimizer):
+    """Douglas-Rachford optimizer for bipartite constraint satisfaction.
+
+    Implements the Douglas-Rachford algorithm using reflection operators:
+    :math:`D_\\lambda = (1 - \\lambda)I + \\lambda R_B R_A`, where :math:`R = 2P - I`
+    and :math:`\\lambda` is the relaxation parameter.
+
+    Args:
+        steps_per_update: number of optimization steps per update call.
+        change_projection_order: whether to reverse the order of projections.
+        relaxation: relaxation parameter :math:`\\lambda \\in (0, 1]`, controls step size and convergence.
+
+    Attributes:
+        relaxation: the relaxation parameter for the Douglas-Rachford iteration.
+    """
+
+    def __init__(self, steps_per_update=50, change_projection_order=False, relaxation=0.5):
+        super().__init__(steps_per_update, change_projection_order)
+        self.relaxation = relaxation
+        self.beta = 0.9
+        self.learning_rate = 1
+        self.uses_velocity = True
+
+
+    def _step(self, vars, projection_a, projection_b, velocity):
+        def reflection(projection, vars):
+            return jax.tree.map(lambda x, y: 2.0 * x - y, projection(vars), vars)
+
+        vars_look_ahead = jax.tree.map(lambda x, d: x + 0.9*d , vars, velocity)
+        new_vars = jax.tree.map(
+            lambda x, y: (1.0 - self.relaxation) * x + self.relaxation * y,
+            vars,
+            reflection(projection_b, reflection(projection_a, vars_look_ahead)),
+        )
+        velocity = jax.tree.map(lambda x, y: x - y, new_vars, vars)
+
+        return new_vars, velocity
+
 
 
 class DifferenceMap(BipartiteOptimizer):
