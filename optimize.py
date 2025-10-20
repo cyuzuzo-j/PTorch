@@ -1,17 +1,15 @@
 import jax.numpy as jnp
-
+from jax import jit
 class projectionOptimizer:
-    def __init__(self, projectionsA, projectionsB, lossFn=None):
-        self.projectionsA = projectionsA
-        self.projectionsB = projectionsB
-        self.lossFn = lossFn
-
+    def __init__(self, projectionsA, projectionsB):
+        self.projectionsA = [jit(proj) for proj in projectionsA]
+        self.projectionsB = [jit(proj) for proj in projectionsB]
+        
     def step_layer(self, x, w, y):
         """Perform one optimization step."""
         raise NotImplementedError("This method should be implemented by subclasses.")
         
 class AlternatingProjection(projectionOptimizer):
-    
     def step_layer(self, x, w, y):
         """Perform one optimization step."""
         x_res = jnp.copy(x)

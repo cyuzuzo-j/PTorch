@@ -1,5 +1,5 @@
 import jax
-
+import jax.numpy as jnp
 @jax.jit
 def bilinearProj(a, b, z, steps = 10):
     """Project onto bilinear function graph using Newton's method."""
@@ -38,10 +38,26 @@ def pos(x, w, y):
     """Project onto positive orthant."""
     return jax.numpy.maximum(x, 0), jax.numpy.maximum(w, 0), y
 
+def normalizeWeights(x, w, y, norm=1):
+    """ Project onto weight norm constraint"""
+    w_norm = jax.numpy.linalg.norm(w)
+    w = jax.lax.cond(w_norm > norm, lambda w: w * (norm / w_norm), lambda w: w, w)
+    return x, w, y
+## helper functions for classifier output
+def _largerThenDelta(x,delta):
+    return jax.numpy.maximum(x, delta)
+def _smallerThenZero(x,delta):
+    return jax.numpy.minimum(x,0)
 def classifierOutput(x,w,y, delta=1):
     """ project onto classification output constraints y >= delta for positive class, y <= 0 for negative class"""
-    if y == 1:
-        x = jax.numpy.maximum(x, delta)
-    else:
-        x = jax.numpy.minimum(x, 0)
+    x = jax.lax.cond(y == 1, _largerThenDelta, _smallerThenZero, x,delta)
     return x,w,y
+
+def stepActivation(x, W, y):
+    """Project onto step activation function constraint: y = step(x) where step(x) = 1 if x >= 0, 0 otherwise."""
+    y_projected = jnp.zeros_like(y)
+    for i in range(W.shape[0]):
+        w = W[i,:]
+        h = w@x
+        y_projected.at[i].set(jax.lax.cond(h>= 0, lambda: 1.0, lambda: 0.0))
+    return x, w, y_projected
