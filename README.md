@@ -1,2 +1,2 @@
 # learning_with_projections
-thesis paper https://www.overleaf.com/3219488561fmfbyvnwcgpk#cf00e4
+thesis https://www.overleaf.com/8282812728pjwvpqvvtmyn#47f304
