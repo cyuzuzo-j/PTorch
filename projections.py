@@ -58,33 +58,6 @@ def bilinearMatrixs(X, W, Z, steps = 10):
     #print(jnp.linalg.norm(proj_W - W))
     return proj_X, proj_W, Z
 
-
-def bilinearMatrixsJAX(X, W, Z, steps=10):
-    """Project onto bilinear function graph using Newton's method (vectorized)."""
-
-    # Function to apply bilinearProj to one (x, z) pair for all outputs
-    def process_sample(x, z):
-        # Vectorize over outputs (axis 0 of W and Z)
-        def process_output(w, zi):
-            x_buffer, w_buffer, _ = bilinearProj(x, w, zi, steps)
-            return x_buffer, w_buffer
-
-        x_bufs, w_bufs = jax.vmap(process_output, in_axes=(0, 0))(W, z)
-        return x_bufs, w_bufs
-
-    # Vectorize over samples (axis 1 of X and Z)
-    X_buffers, W_buffers = jax.vmap(process_sample, in_axes=(1, 1))(X, Z)
-
-    # X_buffers shape: (num_samples, num_outputs, dim)
-    # W_buffers shape: (num_samples, num_outputs, dim_w)
-
-    # Average over samples
-    proj_X = jnp.mean(jnp.swapaxes(X_buffers, 0, 1), axis=0)
-    print(proj_X.shape)
-    proj_W = jnp.mean(W_buffers, axis=0)
-    
-    return proj_X, proj_W, Z
-
         
 def pos(x, w, y):
     """Project onto positive orthant."""
@@ -95,6 +68,7 @@ def normalizeWeights(x, w, y, norm=1):
     w_norm = jax.numpy.linalg.norm(w)
     w = jax.lax.cond(w_norm > norm, lambda w: w * (norm / w_norm), lambda w: w, w)
     return x, w, y
+
 ## helper functions for classifier output
 def _largerThenDelta(x,delta):
     return jax.numpy.maximum(x, delta)
@@ -114,6 +88,33 @@ def stepActivation(x, W, y):
         y_projected.at[i].set(jax.lax.cond(h>= 0, lambda: 1.0, lambda: 0.0))
     return x, W, y_projected
 
+
+
+
+def sum_relu_proj(x,W, y):
+    """Project onto sum-ReLU function graph."""
+    inputs = x
+    outputs = y
+    new_inputs = jnp.zeros_like(inputs)
+    new_outputs = jnp.zeros_like(outputs)
+    for i, (input, output ) in enumerate(zip(inputs, outputs)):
+        print("input", input, "output", output)
+        # solution 1
+        new_value = (input + output)/2
+        new_input, new_output = new_value, new_value
+
+        # solution 2
+        new_output2 = 0
+        new_input2 = input
+        
+        dist1 = (jnp.abs(input - new_input))**2 + (jnp.abs(output - new_output))**2
+        dist2 = output**2
+        new_inputs = new_inputs.at[i].set(jnp.where(dist1 < dist2, new_input, new_input2))
+        new_outputs = new_outputs.at[i].set(jnp.where(dist1 < dist2, new_output, new_output2))
+        
+
+    # select solution minimizing the distance
+    return new_inputs , W, new_outputs
 
 
 """----------- Bilinear projection with only a and b updated from pjax"""
