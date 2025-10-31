@@ -22,6 +22,7 @@ def bilinearProj(a, b, z, steps = 10):
     return a_new, b_new, z
 
 
+@jax.jit
 def bilinearMatrix(a, B, z, steps = 10):
     """Project onto bilinear function graph using Newton's method."""
     """ with A a vector of shape (dim,), B a matrix of shape (AA, dim) and z a vector of shape (AA,)"""
@@ -79,13 +80,14 @@ def classifierOutput(x,w,y, delta=1):
     x = jax.lax.cond(y == 1, _largerThenDelta, _smallerThenZero, x,delta)
     return x,w,y
 
+@jax.jit
 def stepActivation(x, W, y):
     """Project onto step activation function constraint: y = step(x) where step(x) = 1 if x >= 0, 0 otherwise."""
     y_projected = jnp.zeros_like(y)
     for i in range(W.shape[0]):
         w = W[i,:]
         h = w@x
-        y_projected.at[i].set(jax.lax.cond(h>= 0, lambda: 1.0, lambda: 0.0))
+        y_projected.at[i].set(jax.lax.cond(h>= 0, lambda: 1, lambda:-1))
     return x, W, y_projected
 
 
@@ -98,7 +100,6 @@ def sum_relu_proj(x,W, y):
     new_inputs = jnp.zeros_like(inputs)
     new_outputs = jnp.zeros_like(outputs)
     for i, (input, output ) in enumerate(zip(inputs, outputs)):
-        print("input", input, "output", output)
         # solution 1
         new_value = (input + output)/2
         new_input, new_output = new_value, new_value
