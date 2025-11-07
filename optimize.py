@@ -3,7 +3,7 @@ from jax import jit
 class projectionOptimizer:
     def __init__(self, projectionsA, projectionsB):
         self.projectionsA = [jit(proj) for proj in projectionsA]
-        self.projectionsB = [proj for proj in projectionsB]
+        self.projectionsB = [jit(proj) for proj in projectionsB]
         
     def step_layer(self, x, w, y):
         """Perform one optimization step."""

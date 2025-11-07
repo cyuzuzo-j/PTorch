@@ -35,7 +35,7 @@ optOutput= optimizer([lambda x,w,y :projections.classifierOutput(x,w,y,delta=del
 error = []
 bias0 = []
 bias1 = []
-for iter in range(500):
+for iter in range(50):
     batchError = np.zeros(len(xor_y))
     for k, classSample in enumerate(xor_y):
         ## do a forward pass
