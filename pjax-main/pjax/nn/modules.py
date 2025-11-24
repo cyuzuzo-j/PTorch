@@ -136,7 +136,61 @@ class Linear(Module):
     def __call__(self, input):
         return pjax.matmul(input, self.weight)
 
+class NormalLayer(Module):
+    """Linear layer producing mean and log-variance outputs.
 
+    This layer outputs two separate vectors for each input: one representing
+    the mean and the other representing the variance. It is commonly used
+    in variational autoencoders.
+
+    Args:
+        in_features: number of input features.
+        out_features: number of output features (mean and log-variance).
+
+    Attributes:
+        weight: learnable weight matrix of shape ``(in_features, 2 * out_features)``.
+    """
+
+    def __init__(self, in_features: int, out_features: int):
+        super().__init__()
+        self.weightMu = Weight((in_features, out_features))
+        self.weightSigma = Weight((in_features,  out_features))
+
+    def __call__(self, input):
+        outputMu = pjax.matmul(input, self.weightMu)
+        outputSigma = pjax.matmul(input, self.weightSigma)
+        
+        return outputMu, outputSigma
+    
+class reparameterize(Module):
+    """Reparameterization layer for sampling from Gaussian distributions.
+
+    This layer implements the reparameterization trick, allowing for
+    differentiable sampling from a Gaussian distribution defined by
+    mean and standard deviation vectors.
+
+    Args:
+        None
+
+    Attributes:
+        None
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def __call__(self, mu, sigma):
+        """Sample from Gaussian using reparameterization trick.
+
+        Args:
+            mu: mean vector of shape ``(batch_size, features)``.
+            sigma: standard deviation vector of shape ``(batch_size, features)``.
+
+        Returns:
+            sampled vector of shape ``(batch_size, features)``.
+        """
+        eps = jax.random.normal(jax.random.PRNGKey(0), shape=mu.shape)
+        return mu + sigma * eps
 class ReLU(Module):
     """Rectified Linear Unit with bias.
 
@@ -157,7 +211,12 @@ class ReLU(Module):
     def __call__(self, *inputs):
         return pjax.sum_relu(self.bias, *inputs)
 
-
+class Step(Module):
+    def __init__(self, features):
+        super().__init__()
+        self.bias = Bias((features,))
+    def __call__(self, *inputs):
+        return pjax.step(self.bias, *inputs)
 class MultiHeadAttention(Module):
     """Multi-head attention mechanism for transformer architectures.
 

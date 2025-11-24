@@ -15,8 +15,8 @@ def setup_problem(rand_key):
     keys = random.split(rand_key, 4)
     
     # --- Hyperparameters ---
-    inputDim = 50
-    hiddenDim = 50
+    inputDim = 5
+    hiddenDim = 10
     outputDim = 2
     samples = 50
     delta = 1.0
@@ -60,7 +60,7 @@ CONFIGURATIONS = [
         "optimizer": DouglassRachford,
         "activation": projections.stepActivation,
         "extraConstraints": [],
-
+10
     },
     {
         "name": "DR + ReLU Activation",
@@ -81,7 +81,7 @@ CONFIGURATIONS = [
         "name": "DR + Step Activation ( orthonormalization)",
         "optimizer": AlternatingProjection,
         "activation": projections.stepActivation,
-        "extraConstraints": [projections.orthonormalizeMatrix],
+        "extraConstraints": [],
 
     },
     {

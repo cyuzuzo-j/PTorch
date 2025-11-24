@@ -10,10 +10,9 @@ computes the orthogonal projection onto the function's graph.
 
 import jax
 from jax import numpy as jnp
-
+from jaxopt import Bisection
 from .. import config
 from .computation import make_computation
-
 
 def identity_op(a, /):
     """Identity operation returning input unchanged."""
@@ -114,6 +113,26 @@ def bilinear_proj(a, b, z, /):
 
 dot = make_computation("dot", dotproduct_op, bilinear_proj)
 
+def sum_step_activation_op(*args):
+    """Sum inputs and apply step activation."""
+    sum_args = sum(args)
+    return jnp.where(sum_args >= 0, 1, -1)
+
+def step_activation_proj(*args):
+    """Project onto step activation function constraint: y = step(x) where step(x) = 1 if x >= 0, -1 otherwise."""
+    inputs, output = args[:-1], args[-1]
+    s = sum(inputs)
+    
+    # Element-wise projection: adjust inputs so their sum matches target output
+    # For each element, if s >= 0 but output == -1, or s < 0 but output == 1, we need to adjust
+    mid = (s - output) / (len(inputs) + 1)
+    
+    # Adjust inputs: move them toward the midpoint
+    projected_inputs = tuple(x - mid for x in inputs)
+    
+    return projected_inputs
+
+step = make_computation("step_activation", sum_step_activation_op, step_activation_proj)
 
 def sum_relu_op(*args):
     """Sum inputs and apply ReLU activation."""
@@ -197,7 +216,84 @@ def margin_loss_proj(logits, labels, *args):
 
 margin_loss = make_computation("margin_loss", margin_loss_op, margin_loss_proj)
 
+def mean_squared_op(predictions, targets, /):
+    """Mean squared error operation."""
+    print( "Using MSE operation")
+    print( predictions.shape, targets.shape)
+    squared_errors=  jnp.square(predictions - targets)
+    return jnp.mean(squared_errors)
 
+def mse_prox(predictions, targets, _, /):
+    """Project onto mean squared error constraint. """
+    print("Using MSE projection")
+    out = (predictions+ targets) /2
+    print( predictions.shape, targets.shape, out.shape)
+
+    return out, targets
+
+mse = make_computation("mse_loss", mean_squared_op, mse_prox)
+
+def reparameterize_op(*args):
+    mu = args[0]
+    sigma = args[1]
+    #jax.debug.print("Reparameterize mu shape:{}, sigma shape:{}, arglen {}", mu.shape, sigma.shape, args)
+    """Reparameterization operation."""
+    eps = jax.random.normal(jax.random.PRNGKey(0), shape=mu.shape, )
+    #jax.debug.print("eps shape: {}", eps.shape)
+    out = mu + sigma * eps
+    #jax.debug.print("reparameterize output shape: {}", out.shape)
+    return out
+
+def project_to_normal_vec(mu0, sigma0, z0, lam=1.0, tol=1e-8, maxiter=200):
+    """
+    Minimize for each dimension i:
+        (z_i - z0_i)^2 + (μ_i - μ0_i)^2 + (σ_i - σ0_i)^2
+        + λ * [ (z_i - μ_i)^2 / σ_i^2 + log σ_i^2 ]
+    so that z_i resembles a Normal(μ_i, σ_i^2), while staying close to priors.
+    """
+    # elementwise equation for σ_i and its derivative
+    def sigma_fun(sigma, z0, mu0, sigma0, lam):
+        return (
+            (sigma - sigma0)
+            - lam * (sigma * (z0 - mu0) ** 2) / (2 * lam + sigma**2) ** 2
+            + lam / sigma
+        )
+
+    def sigma_fun_derivative(sigma, z0, mu0, sigma0, lam):
+        diff_sq = (z0 - mu0) ** 2
+        denom = 2 * lam + sigma**2
+        term1 = 1.0
+        term2 = -lam * (diff_sq * denom**2 - sigma * diff_sq * 2 * sigma * 2 * denom) / (denom**4)
+        term3 = -lam / (sigma**2)
+        return term1 + term2 + term3
+
+    # Newton's method for each dimension
+    def solve_sigma_single(z0_i, mu0_i, sigma0_i):
+        sigma = jnp.maximum(sigma0_i, 1e-6)
+        
+        def newton_body(sigma):
+            f_val = sigma_fun(sigma, z0_i, mu0_i, sigma0_i, lam)
+            f_prime = sigma_fun_derivative(sigma, z0_i, mu0_i, sigma0_i, lam)
+            sigma_new = sigma - f_val / (f_prime + 1e-8)
+            return jnp.maximum(sigma_new, 1e-6)
+        
+        sigma = jax.lax.fori_loop(0, maxiter, lambda _, s: newton_body(s), sigma)
+        return jnp.maximum(sigma, 1e-8)
+    
+    # vectorize over dimensions
+    solve_sigma_vmap = jax.vmap(solve_sigma_single, in_axes=(0, 0, 0))
+    sigma = solve_sigma_vmap(z0, mu0, sigma0)
+
+    # compute z*, mu* elementwise
+    denom = 2 * lam + sigma**2
+    z = (lam * mu0 + lam * z0 + sigma**2 * z0) / denom
+    mu = (lam * mu0 + lam * z0 + mu0 * sigma**2) / denom
+
+    return mu, sigma
+
+reparameterize = make_computation("reparameterize", reparameterize_op, project_to_normal_vec)
+
+#kl_divergence = make_computation("kl_divergence", kl_divergence_op, prox_kl_std_normal)
 def cross_entropy_op(logits, labels, /):
     """Cross-entropy operation."""
     return logits

@@ -3,7 +3,7 @@ from functools import partial
 from typing import Sequence
 
 from jax import numpy as jnp
-
+import jax
 from . import no_ops, ops
 from .computation import Computation, vmap
 
@@ -209,8 +209,17 @@ def matmul(a: Computation, b: Computation) -> Computation:
     if b.ndim == 1:
         out = squeeze(out, axis=-1)
     return out
+def reparameterize(mean: Computation, logvar: Computation) -> Computation:
+    """Reparameterization trick to sample from a diagonal Gaussian.
 
+    Args:
+        mean: mean of the diagonal Gaussian.
+        logvar: log-variance of the diagonal Gaussian.
 
+    Returns:
+        sampled array from the diagonal Gaussian.
+    """
+    return ops.reparameterize(mean, logvar)
 def relu(a: Computation) -> Computation:
     """Rectified Linear Unit activation function.
 
@@ -224,6 +233,18 @@ def relu(a: Computation) -> Computation:
     """
     return ops.sum_relu(a)
 
+def step(*args: Computation) -> Computation:
+    """Step activation function.
+
+    Applies the step function element-wise: :math:`\\text{step}(x) = 1` if :math:`x \\geq 0`, else :math:`-1`.
+
+    Args:
+        a: input array to apply step activation.
+
+    Returns:
+        array with step activation applied element-wise.
+    """
+    return ops.step(*broadcast_arrays(*args))
 
 def sum_relu(*args: Computation) -> Computation:
     """Sum multiple arrays and apply ReLU activation.
@@ -287,6 +308,20 @@ def cross_entropy(logits: Computation, labels: Computation) -> Computation:
     """
     return ops.cross_entropy(logits, labels)
 
+def means_squared_error(predictions: Computation, targets: Computation) -> Computation:
+    """Compute mean squared error loss.
+
+    Computes the mean squared error (MSE) between predicted values and target values.
+    This is commonly used as a loss function for regression tasks.
+
+    Args:
+        predictions: predicted values.
+        targets: ground truth target values.
+
+    Returns:
+        mean squared error loss value.
+    """
+    return ops.mse(predictions, targets)
 
 def index(a: Computation, idx: Computation) -> Computation:
     """Index an array using advanced or basic indexing.
