@@ -324,3 +324,42 @@ class Conv2D(Module):
         patches = self.conv_patch(input)
         out = self.linear(patches)
         return out
+
+class Maxpool2D(Module):
+    """2D convolutional layer via patch extraction and linear projection.
+
+    Implements 2D convolution by extracting patches from the input tensor
+    and applying a linear transformation. This approach leverages the patch
+    extraction functionality for efficient convolution computation.
+
+    Args:
+        kernel_shape: shape of the convolution kernel as (height, width).
+        strides: stride values as (stride_height, stride_width).
+        padding: padding strategy, either "SAME", "VALID", or explicit padding values.
+
+    Attributes:
+        conv_patch: configured patch extraction function.
+    """
+
+    def __init__(
+        self,
+        kernel_shape: Sequence[int] = (3, 3),
+        strides: Sequence[int] = (1, 1),
+        padding: str | Sequence[int] = "SAME",
+    ):
+        super().__init__()
+        self.conv_patch = partial(pjax.conv_patch, kernel_shape=kernel_shape, strides=strides, padding=padding)
+
+    def __call__(self, input):
+        """Apply convolution to input tensor.
+
+        Args:
+            input: input tensor of shape ``(..., H, W, C)``.
+
+        Returns:
+            output tensor after convolution and projection.
+        """
+        patches = self.conv_patch(input)
+        ## perform max pooling on the patches
+        out = jnp.max(patches, axis=-1)
+        return out
