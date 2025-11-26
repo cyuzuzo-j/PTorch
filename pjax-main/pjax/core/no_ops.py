@@ -105,7 +105,6 @@ def concatenate_inverse(*args, axis=0):
     split_indices = np.cumsum([x.shape[axis] for x in args[:-1]])
     return jnp.split(z, split_indices, axis=axis)
 
-
 concatenate = make_shape_transform("concatenate", transform=concatenate_transform, inverse=concatenate_inverse)
 
 
@@ -186,4 +185,21 @@ def conv_patch_inverse(a, z, /, *, kernel_shape, strides, padding):
     return out
 
 
+def fft2d(*args):
+    """Compute the 2D FFT of the last two dimensions of the input array."""
+    a = args[0] if len(args) == 1 else args[1]
+    return jnp.fft.fft2(a, axes=(-2, -1))
+
+def ifft2d(*args):
+    """Compute the 2D inverse FFT of the last two dimensions of the input array."""
+    a = args[0] if len(args) == 1 else args[1]
+    return jnp.fft.ifft2(a, axes=(-2, -1))
+
+fourier = make_shape_transform("fft", transform=fft2d, inverse=ifft2d)
+inv_fourier = make_shape_transform("ifft", transform=ifft2d, inverse=fft2d)
+real = make_shape_transform(
+    "real",
+    transform=lambda x: jnp.real(x),
+    inverse=lambda orig, x: x + 0j,
+)
 conv_patch = make_shape_transform("conv_patch", transform=conv_patch_transform, inverse=conv_patch_inverse)

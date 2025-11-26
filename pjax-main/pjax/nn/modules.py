@@ -136,61 +136,7 @@ class Linear(Module):
     def __call__(self, input):
         return pjax.matmul(input, self.weight)
 
-class NormalLayer(Module):
-    """Linear layer producing mean and log-variance outputs.
 
-    This layer outputs two separate vectors for each input: one representing
-    the mean and the other representing the variance. It is commonly used
-    in variational autoencoders.
-
-    Args:
-        in_features: number of input features.
-        out_features: number of output features (mean and log-variance).
-
-    Attributes:
-        weight: learnable weight matrix of shape ``(in_features, 2 * out_features)``.
-    """
-
-    def __init__(self, in_features: int, out_features: int):
-        super().__init__()
-        self.weightMu = Weight((in_features, out_features))
-        self.weightSigma = Weight((in_features,  out_features))
-
-    def __call__(self, input):
-        outputMu = pjax.matmul(input, self.weightMu)
-        outputSigma = pjax.matmul(input, self.weightSigma)
-        
-        return outputMu, outputSigma
-    
-class reparameterize(Module):
-    """Reparameterization layer for sampling from Gaussian distributions.
-
-    This layer implements the reparameterization trick, allowing for
-    differentiable sampling from a Gaussian distribution defined by
-    mean and standard deviation vectors.
-
-    Args:
-        None
-
-    Attributes:
-        None
-    """
-
-    def __init__(self):
-        super().__init__()
-
-    def __call__(self, mu, sigma):
-        """Sample from Gaussian using reparameterization trick.
-
-        Args:
-            mu: mean vector of shape ``(batch_size, features)``.
-            sigma: standard deviation vector of shape ``(batch_size, features)``.
-
-        Returns:
-            sampled vector of shape ``(batch_size, features)``.
-        """
-        eps = jax.random.normal(jax.random.PRNGKey(0), shape=mu.shape)
-        return mu + sigma * eps
 class ReLU(Module):
     """Rectified Linear Unit with bias.
 
@@ -309,6 +255,7 @@ class Conv2D(Module):
         padding: str | Sequence[int] = "SAME",
     ):
         super().__init__()
+
         self.conv_patch = partial(pjax.conv_patch, kernel_shape=kernel_shape, strides=strides, padding=padding)
         self.linear = Linear(int(in_channels * np.prod(kernel_shape)), out_channels)
 
@@ -323,32 +270,34 @@ class Conv2D(Module):
         """
         patches = self.conv_patch(input)
         out = self.linear(patches)
+
         return out
 
-class Maxpool2D(Module):
-    """2D convolutional layer via patch extraction and linear projection.
 
-    Implements 2D convolution by extracting patches from the input tensor
-    and applying a linear transformation. This approach leverages the patch
-    extraction functionality for efficient convolution computation.
 
-    Args:
-        kernel_shape: shape of the convolution kernel as (height, width).
-        strides: stride values as (stride_height, stride_width).
-        padding: padding strategy, either "SAME", "VALID", or explicit padding values.
 
-    Attributes:
-        conv_patch: configured patch extraction function.
+class FftConv2D(Module):
+    """
+    Implements the 2D convolutional neural network by first computing the fft and then performing an elementwise product, ..
     """
 
     def __init__(
-        self,
-        kernel_shape: Sequence[int] = (3, 3),
-        strides: Sequence[int] = (1, 1),
-        padding: str | Sequence[int] = "SAME",
+            self,
+            in_features_x:int,
+            in_features_y:int,
+            in_channels: int,
+            out_channels: int,
+            kernel_shape: int,
     ):
         super().__init__()
-        self.conv_patch = partial(pjax.conv_patch, kernel_shape=kernel_shape, strides=strides, padding=padding)
+        self.in_features_x = in_features_x
+        self.in_features_y = in_features_y
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.pad_row = in_features_x - kernel_shape
+        self.pad_col = in_features_y - kernel_shape
+        self.kernel = Weight((kernel_shape, kernel_shape))
+        
 
     def __call__(self, input):
         """Apply convolution to input tensor.
@@ -359,7 +308,19 @@ class Maxpool2D(Module):
         Returns:
             output tensor after convolution and projection.
         """
-        patches = self.conv_patch(input)
-        ## perform max pooling on the patches
-        out = jnp.max(patches, axis=-1)
+        print("input shape in fftconv2d", input)
+        ### add zero padding to the weight
+        print("pad row, pad col", self.pad_row, self.pad_col)
+        padded_kernel = pjax.zero_pad_assymetric(self.kernel, ((0,self.pad_row), (0,self.pad_col)))
+        
+        # compute fft of input and kernel
+        input_fft = pjax.fft2d(input)
+        kernel_fft = pjax.fft2d(padded_kernel)
+        # perform elementwise multiplication in the frequency domain
+        output_fft = pjax.haddamarmul(input_fft , kernel_fft)
+        # compute inverse fft to obtain the convolved output
+        out = pjax.ifft2d(output_fft)
+        
+        # convert back to real values if necessary
+        out = pjax.no_ops.real(out)
         return out

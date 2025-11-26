@@ -170,6 +170,27 @@ def dot(a: Computation, b: Computation) -> Computation:
     return fn(a, b)
 
 
+def haddamarmul(a: Computation, b: Computation) -> Computation:
+    """Matrix haddamar product of two 2D arrays.
+
+    Args:
+        a: array of shape ``(B, M,N)`` or ``(M,N)``.
+        b: array of shape ``(M,N)``
+
+    """
+    print("haddamar", a.shape, b.shape)
+    fn = partial(ops.haddamarmul)  # without partial, we get recompilation errors
+    #flatten the arrays
+    a_ = reshape(a, (a.shape[0],-1))
+    b_ = reshape(b, (-1,))
+    #vmap over batch and rows
+    #fn = vmap(fn, in_axes=(0, None), out_axes=0)
+    fn = vmap(fn, in_axes=(0, None), out_axes=0)
+    
+    out = fn(a_, b_)
+    out = reshape(out, a.shape)
+    return out
+
 def matmul(a: Computation, b: Computation) -> Computation:
     """Matrix product of two arrays with element-wise scaling of the result.
 
@@ -540,6 +561,28 @@ def zero_pad(a: Computation, pad_width) -> Computation:
     return no_ops.zero_pad(a, pad_width=pad_width)
 
 
+def zero_pad_assymetric(a: Computation, pad_width) -> Computation:
+    return no_ops.zero_pad(a, pad_width=pad_width)
+def fft2d(a: Computation) -> Computation:
+    """Compute the 2D discrete Fourier Transform of an array.
+
+    Args:
+        a: the array to transform of shape ``(..., H, W)`` or ``(..., H, W, C)``.
+
+    Returns:
+        the Fourier transformed array of the same shape as ``a``.
+    """
+    return  no_ops.fourier(a)
+def ifft2d(a: Computation) -> Computation:
+    """Compute the inverse 2D discrete Fourier Transform of an array.
+
+    Args:
+        a: the array to transform of shape ``(..., H, W)`` or ``(..., H, W, C)``.
+
+    Returns:
+        the inverse Fourier transformed array of the same shape as ``a``.
+    """
+    return no_ops.inv_fourier(a)
 def conv_patch(a: Computation, kernel_shape, strides, padding) -> Computation:
     """Extract patches from an array.
 

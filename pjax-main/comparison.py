@@ -449,7 +449,7 @@ if __name__ == "__main__":
         help="Dataset to use.",
     )
     parser.add_argument(
-        "--model_type", type=str, default="mlp", choices=["mlp", "cnn", "rnn"], help="Type of model architecture."
+        "--model_type", type=str, default="cnn", choices=["mlp", "cnn", "rnn"], help="Type of model architecture."
     )
     parser.add_argument(
         "--optimizer",
@@ -474,7 +474,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=256, help="Batch size for training and validation.")
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate for SGD/Adam.")
     parser.add_argument(
-        "--steps_per_update", type=int, default=50, help="Steps per update for pjax optimizers (DR, AP, CP)."
+        "--steps_per_update", type=int, default=1, help="Steps per update for pjax optimizers (DR, AP, CP)."
     )
     parser.add_argument("--dm_beta", type=float, default=0.5, help="Beta parameter for Difference Map optimizer.")
     parser.add_argument(

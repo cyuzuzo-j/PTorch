@@ -163,9 +163,9 @@ class Optimizer(ABC):
         inputs = {}
         for node in graph.nodes:
             if isinstance(node, Parameter):
-                inputs[node] = [node.value]
+                inputs[node] = [node.value.astype(jnp.complex64)]
             if isinstance(node, Operation):
-                inputs[node] = [parent.value for parent in node.parents]
+                inputs[node] = [parent.value.astype(jnp.complex64) for parent in node.parents]
         inputs = freeze(inputs)
 
         # get bipartition
@@ -180,22 +180,12 @@ class Optimizer(ABC):
         # initialize optional states
         if self.uses_velocity:
             velocity = jax.tree.map(lambda x: x * 0, inputs)
-        if self.uses_variance:
-            variance = jax.tree.map(lambda x: x * 0, inputs)
-
         # optimize
         def loss_fn(old, new):
             diffs = [jnp.mean((x - y) ** 2) for x, y in zip(jax.tree.leaves(old), jax.tree.leaves(new))]
             return sum(diffs) / len(diffs)
 
-        if self.uses_velocity and self.uses_variance:
-            def step(carry, _):
-                vars_, vel, var = carry
-                new_vars, new_vel, new_var = self._step(vars_, *projections, vel, var)
-                loss = loss_fn(vars_, new_vars)
-                return (new_vars, new_vel, new_var), loss
-            (inputs, velocity, variance), losses = jax.lax.scan(step, (inputs, velocity, variance), None, length=steps_per_update)
-        elif self.uses_velocity:
+        if self.uses_velocity:
             def step(carry, _):
                 vars_, vel = carry
                 new_vars, new_vel = self._step(vars_, *projections, vel)
@@ -207,6 +197,7 @@ class Optimizer(ABC):
                 vars_ = carry
                 new_vars = self._step(vars_, *projections)
                 loss = loss_fn(vars_, new_vars)
+                print("loss:", loss)
                 return new_vars, loss
             inputs, losses = jax.lax.scan(step, inputs, None, length=steps_per_update)
 

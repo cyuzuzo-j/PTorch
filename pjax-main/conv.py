@@ -5,7 +5,7 @@ from data import (
     MNISTDataModule,
 ) 
 
-dataset = MNISTDataModule(batch_size=32)
+dataset = MNISTDataModule(batch_size=5)
 train_data =dataset.train_dataloader()
 
 # 1. Define the model
@@ -29,7 +29,7 @@ class CNN_pjax(nn.Module):
         self.max_pool = max_pool
         last_f = in_features
         for i, f in enumerate(hidden_features):
-            setattr(self, f"conv_{i}", nn.Conv2D(last_f, f, (3, 3), (stride, stride), "SAME"))
+            setattr(self, f"conv_{i}", nn.FftConv2D(28,28,1,1, 3))
             setattr(self, f"relu_{i}", nn.ReLU(f))
             last_f = f
 
@@ -74,6 +74,7 @@ def train_step(params, x, y):
     def apply_fn(params):
         logits = model.apply(params, x)
         y_one_hot = jax.nn.one_hot(y, num_classes=10)
+        y_one_hot = y_one_hot.astype(jax.numpy.complex64)
         return pjax.cross_entropy(logits, y_one_hot)
 
     updated_params, loss = optimizer.update(apply_fn, params)
@@ -89,6 +90,7 @@ for step in range(1):
     for i, (x,y)  in enumerate(train_data):
         print("Batch", i)
         params, loss = train_step(params, x, y)
+        print("Loss:", loss)
         losses.append(loss)
         if i > 10:
             break

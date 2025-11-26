@@ -1,5 +1,5 @@
 from pjax import nn
-
+from pjax import concatenate
 class SimpleBlock(nn.Module):
     def __init__(self, in_channels, out_channels, time_emb_dim):
         super().__init__()
@@ -12,10 +12,9 @@ class SimpleBlock(nn.Module):
     def forward(self, x, t_emb):
         x = self.conv1(x)
         x = self.relu(x)
-
-        if t_emb is not None:
-            time_emb = self.time_mlp(t_emb)
-            x = x + time_emb[:, :, None, None]
+        
+        time_emb = self.time_mlp(t_emb)
+        x = x + time_emb[:, :, None, None]
 
         x = self.conv2(x)
         x = self.relu(x)
@@ -45,7 +44,7 @@ class DecoderBlock(nn.Module):
         if x.shape[2:] != x_shortcut.shape[2:]:
             x = nn.functional.interpolate(x, size=x_shortcut.shape[2:], mode='bilinear', align_corners=False)
 
-        x = torch.cat([x, x_shortcut], dim=1)
+        x = concatenate([x, x_shortcut], dim=1)
         x = self.block(x, t_emb)
         return x
 

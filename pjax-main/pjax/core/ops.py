@@ -53,6 +53,8 @@ def max_op(a, /):
 def max_proj(a, z, /):
     """Project onto maximum function graph."""
     assert a.ndim == 1 and z.ndim == 0
+    a = a.astype(jnp.float32)
+    z = z.astype(jnp.float32)
     n = a.size
 
     # sort array
@@ -75,12 +77,30 @@ def max_proj(a, z, /):
 
     # select candidate minimizing distance
     k = jnp.argmin(dist_valid)
-    return (a_k[k][jnp.argsort(idx)],)
+    
+    return (a_k[k][jnp.argsort(idx)].astype(jnp.complex64),)
 
 
 max = make_computation("max", max_op, max_proj)
 
+def haddamarmul_op(a, b, /):
+    """Haddamar product operation for 1D arrays."""
+    if a.ndim != 1 or b.ndim != 1:
+        raise ValueError("haddamarmul requires 1D arrays.")
+    if a.size != b.size:
+        raise ValueError(f"haddamarmul requires arrays of the same size. Got {a.size} and {b.size}.")
+    return a * b
 
+def haddamarmul_proj(a, b, z, /):
+    a_new = (a + z*jnp.conj(b))/(1 + jnp.abs(b)**2)
+    b_new = (b + z*jnp.conj(a))/(1 + jnp.abs(a)**2)
+    jax.debug.print("haddamarmul_proj values: diff a {}", jnp.linalg.norm(a_new[0]- a[0]))
+    jax.debug.print("haddamarmul_proj values: diff b {}", jnp.linalg.norm(b_new - b))
+    jax.debug.print("haddamarmul_proj values: change z {}", jnp.linalg.norm(a_new * b_new - z))
+    jax.debug.breakpoint()
+    return a_new, b_new
+    
+haddamarmul = make_computation("haddamarmul", haddamarmul_op, haddamarmul_proj)
 def dotproduct_op(a, b, /):
     """Dot product operation for 1D arrays."""
     if a.ndim != 1 or b.ndim != 1:
@@ -92,6 +112,9 @@ def dotproduct_op(a, b, /):
 
 def bilinear_proj(a, b, z, /):
     """Project onto bilinear function graph using Newton's method."""
+    a = a.astype(jnp.float32)
+    b = b.astype(jnp.float32)
+    z = z.astype(jnp.float32)
     p = a @ b
     q = a @ a + b @ b
 
@@ -103,11 +126,13 @@ def bilinear_proj(a, b, z, /):
     def newton_step(t):
         return t - f(t) / f_prime(t)
 
+    
     t = jax.lax.fori_loop(0, config.bilinear_projection_num_newton_steps, lambda _, t: newton_step(t), 0.0, unroll=True)
 
     a_new = (a + t * b) / (1 - t**2)
     b_new = (b + t * a) / (1 - t**2)
-
+    a_new = a_new.astype(jnp.complex64)
+    b_new = b_new.astype(jnp.complex64)
     return a_new, b_new
 
 
