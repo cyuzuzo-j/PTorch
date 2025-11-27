@@ -125,7 +125,7 @@ def multiple_projection(inputs: FrozenDict, partition: set[Operation | Parameter
     pruned_graph = prune_shape_transforms(graph)
     for computation in set([child for computation in partition for child in pruned_graph.successors(computation)]):
         if isinstance(computation, Operation):
-            inputs = inputs.set(computation, [get_value(parent, inputs) for parent in computation.parents])
+            inputs = inputs.set(computation, [get_value(parent, inputs).astype(jnp.complex64) for parent in computation.parents])
 
     return inputs
 

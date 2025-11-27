@@ -82,6 +82,7 @@ class Module(ABC):
         # replace parameters with values from params
         for name, value in params.items():
             ref = module
+            print("name:", name)
             path, param = name.rsplit(".", 1)
             for attr in path.split("."):
                 ref = getattr(ref, attr)
@@ -308,19 +309,45 @@ class FftConv2D(Module):
         Returns:
             output tensor after convolution and projection.
         """
-        print("input shape in fftconv2d", input)
         ### add zero padding to the weight
-        print("pad row, pad col", self.pad_row, self.pad_col)
         padded_kernel = pjax.zero_pad_assymetric(self.kernel, ((0,self.pad_row), (0,self.pad_col)))
         
+        # Shift the kernel so that the center is at (0, 0)
+        # The kernel is currently at [0..k-1, 0..k-1].
+        # We want to shift it by -(k//2) along both axes.
+        k = self.kernel.shape[0] # Assuming square kernel for now based on init
+        shift = -(k // 2)
+        padded_kernel = pjax.roll(padded_kernel, shift=(shift, shift), axis=(0, 1))
+
+        # Transpose input to (..., C, H, W) so that fft2d operates on (H, W)
+        # input is (..., H, W, C). We want to move C to before H.
+        ndim = len(input.shape)
+        # Permutation: move last dim (C) to 3rd from last (before H)
+        # Indices: 0, ..., ndim-4, ndim-1, ndim-3, ndim-2
+        perm = list(range(ndim - 3)) + [ndim - 1, ndim - 3, ndim - 2]
+        input_transposed = pjax.transpose(input, perm)
+
         # compute fft of input and kernel
-        input_fft = pjax.fft2d(input)
+        input_fft = pjax.fft2d(input_transposed)
+        
         kernel_fft = pjax.fft2d(padded_kernel)
+        
         # perform elementwise multiplication in the frequency domain
+        # input_fft: (..., C, H, W), kernel_fft: (H, W)
+        # haddamarmul broadcasts correctly
         output_fft = pjax.haddamarmul(input_fft , kernel_fft)
+        
         # compute inverse fft to obtain the convolved output
-        out = pjax.ifft2d(output_fft)
+        out_transposed = pjax.ifft2d(output_fft)
         
         # convert back to real values if necessary
-        out = pjax.no_ops.real(out)
+        #out_transposed = pjax.ops.real(out_transposed)
+        
+        # Transpose back to (..., H, W, C)
+        # Current: ..., C, H, W (indices: 0, ..., ndim-3, ndim-2, ndim-1)
+        # Target: ..., H, W, C
+        # We want to move ndim-3 (C) to last position.
+        # Indices: 0, ..., ndim-4, ndim-2, ndim-1, ndim-3
+        inv_perm = list(range(ndim - 3)) + [ndim - 2, ndim - 1, ndim - 3]
+        out = pjax.transpose(out_transposed, inv_perm)
         return out

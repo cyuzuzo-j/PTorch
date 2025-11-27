@@ -10,6 +10,7 @@ computes the orthogonal projection onto the function's graph.
 
 import jax
 from jax import numpy as jnp
+from jax import jacrev
 from jaxopt import Bisection
 from .. import config
 from .computation import make_computation
@@ -83,6 +84,42 @@ def max_proj(a, z, /):
 
 max = make_computation("max", max_op, max_proj)
 
+def _haddamarmul_F(z, const):
+    w_r, w_i, x_r, x_i, y_r, y_i = const
+    w_rp, w_ip, x_rp, x_ip, y_rp, y_ip, lam_r, lam_i = z
+
+    return jnp.array([
+        2*(w_rp - w_r) + lam_i * x_ip + lam_r * x_rp,
+        2*(w_ip - w_i) - lam_r * x_ip + lam_i * x_rp,
+        2*(x_rp - x_r) + lam_i * w_ip + lam_r * w_rp,
+        2*(x_ip - x_i) - lam_r * w_ip + lam_i * w_rp,
+        2*(y_rp - y_r) - lam_r,
+        2*(y_ip - y_i) - lam_i,
+        w_rp * x_rp - w_ip * x_ip - y_rp,
+        w_rp * x_ip + w_ip * x_rp - y_ip
+    ])
+
+_haddamarmul_JF = jacrev(_haddamarmul_F)
+
+def _haddamarmul_solve_single(const):
+    z = jnp.zeros(8)
+    
+    def cond_fun(state):
+        z, step_norm, iter_num = state
+        return (step_norm > 1e-12) & (iter_num < 50)
+
+    def body_fun(state):
+        z, _, iter_num = state
+        J = _haddamarmul_JF(z, const)
+        f = _haddamarmul_F(z, const)
+        delta = jnp.linalg.solve(J, -f)
+        step_norm = jnp.linalg.norm(delta)
+        return z + delta, step_norm, iter_num + 1
+
+    init_state = (z, 1.0, 0)
+    final_state = jax.lax.while_loop(cond_fun, body_fun, init_state)
+    return final_state[0]
+
 def haddamarmul_op(a, b, /):
     """Haddamar product operation for 1D arrays."""
     if a.ndim != 1 or b.ndim != 1:
@@ -91,16 +128,38 @@ def haddamarmul_op(a, b, /):
         raise ValueError(f"haddamarmul requires arrays of the same size. Got {a.size} and {b.size}.")
     return a * b
 
-def haddamarmul_proj(a, b, z, /):
-    a_new = (a + z*jnp.conj(b))/(1 + jnp.abs(b)**2)
-    b_new = (b + z*jnp.conj(a))/(1 + jnp.abs(a)**2)
-    jax.debug.print("haddamarmul_proj values: diff a {}", jnp.linalg.norm(a_new[0]- a[0]))
-    jax.debug.print("haddamarmul_proj values: diff b {}", jnp.linalg.norm(b_new - b))
-    jax.debug.print("haddamarmul_proj values: change z {}", jnp.linalg.norm(a_new * b_new - z))
-    jax.debug.breakpoint()
-    return a_new, b_new
+def haddamarmul_proj(a, b, y, /):
+    """Project onto Hadamard product graph."""
+    consts = jnp.stack([
+        jnp.real(a), jnp.imag(a),
+        jnp.real(b), jnp.imag(b),
+        jnp.real(y), jnp.imag(y)
+    ], axis=-1)
     
+    z_sol = jax.vmap(_haddamarmul_solve_single)(consts)
+    
+    w_rp = z_sol[:, 0]
+    w_ip = z_sol[:, 1]
+    x_rp = z_sol[:, 2]
+    x_ip = z_sol[:, 3]
+    
+    a_new = w_rp + 1j * w_ip
+    b_new = x_rp + 1j * x_ip
+    
+    return a_new, b_new
+
+def real_proj(orig, x, /):
+    """Project onto real function graph."""
+    x_real = jnp.real(x)
+    return (x_real + 0j,)
 haddamarmul = make_computation("haddamarmul", haddamarmul_op, haddamarmul_proj)
+
+real = make_computation(
+    "real",
+    lambda x: jnp.real(x),
+    lambda orig, x: real_proj(orig, x)
+)
+
 def dotproduct_op(a, b, /):
     """Dot product operation for 1D arrays."""
     if a.ndim != 1 or b.ndim != 1:
@@ -263,7 +322,7 @@ def reparameterize_op(*args):
     sigma = args[1]
     #jax.debug.print("Reparameterize mu shape:{}, sigma shape:{}, arglen {}", mu.shape, sigma.shape, args)
     """Reparameterization operation."""
-    eps = jax.random.normal(jax.random.PRNGKey(0), shape=mu.shape, )
+    eps = jax.random.normal(jax.random.PRNGKey(0), shape=mu.shape, ).astype(mu.dtype)
     #jax.debug.print("eps shape: {}", eps.shape)
     out = mu + sigma * eps
     #jax.debug.print("reparameterize output shape: {}", out.shape)

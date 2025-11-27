@@ -67,7 +67,7 @@ key = jax.random.key(0)
 model = CNN_pjax([32], in_features=1, size_2d=28, classes=10, max_pool=True, stride=1)
 params = model.init(key)
 
-optimizer = optim.AlternatingProjections(steps_per_update=50)
+optimizer = optim.AlternatingProjections(steps_per_update=1)
 # 3. Define a training step
 @jax.jit
 def train_step(params, x, y):
@@ -75,6 +75,7 @@ def train_step(params, x, y):
         logits = model.apply(params, x)
         y_one_hot = jax.nn.one_hot(y, num_classes=10)
         y_one_hot = y_one_hot.astype(jax.numpy.complex64)
+        #jax.debug.print("Logits: {}", logits.value)
         return pjax.cross_entropy(logits, y_one_hot)
 
     updated_params, loss = optimizer.update(apply_fn, params)
@@ -86,16 +87,49 @@ def train_step(params, x, y):
 losses  = []
 losses2 = []
 losses3 = []
-for step in range(1):
+for step in range(10):
+    avg_loss = 0
     for i, (x,y)  in enumerate(train_data):
-        print("Batch", i)
         params, loss = train_step(params, x, y)
         print("Loss:", loss)
-        losses.append(loss)
-        if i > 10:
+        avg_loss += loss
+        if i>150:
             break
+    avg_loss /= (i+1)
     print("Step:", step, "Loss:", loss)
         
 import matplotlib.pyplot as plt
 plt.plot(losses)
+
+# Prediction
+print("\n--- Prediction on Test Data ---")
+# Get one batch
+x_test, y_test = next(iter(train_data))
+
+# Run model
+logits = model.apply(params, x_test)
+
+# Check if logits are complex
+if jax.numpy.iscomplexobj(logits):
+    print("Logits are complex. Using real part for prediction.")
+    predictions = jax.numpy.argmax(logits.real, axis=-1)
+else:
+    predictions = jax.numpy.argmax(logits, axis=-1)
+
+print("Predictions:", predictions)
+print("Actual labels:", y_test)
+
+# Calculate accuracy on this batch
+accuracy = jax.numpy.mean(predictions == y_test)
+print(f"Batch Accuracy: {accuracy:.2f}")
+
+# Visualize
+fig, axes = plt.subplots(1, 5, figsize=(15, 3))
+for i in range(min(5, len(x_test))):
+    img = x_test[i]
+    if img.shape[-1] == 1:
+        img = img.reshape(28, 28)
+    axes[i].imshow(img, cmap='gray')
+    axes[i].set_title(f"Pred: {predictions[i]}, True: {y_test[i]}")
+    axes[i].axis('off')
 plt.show()

@@ -178,7 +178,6 @@ def haddamarmul(a: Computation, b: Computation) -> Computation:
         b: array of shape ``(M,N)``
 
     """
-    print("haddamar", a.shape, b.shape)
     fn = partial(ops.haddamarmul)  # without partial, we get recompilation errors
     #flatten the arrays
     a_ = reshape(a, (a.shape[0],-1))
@@ -623,3 +622,16 @@ def conv_patch(a: Computation, kernel_shape, strides, padding) -> Computation:
         fn = vmap(fn)
 
     return fn(a)
+
+def roll(a: Computation, shift, axis=None) -> Computation:
+    """Roll array elements along a given axis.
+
+    Args:
+        a: input array.
+        shift: number of places by which elements are shifted.
+        axis: axis or axes along which elements are shifted.
+
+    Returns:
+        output array with rolled elements.
+    """
+    return no_ops.roll(a, shift=shift, axis=axis)

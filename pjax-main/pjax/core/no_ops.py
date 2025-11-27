@@ -197,9 +197,22 @@ def ifft2d(*args):
 
 fourier = make_shape_transform("fft", transform=fft2d, inverse=ifft2d)
 inv_fourier = make_shape_transform("ifft", transform=ifft2d, inverse=fft2d)
-real = make_shape_transform(
-    "real",
-    transform=lambda x: jnp.real(x),
-    inverse=lambda orig, x: x + 0j,
-)
 conv_patch = make_shape_transform("conv_patch", transform=conv_patch_transform, inverse=conv_patch_inverse)
+
+
+def roll_transform(a, /, *, shift, axis):
+    """Roll array elements along a given axis."""
+    return jnp.roll(a, shift, axis=axis)
+
+
+def roll_inverse(a, z, /, *, shift, axis):
+    """Inverse of roll transform: rolls back in the opposite direction."""
+    # If shift is an int, -shift works.
+    # If shift is a tuple, we need to negate each element.
+    if isinstance(shift, tuple):
+        neg_shift = tuple(-s for s in shift)
+    else:
+        neg_shift = -shift
+    return jnp.roll(z, neg_shift, axis=axis)
+
+roll = make_shape_transform("roll", transform=roll_transform, inverse=roll_inverse)
