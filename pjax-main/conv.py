@@ -5,7 +5,7 @@ from data import (
     MNISTDataModule,
 ) 
 
-dataset = MNISTDataModule(batch_size=5)
+dataset = MNISTDataModule(batch_size=32)
 train_data =dataset.train_dataloader()
 
 # 1. Define the model
@@ -67,7 +67,7 @@ key = jax.random.key(0)
 model = CNN_pjax([32], in_features=1, size_2d=28, classes=10, max_pool=True, stride=1)
 params = model.init(key)
 
-optimizer = optim.AlternatingProjections(steps_per_update=1)
+optimizer = optim.AlternatingProjections(steps_per_update=50)
 # 3. Define a training step
 @jax.jit
 def train_step(params, x, y):
@@ -90,12 +90,13 @@ losses3 = []
 for step in range(10):
     avg_loss = 0
     for i, (x,y)  in enumerate(train_data):
+        print(i)
         params, loss = train_step(params, x, y)
-        print("Loss:", loss)
         avg_loss += loss
-        if i>150:
+        if i % 10 == 9:
             break
     avg_loss /= (i+1)
+    losses.append(avg_loss)
     print("Step:", step, "Loss:", loss)
         
 import matplotlib.pyplot as plt

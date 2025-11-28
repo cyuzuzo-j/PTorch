@@ -2,21 +2,27 @@
 import jax
 import jax.numpy as jnp
 from pjax.core.ops import haddamarmul_proj
+from pjax.core.no_ops import fft2d, ifft2d
+def test_fft2d():
+    key = jax.random.PRNGKey(0)
+    x = jax.random.normal(key, (4, 4))
+    print("Input x:\n", x)
+
+    x_fft = fft2d(x)
+    print("FFT2 of x:\n", x_fft)
+
+    x_ifft = ifft2d(x_fft)
+    print(" check if ifft2(fft2(x)) == x:\n", jnp.allclose(x_ifft, x))
+
 
 def test_haddamarmul():
-    # From aaa.py: const = jnp.array([1.0, 2.0, -1.0, 0.5, 0.2, -0.4])
-    # w_r, w_i, x_r, x_i, y_r, y_i
+    key = jax.random.PRNGKey(0)
+    key, k1, k2, k3, k4, k5, k6 = jax.random.split(key, 7)
     
-    w_r = 1.0
-    w_i = 9
-    x_r = -1.0
-    x_i = 0.5
-    y_r = 0.2
-    y_i = -0.4
-    
-    a = jnp.array([w_r + 1j * w_i, 2.0 + 3.0j])
-    b = jnp.array([x_r + 1j * x_i, 1.0])
-    y = jnp.array([y_r + 1j * y_i, 2.0 + 3.0j])
+    shape = (10,)
+    a = jax.random.normal(k1, shape) + 1j * jax.random.normal(k2, shape)
+    b = jax.random.normal(k3, shape) + 1j * jax.random.normal(k4, shape)
+    y = jax.random.normal(k5, shape) + 1j * jax.random.normal(k6, shape)
     
     print("Input a:", a)
     print("Input b:", b)
@@ -25,8 +31,9 @@ def test_haddamarmul():
     while True:
         a, b = haddamarmul_proj(a, b, y)
         
-        print( "new a*b:", a * b)
-        print( "Expected y:", y)
+        loss = jnp.linalg.norm(a * b - y)
+        print( "Loss:", loss)
     
 if __name__ == "__main__":
+    #test_fft2d()
     test_haddamarmul()

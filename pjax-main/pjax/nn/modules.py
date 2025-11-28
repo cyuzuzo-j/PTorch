@@ -36,7 +36,7 @@ class Parameter:
 class Weight(Parameter):
     """Learnable weight parameter with He normal initialization."""
 
-    def __init__(self, shape: Sequence[int], dtype: jnp.dtype = jnp.float32, init_fn: Callable | None = None):
+    def __init__(self, shape: Sequence[int], dtype: jnp.dtype = jnp.complex64, init_fn: Callable | None = None):
         def default_init_fn(key, shape, dtype):
             return jax.nn.initializers.he_normal()(key, shape, dtype)
 
@@ -82,7 +82,6 @@ class Module(ABC):
         # replace parameters with values from params
         for name, value in params.items():
             ref = module
-            print("name:", name)
             path, param = name.rsplit(".", 1)
             for attr in path.split("."):
                 ref = getattr(ref, attr)
@@ -341,7 +340,7 @@ class FftConv2D(Module):
         out_transposed = pjax.ifft2d(output_fft)
         
         # convert back to real values if necessary
-        #out_transposed = pjax.ops.real(out_transposed)
+        out_transposed = pjax.ops.real(out_transposed)
         
         # Transpose back to (..., H, W, C)
         # Current: ..., C, H, W (indices: 0, ..., ndim-3, ndim-2, ndim-1)

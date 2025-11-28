@@ -3,13 +3,14 @@ import jax.numpy as jnp
 import pjax
 from pjax import nn, optim
 import numpy as np
+import matplotlib.pyplot as plt
 
 # Define a simple CNN model
 class SimpleCNN(nn.Module):
     def __init__(self):
         super().__init__()
         # in_features_x=28, in_features_y=28, in_channels=1, out_channels=1, kernel_shape=3
-        self.conv = nn.FftConv2D(28, 28, 1, 1, 2)
+        self.conv = nn.FftConv2D(4, 4, 1, 1, 4)
 
     def __call__(self, x):
         return self.conv(x)
@@ -25,13 +26,13 @@ def test_cnn_update():
 
         # Create dummy data
         # Input: (batch=1, H=28, W=28, C=1)
-        x = jax.random.normal(key, (1, 28, 28, 1))
+        x = jax.random.normal(key, (1, 4, 4, 1))
         # Target: (batch=1, H=28, W=28, C=1)
         # We want the output to match this target
-        y = jax.random.normal(key, (1, 28, 28, 1))
+        y = jax.random.normal(key, (1, 4, 4, 1))*100
 
         # Define optimizer
-        optimizer = optim.AlternatingProjections(steps_per_update=1)
+        optimizer = optim.DouglasRachford(steps_per_update=1)
 
         # Define training step
         @jax.jit
@@ -48,30 +49,25 @@ def test_cnn_update():
         # Initial loss
         initial_output = model.apply(params, x)
         initial_loss = jnp.mean((initial_output - y) ** 2)
-        print(f"Initial Loss: {initial_loss}")
 
         # Initial kernel
         initial_kernel = params['conv.kernel']
-        print(f"Initial Kernel (first 5 values): {initial_kernel.flatten()[:5]}")
 
         # Run one update step
-        print("Running optimization step...")
-        updated_params, loss_metric = train_step(params, x, y)
+        
+        params, loss_metric = train_step(params, x, y)
         
         # Check if params changed
-        updated_kernel = updated_params['conv.kernel']
-        print(f"Updated Kernel (first 5 values): {updated_kernel.flatten()[:5]}")
+        updated_kernel = params['conv.kernel']
         
         kernel_diff = jnp.linalg.norm(updated_kernel - initial_kernel)
-        print(f"Kernel difference norm: {kernel_diff}")
 
         # Check if loss decreased
-        final_output = model.apply(updated_params, x)
+        final_output = model.apply(params, x)
         final_loss = jnp.mean((final_output - y) ** 2)
-        print(f"Final Loss: {final_loss}")
 
-        if final_loss >= initial_loss:
-            print("Test Failed: Loss did not decrease.")
+        if  jnp.abs(final_loss) > jnp.abs(initial_loss):
+            print("Test Failed: Loss Increased from", jnp.abs(initial_loss), "to", jnp.abs(final_loss))
             break
 
 if __name__ == "__main__":

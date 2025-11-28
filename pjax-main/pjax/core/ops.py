@@ -103,10 +103,11 @@ _haddamarmul_JF = jacrev(_haddamarmul_F)
 
 def _haddamarmul_solve_single(const):
     z = jnp.zeros(8)
+    z = z.at[0:6].set(const[0:6])  # initialize w_rp, w_ip, x_rp, x_ip, y_rp, y_ip
     
     def cond_fun(state):
         z, step_norm, iter_num = state
-        return (step_norm > 1e-12) & (iter_num < 50)
+        return (step_norm > 1e-4) & (iter_num < 150)
 
     def body_fun(state):
         z, _, iter_num = state
@@ -130,6 +131,7 @@ def haddamarmul_op(a, b, /):
 
 def haddamarmul_proj(a, b, y, /):
     """Project onto Hadamard product graph."""
+    #jax.debug.print("haddamarmul_proj called with a {}, b {}, y {}", a.shape, b.shape, y.shape)
     consts = jnp.stack([
         jnp.real(a), jnp.imag(a),
         jnp.real(b), jnp.imag(b),
@@ -145,11 +147,11 @@ def haddamarmul_proj(a, b, y, /):
     
     a_new = w_rp + 1j * w_ip
     b_new = x_rp + 1j * x_ip
-    
     return a_new, b_new
 
 def real_proj(orig, x, /):
     """Project onto real function graph."""
+    #jax.debug.print("projection to real called with orig {} x {} ", orig, x)
     x_real = jnp.real(x)
     return (x_real + 0j,)
 haddamarmul = make_computation("haddamarmul", haddamarmul_op, haddamarmul_proj)
@@ -304,16 +306,14 @@ def mean_squared_op(predictions, targets, /):
     """Mean squared error operation."""
     print( "Using MSE operation")
     print( predictions.shape, targets.shape)
-    squared_errors=  jnp.square(predictions - targets)
+    squared_errors=  jnp.abs(predictions - targets) ** 2
     return jnp.mean(squared_errors)
 
-def mse_prox(predictions, targets, _, /):
+def mse_prox(predictions, targets, idk, /):
     """Project onto mean squared error constraint. """
-    print("Using MSE projection")
     out = (predictions+ targets) /2
-    print( predictions.shape, targets.shape, out.shape)
-
-    return out, targets
+    #jax.debug.print("preds {} , targets,{}, idk {}", predictions, targets, idk )
+    return out, out
 
 mse = make_computation("mse_loss", mean_squared_op, mse_prox)
 

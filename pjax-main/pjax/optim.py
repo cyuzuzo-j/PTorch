@@ -15,8 +15,8 @@ def plot_graph(graph: nx.DiGraph):
     """Plot a computation graph."""
     import matplotlib.pyplot as plt
 
-    graph = prune_shape_transforms(graph)
-    A, B = nx.bipartite.sets(prune_shape_transforms(graph))
+    graph = graph
+    A, B = nx.bipartite.sets(graph)
 
     # color node; green for partition A, red for partition B, blue for non-partition nodes
     node_color = ["green" if node in A else "red" if node in B else "blue" for node in graph.nodes]
@@ -197,7 +197,6 @@ class Optimizer(ABC):
                 vars_ = carry
                 new_vars = self._step(vars_, *projections)
                 loss = loss_fn(vars_, new_vars)
-                print("loss:", loss)
                 return new_vars, loss
             inputs, losses = jax.lax.scan(step, inputs, None, length=steps_per_update)
 

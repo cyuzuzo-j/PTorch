@@ -195,8 +195,16 @@ def ifft2d(*args):
     a = args[0] if len(args) == 1 else args[1]
     return jnp.fft.ifft2(a, axes=(-2, -1))
 
-fourier = make_shape_transform("fft", transform=fft2d, inverse=ifft2d)
-inv_fourier = make_shape_transform("ifft", transform=ifft2d, inverse=fft2d)
+def inverse_ifft2d(*args):
+    """Inverse of 2D FFT: computes the 2D inverse FFT."""
+    return fft2d(*args)
+
+def inverse_fft2d(*args):
+    """Inverse of 2D FFT: computes the 2D inverse FFT."""
+    return ifft2d(*args)
+
+fourier = make_shape_transform("fft", transform=fft2d, inverse=inverse_fft2d)
+inv_fourier = make_shape_transform("ifft", transform=ifft2d, inverse=inverse_ifft2d)
 conv_patch = make_shape_transform("conv_patch", transform=conv_patch_transform, inverse=conv_patch_inverse)
 
 
