@@ -174,10 +174,11 @@ def haddamarmul(a: Computation, b: Computation) -> Computation:
     """Matrix haddamar product of two 2D arrays.
 
     Args:
-        a: array of shape ``(B, M,N)`` or ``(M,N)``.
-        b: array of shape ``(M,N)``
+        a: array of shape ``(B,C, M,N)`` or ``(M,N)``.
+        b: array of shape ``(C,M,N)``
 
     """
+    
     fn = partial(ops.haddamarmul)  # without partial, we get recompilation errors
     #flatten the arrays
     a_ = reshape(a, (a.shape[0],-1))
@@ -566,7 +567,7 @@ def fft2d(a: Computation) -> Computation:
     """Compute the 2D discrete Fourier Transform of an array.
 
     Args:
-        a: the array to transform of shape ``(..., H, W)`` or ``(..., H, W, C)``.
+        a: the array to transform of shape ``(..., H, W)`` or ``(...,C,  H, W)``.
 
     Returns:
         the Fourier transformed array of the same shape as ``a``.
