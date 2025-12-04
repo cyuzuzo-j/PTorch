@@ -5,15 +5,21 @@ import matplotlib.pyplot as plt
 import time
 from sklearn.decomposition import PCA
 
-import projections
-from optimize import DouglassRachford, AlternatingProjection
+import tools.projections as projections
+from tools.optimize import DouglassRachford, AlternatingProjection
 from data import MNISTDataModule
 
+    
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 def step_activation(x):
     """Step activation function: 1 if x > 0, else 0."""
     return np.where(x > 0, 1.0, 0.0)
 
+def relu(x):
+    """Relu activation function"""
+    return np.where(x>0,x,0)
 
 def he_initialization(key, shape, fan_in):
     """He initialization: samples from N(0, sqrt(2/fan_in))."""
@@ -63,7 +69,7 @@ def setup_autoencoder_problem(data_module, rand_key):
     return problem_params
 
 
-def run_autoencoder_experiment(problem_params, num_iterations=500):
+def run_autoencoder_experiment(problem_params, epochs=10):
     """Runs autoencoder training using projection-based optimization with Step activation."""
     
     # --- Unpack parameters ---
@@ -82,97 +88,99 @@ def run_autoencoder_experiment(problem_params, num_iterations=500):
     
     # --- Initialize optimizers for each layer ---
     # Bilinear for weight layers (no activation)
-    opt_enc_hidden = DouglassRachford([], [projections.bilinearMatrix])
-    opt_enc_hidden_activation = DouglassRachford([projections.stepActivation], [])
+    opt_enc_hidden = AlternatingProjection([], [projections.bilinearMatrix])
+    opt_enc_hidden_activation = AlternatingProjection([projections.sum_relu_proj], [])
     # Step activation for latent
-    opt_enc_latent = DouglassRachford([projections.lowrankApproximation], [projections.bilinearMatrix])
-    opt_enc_latent_activation = DouglassRachford([projections.stepActivation], [])
+    opt_enc_latent = AlternatingProjection([], [projections.bilinearMatrix])
+    opt_enc_latent_activation = AlternatingProjection([projections.sum_relu_proj], [])
     # Bilinear for decoder hidden
     opt_dec_hidden = DouglassRachford([], [projections.bilinearMatrix])
-    opt_dec_hidden_activation = DouglassRachford([projections.stepActivation], [])
+    opt_dec_hidden_activation = DouglassRachford([projections.sum_relu_proj], [])
     # Step activation for decoder output
     opt_dec_output = DouglassRachford([], [projections.bilinearMatrix])
     error_history = []
     
     print("--- Running Autoencoder Training (Step Activation) ---")
     start_time = time.time()
-    train_loader = iter(train_loader)
-    realData = next(train_loader)[0]
-    for batch, (data,_) in enumerate(train_loader):
-        inputData = np.array(realData).reshape(realData.shape[0], -1).T  # (784, batch_size)
-        print(f"Processing batch {batch} with shape {inputData.shape}")
-        batchError = np.zeros(inputData.shape[1])
-        if batch >= num_iterations:
-            break
-        
-        for k, sample in enumerate(inputData.T):
-            # --- Forward Pass: Encoder ---
-            x_in = sample
-            x_in_aug = np.append(x_in, b_enc_hidden)
-            x_enc_hidden = W_enc_hidden @ x_in_aug
-            h_enc_hidden = step_activation(x_enc_hidden)  # Step activation
+    for epoch in range(epochs):  # Single epoch for demonstration
+        print(f"Epoch {epoch + 1} time:{time.time() - start_time:.2f}s")
+        start_time = time.time()
+        loader = iter(train_loader)
+        realData = next(loader)[0]
+        for batch, (data,_) in enumerate(loader):
+            inputData = np.array(realData).reshape(realData.shape[0], -1).T  # (784, batch_size)
+            print(f"Processing batch {batch} with shape {inputData.shape}")
+            batchError = np.zeros(inputData.shape[1])
             
-            h_enc_hidden_aug = np.append(h_enc_hidden, b_enc_latent)
-            z_latent = W_enc_latent @ h_enc_hidden_aug
-            h_latent =step_activation(z_latent)# Step activation
-            
-            # --- Forward Pass: Decoder ---
-            h_latent_aug = np.append(h_latent, b_dec_hidden)
-            x_dec_hidden = W_dec_hidden @ h_latent_aug
-            h_dec_hidden = step_activation(x_dec_hidden) # relu activation
-            
-            h_dec_hidden_aug = np.append(h_dec_hidden, b_dec_output)
-            x_reconstructed = W_dec_output @ h_dec_hidden_aug
-            
-            # --- Reconstruction Error ---
-            reconstruction_error = (x_reconstructed - sample) ** 2
-            batchError = batchError.at[k].set(np.mean(reconstruction_error))
-            
-            # --- Backward Pass: Update Decoder Output (with Step) ---
-            w_dec_output = W_dec_output
-            w_dec_hidden = W_dec_hidden
-            w_enc_latent = W_enc_latent
-            w_enc_hidden = W_enc_hidden
-            for _ in range(5):  # Multiple projections for better convergence
-                h_dec_hidden_aug, w_dec_output, x_reconstructed = opt_dec_output.step_layer(
-                    h_dec_hidden_aug, w_dec_output, sample
-                )
-                h_dec_hidden = h_dec_hidden_aug[:-len(b_dec_output)]
+            for k, sample in enumerate(inputData.T):
+                # --- Forward Pass: Encoder ---
+                x_in = sample
+                x_in_aug = np.append(x_in, b_enc_hidden)
+                x_enc_hidden = W_enc_hidden @ x_in_aug
+                h_enc_hidden = relu(x_enc_hidden)  # Step activation
                 
-                # --- Backward Pass: Update Decoder Hidden (bilinear) ---
-                x_dec_hidden, _, h_dec_hidden = opt_dec_hidden_activation.step_layer(x_dec_hidden, np.eye(hiddenDim), h_dec_hidden)
-                h_latent_aug, w_dec_hidden, x_dec_hidden = opt_dec_hidden.step_layer(h_latent_aug, w_dec_hidden, x_dec_hidden)
-                h_latent = h_latent_aug[:-len(b_dec_hidden)]
+                h_enc_hidden_aug = np.append(h_enc_hidden, b_enc_latent)
+                z_latent = W_enc_latent @ h_enc_hidden_aug
+                h_latent =relu(z_latent)# Step activation
                 
-                # --- Backward Pass: Update Encoder Latent (with Step) ---
-                z_latent, _, h_latent = opt_enc_latent_activation.step_layer(z_latent, np.eye(latentDim), h_latent)
-                h_enc_hidden_aug, w_enc_latent, z_latent = opt_enc_latent.step_layer(h_enc_hidden_aug, w_enc_latent, z_latent)
-                h_enc_hidden = h_enc_hidden_aug[:-len(b_enc_latent)]
+                # --- Forward Pass: Decoder ---
+                h_latent_aug = np.append(h_latent, b_dec_hidden)
+                x_dec_hidden = W_dec_hidden @ h_latent_aug
+                h_dec_hidden = relu(x_dec_hidden) # relu activation
                 
-                # --- Backward Pass: Update Encoder Hidden (bilinear) ---
-                x_enc_hidden, _, h_enc_hidden = opt_enc_hidden_activation.step_layer(x_enc_hidden, np.eye(hiddenDim), h_enc_hidden)
-                x_in_aug, w_enc_hidden, x_enc_hidden = opt_enc_hidden.step_layer(x_in_aug, w_enc_hidden, x_enc_hidden)
+                h_dec_hidden_aug = np.append(h_dec_hidden, b_dec_output)
+                x_reconstructed = W_dec_output @ h_dec_hidden_aug
+                
+                # --- Reconstruction Error ---
+                reconstruction_error = (x_reconstructed - sample) ** 2
+                batchError = batchError.at[k].set(np.mean(reconstruction_error))
+                
+                # --- Backward Pass: Update Decoder Output (with Step) ---
+                w_dec_output = W_dec_output
+                w_dec_hidden = W_dec_hidden
+                w_enc_latent = W_enc_latent
+                w_enc_hidden = W_enc_hidden
+                for _ in range(1):  # Multiple projections for better convergence
+                    h_dec_hidden_aug, w_dec_output, x_reconstructed = opt_dec_output.step_layer(
+                        h_dec_hidden_aug, w_dec_output, sample
+                    )
+                    h_dec_hidden = h_dec_hidden_aug[:-len(b_dec_output)]
+                    
+                    # --- Backward Pass: Update Decoder Hidden (bilinear) ---
+                    x_dec_hidden, _, h_dec_hidden = opt_dec_hidden_activation.step_layer(x_dec_hidden, np.eye(hiddenDim), h_dec_hidden)
+                    h_latent_aug, w_dec_hidden, x_dec_hidden = opt_dec_hidden.step_layer(h_latent_aug, w_dec_hidden, x_dec_hidden)
+                    h_latent = h_latent_aug[:-len(b_dec_hidden)]
+                    
+                    # --- Backward Pass: Update Encoder Latent (with Step) ---
+                    z_latent, _, h_latent = opt_enc_latent_activation.step_layer(z_latent, np.eye(latentDim), h_latent)
+                    h_enc_hidden_aug, w_enc_latent, z_latent = opt_enc_latent.step_layer(h_enc_hidden_aug, w_enc_latent, z_latent)
+                    h_enc_hidden = h_enc_hidden_aug[:-len(b_enc_latent)]
+                    
+                    # --- Backward Pass: Update Encoder Hidden (bilinear) ---
+                    x_enc_hidden, _, h_enc_hidden = opt_enc_hidden_activation.step_layer(x_enc_hidden, np.eye(hiddenDim), h_enc_hidden)
+                    x_in_aug, w_enc_hidden, x_enc_hidden = opt_enc_hidden.step_layer(x_in_aug, w_enc_hidden, x_enc_hidden)
+                
+                # --- Update Weights with learning rate ---
+                W_enc_hidden = W_enc_hidden + (w_enc_hidden - W_enc_hidden) / ( 5*batch + k + 1)
+                b_enc_hidden = b_enc_hidden + (x_in_aug[-len(b_enc_hidden):] - b_enc_hidden) / (5*batch+  k + 1)
+                W_enc_latent = W_enc_latent + (w_enc_latent - W_enc_latent) / ( 5*batch + k + 1)
+                b_enc_latent = b_enc_latent + (h_enc_hidden_aug[-len(b_enc_latent):] - b_enc_latent) / (5*batch+ k + 1)
+                W_dec_hidden = W_dec_hidden + (w_dec_hidden - W_dec_hidden) / (5*batch + k + 1)
+                b_dec_hidden = b_dec_hidden + (h_latent_aug[-len(b_dec_hidden):] - b_dec_hidden) / ( 5*batch+ k + 1)
+                W_dec_output = W_dec_output + (w_dec_output - W_dec_output) / (5*batch +  k + 1)
+                b_dec_output = b_dec_output + (h_dec_hidden_aug[-len(b_dec_output):] - b_dec_output) / (5*batch +  k + 1)
+                
+                
             
-            # --- Update Weights with learning rate ---
-            lr = 1.0 / (k + 1)
-            W_enc_hidden = W_enc_hidden + lr * (w_enc_hidden - W_enc_hidden)
-            b_enc_hidden = b_enc_hidden + lr * (x_in_aug[-len(b_enc_hidden):] - b_enc_hidden)
-            W_enc_latent = W_enc_latent + lr * (w_enc_latent - W_enc_latent)
-            b_enc_latent = b_enc_latent + lr * (h_enc_hidden_aug[-len(b_enc_latent):] - b_enc_latent)
-            W_dec_hidden = W_dec_hidden + lr * (w_dec_hidden - W_dec_hidden)
-            b_dec_hidden = b_dec_hidden + lr * (h_latent_aug[-len(b_dec_hidden):] - b_dec_hidden)
-            W_dec_output = W_dec_output + lr * (w_dec_output - W_dec_output)
-            b_dec_output = b_dec_output + lr * (h_dec_hidden_aug[-len(b_dec_output):] - b_dec_output)
+            mean_iter_error = np.mean(batchError)
+            error_history.append({
+                "epoch": epoch,
+                "step": epoch * 100 + batch,
+                "batch": batch,
+                "error": mean_iter_error.item()
+            })
             
-            
-        
-        mean_iter_error = np.mean(batchError)
-        error_history.append({
-            "batch": batch,
-            "error": mean_iter_error.item()
-        })
-        
-        print(f"batch {batch:4d}, Reconstruction Error: {mean_iter_error:.6f}")
+            print(f"batch {batch:4d}, Reconstruction Error: {mean_iter_error:.6f}")
     
     end_time = time.time()
     total_time = end_time - start_time
@@ -183,23 +191,23 @@ def run_autoencoder_experiment(problem_params, num_iterations=500):
         "W_dec_hidden": W_dec_hidden, "b_dec_hidden": b_dec_hidden,
         "W_dec_output": W_dec_output, "b_dec_output": b_dec_output,
     })
-    return error_history, realData
+    return error_history, data
 
 
 if __name__ == "__main__":
     # Initialize MNIST data module
-    data_module = MNISTDataModule(batch_size=20, normalize=True)
+    data_module = MNISTDataModule(batch_size=64, normalize=True)
     
     rand_key = random.PRNGKey(42)
     problem_params = setup_autoencoder_problem(data_module, rand_key)
     
-    history, data = run_autoencoder_experiment(problem_params, num_iterations=100)
+    history, data = run_autoencoder_experiment(problem_params, epochs=500)
     
     df_results = pd.DataFrame(history)
-    
+
     # --- Visualization: Convergence Plot ---
     plt.figure(figsize=(12, 6))
-    plt.plot(df_results["batch"], df_results["error"], linewidth=2, marker='o', markersize=4)
+    sns.lineplot(data=df_results, x="step", y="error", label='Douglass-Rachford')
     plt.title("Autoencoder Reconstruction Error Convergence (Step Activation)", fontsize=14)
     plt.xlabel("batch")
     plt.ylabel("Mean Reconstruction Error (MSE)")
@@ -207,7 +215,6 @@ if __name__ == "__main__":
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.show()
-    
     # --- Visualization: Reconstructed Images ---
     print("\nGenerating reconstruction visualizations...")
     

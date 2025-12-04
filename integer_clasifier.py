@@ -1,7 +1,7 @@
 import jax.numpy as np
 import jax.random as random
-import optimize as optimize
-import projections as projections
+import tools.optimize as optimize
+import tools.projections as projections
 rand_key = random.key(123)
 
 ## setup problem

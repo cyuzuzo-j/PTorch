@@ -1,8 +1,8 @@
 # %%
 import jax.numpy as np
 import jax.random as random
-import optimize
-import projections
+import tools.optimize as optimize
+import tools.projections as projections
 rand_key = random.key(123)
 
 # %%
