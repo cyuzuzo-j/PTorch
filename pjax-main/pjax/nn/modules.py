@@ -296,7 +296,7 @@ class FftConv2D(Module):
         self.out_channels = out_channels
         self.pad_row = in_features_x - kernel_shape
         self.pad_col = in_features_y - kernel_shape
-        self.kernel = Weight((kernel_shape, kernel_shape, in_channels))
+        self.kernel = Weight((kernel_shape*kernel_shape *in_channels, out_channels))
         
 
     def __call__(self, input):
@@ -309,7 +309,8 @@ class FftConv2D(Module):
             output tensor after convolution and projection.
         """
         ### add zero padding to the weight
-        padded_kernel = pjax.zero_pad_assymetric(self.kernel, ((0,self.pad_row), (0,self.pad_col), (0,0)))
+        kernel = pjax.reshape(self.kernel, (3,3,1))
+        padded_kernel = pjax.zero_pad_assymetric(kernel, ((0,self.pad_row), (0,self.pad_col), (0,0)))
         
         # Shift the kernel so that the center is at (0, 0)
         # The kernel is currently at [0..k-1, 0..k-1].
@@ -335,7 +336,6 @@ class FftConv2D(Module):
         # input_fft: (..., C, H, W), kernel_fft: (H, W)
         # haddamarmul broadcasts correctly
         output_fft = pjax.haddamarmul(input_fft , kernel_fft)
-        
         # compute inverse fft to obtain the convolved output
         out_transposed = pjax.ifft2d(output_fft)
         

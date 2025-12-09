@@ -184,6 +184,29 @@ def conv_patch_inverse(a, z, /, *, kernel_shape, strides, padding):
     out = out_flat.reshape(N, C_in, H_in, W_in).transpose(0, 2, 3, 1)  # Reshape and transpose to (N, H_in, W_in, C_in)
     return out
 
+def detach_complex_transform(a, /):
+    """Detach complex tensor by separating real and imaginary parts.
+       Add the imaginary part as an additional channel.
+    """
+    real_part = jnp.real(a)
+    imag_part = jnp.imag(a)
+    
+    return jnp.concatenate([real_part, imag_part], axis=1)
+
+
+def detach_complex_inverse(a, z,/):
+    """Inverse of detach complex: recombines real and imaginary parts."""
+    half = z.shape[1] //2
+    real_part = z[:, :half, ...]
+    imag_part = z[:, half:, ...]
+    return real_part + 1j * imag_part
+
+detach_complex = make_shape_transform(
+    "detach_complex", transform=detach_complex_transform, inverse=detach_complex_inverse
+)
+attach_complex = make_shape_transform(
+    "attach_complex", transform=lambda a: detach_complex_inverse(a,a), inverse= lambda a,z: detach_complex_transform(z)
+)
 
 def fft2d(*args):
     """Compute the 2D FFT of the last two dimensions of the input array."""

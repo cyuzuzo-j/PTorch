@@ -230,6 +230,7 @@ def matmul(a: Computation, b: Computation) -> Computation:
     if b.ndim == 1:
         out = squeeze(out, axis=-1)
     return out
+
 def reparameterize(mean: Computation, logvar: Computation) -> Computation:
     """Reparameterization trick to sample from a diagonal Gaussian.
 
@@ -251,6 +252,12 @@ def relu(a: Computation) -> Computation:
 
     Returns:
         array with ReLU activation applied element-wise.
+    """
+    return ops.sum_relu(a)
+def generalized_relu(a: Computation) -> Computation:
+    """
+    Generalized Rectified Linear Unit activation function.
+    Handles complex inputs
     """
     return ops.sum_relu(a)
 
@@ -379,6 +386,26 @@ def reshape(a: Computation, shape: Sequence[int]) -> Computation:
     """
     return no_ops.reshape(a, shape=shape)
 
+def detach_complex(a: Computation) -> Computation:
+    """Detach the complex array from the computation graph.
+
+    Args:
+        a: complex array to detach.
+    Returns:
+        detached complex array.
+    """    
+    return no_ops.detach_complex(a)
+
+
+def attach_complex(a: Computation) -> Computation:
+    """Attach the complex array to the computation graph.
+
+    Args:
+        a: detached complex array to attach.
+    Returns:
+        attached complex array.
+    """    
+    return no_ops.attach_complex(a)
 
 def transpose(a: Computation, axes: Sequence[int]) -> Computation:
     """Transpose a tensor by permuting its axes.

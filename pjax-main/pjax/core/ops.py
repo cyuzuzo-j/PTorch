@@ -11,7 +11,6 @@ computes the orthogonal projection onto the function's graph.
 import jax
 from jax import numpy as jnp
 from jax import jacrev
-from jaxopt import Bisection
 from .. import config
 from .computation import make_computation
 
@@ -154,6 +153,8 @@ def real_proj(orig, x, /):
     #jax.debug.print("projection to real called with orig {} x {} ", orig, x)
     x_real = jnp.real(x)
     return (x_real + 0j,)
+
+
 haddamarmul = make_computation("haddamarmul", haddamarmul_op, haddamarmul_proj)
 
 real = make_computation(
@@ -204,6 +205,35 @@ def sum_step_activation_op(*args):
     sum_args = sum(args)
     return jnp.where(sum_args >= 0, 1, -1)
 
+def hermitian_symetry(a, /):
+    """Enforce Hermitian symmetry on a 2D complex array."""
+    a_conj_flip = jnp.conj(jnp.flip(jnp.flip(a, axis=0), axis=1))
+    a_sym = (a + a_conj_flip) / 2
+    return a_sym
+
+def hermitian_symetry_proj(X):
+    """
+    Project a 2D complex array X onto the Hermitian-symmetric set
+    that ensures a real 2D IFFT.
+    """
+    M, N = X.shape
+    # conjugate + 180-degree rotation (flip both axes)
+    X_flip_conj = jnp.conj(jnp.flip(jnp.flip(X, axis=0), axis=1))
+    X_sym = 0.5 * (X + X_flip_conj)
+
+    # find indices that are their own partner: 2u % M == 0 and 2v % N == 0
+    u_idxs = jnp.arange(M)
+    v_idxs = jnp.arange(N)
+    u_self = (2 * u_idxs) % M == 0
+    v_self = (2 * v_idxs) % N == 0
+
+    # set imaginary part to zero at the "self-symmetric" grid points
+    for u in jnp.where(u_self)[0]:
+        for v in jnp.where(v_self)[0]:
+            X_sym[u, v] = jnp.real(X_sym[u, v])  # force real
+
+    return X_sym
+
 def step_activation_proj(*args):
     """Project onto step activation function constraint: y = step(x) where step(x) = 1 if x >= 0, -1 otherwise."""
     inputs, output = args[:-1], args[-1]
@@ -222,8 +252,7 @@ step = make_computation("step_activation", sum_step_activation_op, step_activati
 
 def sum_relu_op(*args):
     """Sum inputs and apply ReLU activation."""
-    return jax.nn.relu(sum(args))
-
+    return jax.nn.relu(sum(args))    
 
 def sum_relu_proj(*args):
     """Project onto sum-ReLU function graph."""
@@ -304,8 +333,6 @@ margin_loss = make_computation("margin_loss", margin_loss_op, margin_loss_proj)
 
 def mean_squared_op(predictions, targets, /):
     """Mean squared error operation."""
-    print( "Using MSE operation")
-    print( predictions.shape, targets.shape)
     squared_errors=  jnp.abs(predictions - targets) ** 2
     return jnp.mean(squared_errors)
 
