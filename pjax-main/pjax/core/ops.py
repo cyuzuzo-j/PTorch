@@ -82,6 +82,97 @@ def max_proj(a, z, /):
 
 
 max = make_computation("max", max_op, max_proj)
+def _solve_reduced_system(a_val, b_val, y_val):
+    """
+    Solves the projection using the reduced 2x2 system (Real/Imag of L)
+    with precomputed algebraic invariants and explicit 2x2 inversion.
+    """
+    
+    # --- Optimization 1: Precompute Constants ---
+    # Numerator expansion: (a - L*conj(b))(b - L*conj(a)) 
+    # = ab - L(|a|^2 + |b|^2) + L^2*conj(ab)
+    # This reduces loop arithmetic significantly.
+    
+    P = a_val * b_val                # Product
+    S = jnp.abs(a_val)**2 + jnp.abs(b_val)**2  # Sum of magnitudes
+    P_conj = jnp.conj(P)
+    
+    def residual(l_vec):
+        L = l_vec[0] + 1j * l_vec[1]
+        
+        # Denominator term
+        L_mag_sq = jnp.abs(L)**2
+        denom = (1.0 - L_mag_sq)
+        
+        # Optimized Numerator using invariants
+        # P - L*S + L^2*conj(P)
+        numerator = P - L * S + (L**2) * P_conj
+        
+        lhs = numerator / (denom**2 + 1e-8)
+        rhs = y_val + L
+        
+        diff = lhs - rhs
+        return jnp.array([jnp.real(diff), jnp.imag(diff)])
+
+    J_fun = jax.jacfwd(residual)
+
+    def cond_fun(state):
+        l_vec, step_norm, iter_num = state
+        return (step_norm > 1e-5) & (iter_num < 50)
+
+    def body_fun(state):
+        l_vec, _, iter_num = state
+        
+        R = residual(l_vec)
+        J = J_fun(l_vec)
+        
+        # --- Optimization 2: Explicit 2x2 Linear Solve ---
+        # Solve J * delta = -R using Cramer's rule
+        # J = [[a, b], [c, d]]
+        # det = ad - bc
+        # inv = 1/det * [[d, -b], [-c, a]]
+        
+        # Unpack Jacobian elements for clarity
+        j00, j01 = J[0, 0], J[0, 1]
+        j10, j11 = J[1, 0], J[1, 1]
+        
+        det = j00 * j11 - j01 * j10
+        inv_det = 1.0 / (det + 1e-12) # epsilon for safety
+        
+        # delta = -inv * R
+        # d0 = -(J[1,1]*R[0] - J[0,1]*R[1]) / det
+        # d1 = -(-J[1,0]*R[0] + J[0,0]*R[1]) / det
+        
+        d0 = (j01 * R[1] - j11 * R[0]) * inv_det
+        d1 = (j10 * R[0] - j00 * R[1]) * inv_det
+        
+        delta = jnp.array([d0, d1])
+        
+        return l_vec + delta, jnp.linalg.norm(delta), iter_num + 1
+
+    init_state = (jnp.zeros(2), 1.0, 0)
+    final_state = jax.lax.while_loop(cond_fun, body_fun, init_state)
+    
+    L_final_vec = final_state[0]
+    L = L_final_vec[0] + 1j * L_final_vec[1]
+    
+    # Reconstruct primitives using the same denominators
+    denom = 1.0 - jnp.abs(L)**2
+    a_new = (a_val - L * jnp.conj(b_val)) / denom
+    b_new = (b_val - L * jnp.conj(a_val)) / denom
+    
+    return a_new, b_new
+
+def haddamarmul_proj_optimized(a, b, y):
+    """
+    Project onto Hadamard product graph using reduced analytical derivation.
+    Input: a, b, y (Complex JAX Arrays of same shape)
+    """
+    if a.shape != b.shape or a.shape != y.shape:
+        raise ValueError("All inputs must have the same shape")
+
+    return jax.vmap(_solve_reduced_system)(a, b, y)
+
 
 def _haddamarmul_F(z, const):
     w_r, w_i, x_r, x_i, y_r, y_i = const
@@ -155,7 +246,7 @@ def real_proj(orig, x, /):
     return (x_real + 0j,)
 
 
-haddamarmul = make_computation("haddamarmul", haddamarmul_op, haddamarmul_proj)
+haddamarmul = make_computation("haddamarmul", haddamarmul_op, haddamarmul_proj_optimized)
 
 real = make_computation(
     "real",
