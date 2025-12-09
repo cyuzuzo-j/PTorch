@@ -651,6 +651,20 @@ def conv_patch(a: Computation, kernel_shape, strides, padding) -> Computation:
 
     return fn(a)
 
+
+def flip(a: Computation, axis) -> Computation:
+    """Flip array elements along specified axes.
+
+    Args:
+        a: input array.
+        axis: axis or axes along which to flip.
+
+    Returns:
+        output array with flipped elements.
+    """
+    return no_ops.flip(a, axis=axis)
+
+
 def roll(a: Computation, shift, axis=None) -> Computation:
     """Roll array elements along a given axis.
 

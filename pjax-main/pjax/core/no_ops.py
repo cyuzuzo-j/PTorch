@@ -231,6 +231,24 @@ inv_fourier = make_shape_transform("ifft", transform=ifft2d, inverse=inverse_iff
 conv_patch = make_shape_transform("conv_patch", transform=conv_patch_transform, inverse=conv_patch_inverse)
 
 
+def flip_transform(a, /, *, axis):
+    """Flip array elements along specified axes."""
+    if isinstance(axis, int):
+        axis = (axis,)
+    result = a
+    for ax in axis:
+        result = jnp.flip(result, axis=ax)
+    return result
+
+
+def flip_inverse(a, z, /, *, axis):
+    """Inverse of flip transform: flip again (flip is self-inverse)."""
+    return flip_transform(z, axis=axis)
+
+
+flip = make_shape_transform("flip", transform=flip_transform, inverse=flip_inverse)
+
+
 def roll_transform(a, /, *, shift, axis):
     """Roll array elements along a given axis."""
     return jnp.roll(a, shift, axis=axis)

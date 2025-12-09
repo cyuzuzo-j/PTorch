@@ -278,13 +278,16 @@ class Conv2D(Module):
 
 class FftConv2D(Module):
     """
-    Implements the 2D convolutional neural network by first computing the fft and then performing an elementwise product, ..
+    Implements 2D convolution via FFT with linear (not circular) convolution.
+    
+    Uses zero-padding to convert circular FFT convolution into linear convolution
+    equivalent to standard conv with SAME padding.
     """
 
     def __init__(
             self,
-            in_features_x:int,
-            in_features_y:int,
+            in_features_x: int,
+            in_features_y: int,
             in_channels: int,
             out_channels: int,
             kernel_shape: int,
@@ -294,59 +297,74 @@ class FftConv2D(Module):
         self.in_features_y = in_features_y
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.pad_row = in_features_x - kernel_shape
-        self.pad_col = in_features_y - kernel_shape
-        self.kernel = Weight((kernel_shape*kernel_shape *in_channels, out_channels))
+        self.kernel_size = kernel_shape
         
+        # For linear convolution via FFT: padded_size = input_size + kernel_size - 1
+        self.padded_h = in_features_x + kernel_shape - 1
+        self.padded_w = in_features_y + kernel_shape - 1
+        
+        # Kernel shape: (kernel_size, kernel_size, in_channels)
+        self.kernel = Weight((kernel_shape, kernel_shape, in_channels))
 
     def __call__(self, input):
         """Apply convolution to input tensor.
 
         Args:
-            input: input tensor of shape ``(..., H, W, C)``.
+            input: input tensor of shape ``(B, H, W, C)``.
 
         Returns:
-            output tensor after convolution and projection.
+            output tensor after convolution, shape ``(B, H, W, C)``.
         """
-        ### add zero padding to the weight
-        kernel = pjax.reshape(self.kernel, (3,3,1))
-        padded_kernel = pjax.zero_pad_assymetric(kernel, ((0,self.pad_row), (0,self.pad_col), (0,0)))
+        H, W = self.in_features_x, self.in_features_y
+        k = self.kernel_size
         
-        # Shift the kernel so that the center is at (0, 0)
-        # The kernel is currently at [0..k-1, 0..k-1].
-        # We want to shift it by -(k//2) along both axes.
-        k = self.kernel.shape[0] # Assuming square kernel for now based on init
-        shift = -(k // 2)
-        padded_kernel = pjax.roll(padded_kernel, shift=(shift, shift), axis=(0, 1))
+        # Step 1: Pad input at the END by (k-1) to get full convolution size
+        input_padded = pjax.zero_pad(input, (
+            (0, 0),      # batch dim
+            (0, k - 1),  # height: pad after
+            (0, k - 1),  # width: pad after
+            (0, 0)       # channel dim
+        ))
+        
+        # Step 2: Flip kernel for true convolution (not correlation)
+        # Flip along spatial dimensions (axis 0 and 1)
+        kernel_flipped = pjax.flip(self.kernel, axis=(0, 1))
+        
+        # Step 3: Pad kernel to match padded input size
+        kernel_padded = pjax.zero_pad(kernel_flipped, (
+            (0, H - 1),  # pad to reach padded_h
+            (0, W - 1),  # pad to reach padded_w
+            (0, 0)       # channel dim
+        ))
 
-        # Transpose input to (..., C, H, W) so that fft2d operates on (H, W)
-        # input is (..., H, W, C). We want to move C to before H.
-        ndim = len(input.shape)
-        # Permutation: move last dim (C) to 3rd from last (before H)
-        # Indices: 0, ..., ndim-4, ndim-1, ndim-3, ndim-2
+        # Step 4: Transpose to (..., C, H, W) for FFT on last two dims
+        ndim = len(input_padded.shape)
         perm = list(range(ndim - 3)) + [ndim - 1, ndim - 3, ndim - 2]
-        input_transposed = pjax.transpose(input, perm)
+        input_transposed = pjax.transpose(input_padded, perm)
+        
+        # Kernel: (padded_H, padded_W, C) -> (C, padded_H, padded_W)
+        kernel_transposed = pjax.transpose(kernel_padded, (2, 0, 1))
 
-        # compute fft of input and kernel
+        # Step 5: FFT of input and kernel
         input_fft = pjax.fft2d(input_transposed)
+        kernel_fft = pjax.fft2d(kernel_transposed)
         
-        kernel_fft = pjax.fft2d(padded_kernel)
+        # Step 6: Element-wise multiplication in frequency domain
+        output_fft = pjax.haddamarmul(input_fft, kernel_fft)
         
-        # perform elementwise multiplication in the frequency domain
-        # input_fft: (..., C, H, W), kernel_fft: (H, W)
-        # haddamarmul broadcasts correctly
-        output_fft = pjax.haddamarmul(input_fft , kernel_fft)
-        # compute inverse fft to obtain the convolved output
+        # Step 7: Inverse FFT
         out_transposed = pjax.ifft2d(output_fft)
         
-        # convert back to real values if necessary
+        # Step 8: Convert to real
         out_transposed = pjax.ops.real(out_transposed)
         
-        # Transpose back to (..., H, W, C)
-        # Current: ..., C, H, W (indices: 0, ..., ndim-3, ndim-2, ndim-1)
-        # Target: ..., H, W, C
-        # We want to move ndim-3 (C) to last position.
-        # Indices: 0, ..., ndim-4, ndim-2, ndim-1, ndim-3
+        # Step 9: Transpose back: (..., C, H, W) -> (..., H, W, C)
         inv_perm = list(range(ndim - 3)) + [ndim - 2, ndim - 1, ndim - 3]
-        out = pjax.transpose(out_transposed, inv_perm)
+        out_full = pjax.transpose(out_transposed, inv_perm)
+        
+        # Step 10: Crop to get SAME padding output
+        # For SAME: extract from (k//2, k//2) to (k//2 + H, k//2 + W)
+        start = k // 2
+        out = pjax.index(out_full, (slice(None), slice(start, start + H), slice(start, start + W), slice(None)))
+        
         return out
