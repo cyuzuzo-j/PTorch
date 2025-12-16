@@ -1,4 +1,5 @@
 # benchmark.py
+import jax
 import jax.numpy as np
 import jax.random as random
 import pandas as pd
@@ -193,6 +194,26 @@ def run_experiment(config, problem_params, num_iterations=1000):
             print(f"Iter {iteration:4d}, Avg Error: {mean_iter_error:.6f}")
 
     end_time = time.time()
+    
+    # --- Memory Profiling ---
+    try:
+        # Save device memory profile
+        sanitized_name = config['name'].replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')
+        profile_path = f"memory_{sanitized_name}.prof"
+        jax.profiler.save_device_memory_profile(profile_path)
+        print(f"Saved device memory profile to {profile_path}")
+        
+        # Print device memory stats if available
+        devices = jax.devices()
+        if devices:
+            dev = devices[0]
+            if hasattr(dev, "memory_stats"):
+                stats = dev.memory_stats()
+                if stats:
+                    print(f"Device Memory Stats: {stats}")
+    except Exception as e:
+        print(f"Memory profiling note: {e}")
+
     current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     total_time = end_time - start_time
