@@ -1,0 +1,1050 @@
+% 4:3 (default) aspect ratio
+%\documentclass[t, xcolor=table]{beamer}
+% 16:9 aspect ratio
+\documentclass[t, xcolor=table, aspectratio=169]{beamer}
+
+% Basic packages which are recommended for the KUL beamer theme
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[UKenglish]{datetime}
+
+%-------------------------%
+% Add extra packages here %
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, shapes, calc, matrix, positioning, fit}
+%-------------------------%
+
+% Apply the KUL beamer theme
+\usetheme{KUL}
+
+% Set date and time format
+\newdateformat{SetNewDate}{%
+    \twodigit{\THEDAY}/\twodigit{\THEMONTH}/\THEYEAR
+}
+\SetNewDate
+
+% Setup the title page
+\title{Learning with Projections}
+\subtitle{Gradient-free optimization for Neural Networks}
+\institute{Promotor: Panos Patrinos, Daily Supervisor: Jan Quan}
+\author{Jeff Jambé}
+%---------------%
+% Main document %
+%---------------%
+% Redefine footer to remove institute info (fix errors and clutter)
+\makeatletter
+\expandafter\let\csname beamer@@tmpop@footline@KUL\endcsname\relax
+\makeatother
+\defbeamertemplate*{footline}{KUL}
+{%
+    \leavevmode%
+    \hbox{%
+        \begin{beamercolorbox}[wd=.5\paperwidth, ht=0.055\paperheight,
+                               dp=0.04\paperheight, left]
+                               {KUL-BOX-FOOTER-STDPAGE}
+            \hspace{.047\paperwidth}
+            \insertframenumber
+        \end{beamercolorbox}%
+        \begin{beamercolorbox}[wd=.5\paperwidth, ht=0.055\paperheight,
+                               dp=0.04\paperheight, right]
+                               {KUL-BOX-FOOTER-STDPAGE}
+            \begin{tabular}{c}
+                \includegraphics[width=.083\paperwidth]{\KULlogopath}
+            \end{tabular}
+        \end{beamercolorbox}
+    }\vskip0pt%
+}
+
+\begin{document}
+    % Title page
+    % ----------
+    \begin{frame}[plain, KUL-title]
+        \titlepage
+    \end{frame}
+
+    % Outline
+    % -------
+    % Outline
+    % -------
+    \begin{frame}[KUL-standard-notoc]
+        \frametitle{Outline}
+        \vspace{-1em}
+        \tableofcontentsTOP
+    \end{frame}
+
+    % Introduction Section
+    \begin{frame}[KUL-header]
+        \frametitle{Introduction}
+    \end{frame}
+
+    % Mathematical Formulation Slide
+    % Mathematical Formulation Slide
+    \begin{frame}[KUL-standard]
+        \frametitle{Paradigm Shift}
+        \framesubtitle{Optimization as Feasibility}
+        \begin{columns}[onlytextwidth,T]
+            % Gradient Based
+            \begin{column}{0.48\textwidth}
+                \textbf{\large Gradient Based}\\
+                \vspace{0.5em}
+                Minimize a loss function: % moet technisch gezien cost zijn denk ik 
+                \begin{equation*}
+                    \min_{\theta} \mathcal{L}(f(x;\theta), y)
+                \end{equation*}
+                
+                Update step (Gradient Descent):
+                \begin{equation*}
+                    \theta \leftarrow \theta - \eta \nabla_\theta \mathcal{L}
+                \end{equation*}
+                \vfill
+            \end{column}
+            
+            \hspace{0.5em}
+
+            % Projection Based
+            \begin{column}{0.48\textwidth}
+                \vspace{-0.1em}
+                \textbf{\large Feasibility Based}\\
+                \vspace{0.5em}
+                Find a point in the intersection of constraints:
+                \begin{equation*}
+                    x \in \bigcap_{i=1}^m C_i
+                \end{equation*}
+                
+                Update step (e.g. Cyclic Projections):
+                \begin{equation*}
+                    x \leftarrow P_{C_1}P_{C_2} \ldots P_{C_m}(x)
+                \end{equation*}
+                \vfill
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    % Motivation Slide
+    % Motivation Slide
+    \begin{frame}[KUL-standard]
+        \frametitle{Motivation}
+        \vspace{1em}
+        \begin{itemize}
+            \setlength\itemsep{1.5em}
+            
+            \item[\color{KUL-BLUE}\large $\blacktriangleright$] 
+            \textbf{Gradient free} \\
+            \small Removes need for differentiable activation functions, enabling novel architectures (e.g. gapped step activation, ...).
+            
+            \item[\color{KUL-BLUE}\large $\blacktriangleright$] 
+            \textbf{High degrees of parallelization} \\
+            \small Projections can often be computed in parallel, enabling efficient large-scale training.
+        \end{itemize}
+    \end{frame}
+
+    % Running Example Section
+    \begin{frame}[KUL-header]
+        \frametitle{Running Example: Binary XOR Classification}
+    \end{frame}
+
+    % Slide 1: Problem Definition
+    \begin{frame}[KUL-standard]
+        \frametitle{Problem Definition}
+        \framesubtitle{Why XOR?}
+        \begin{columns}[onlytextwidth,T]
+            \begin{column}{0.48\textwidth}
+                \textbf{\large The XOR Problem}
+                \vspace{1em}
+                \begin{itemize}
+                    \item \textbf{Input:} $x \in \{0,1\}^2$
+                    \item \textbf{Output:} $y \in \{0,1\}$ (1 if $x_1 \neq x_2$)
+                    \item \textbf{Challenge:} Not linearly separable.
+                    \item \textbf{Requirement:} Needs at least one hidden layer. %find reference for this
+                \end{itemize}
+            \end{column}
+            
+            \begin{column}{0.48\textwidth}
+                \centering
+                \begin{tikzpicture}[scale=1.5]
+                    \draw[->] (-0.5,0) -- (1.5,0) node[right] {$x_1$};
+                    \draw[->] (0,-0.5) -- (0,1.5) node[above] {$x_2$};
+                    \fill[red] (0,0) circle (2pt) node[below left] {0};
+                    \fill[green] (1,0) circle (2pt) node[below right] {1};
+                    \fill[green] (0,1) circle (2pt) node[above left] {1};
+                    \fill[red] (1,1) circle (2pt) node[above right] {0};
+                    \draw[dashed, gray] (-0.5, 1.2) -- (1.2, -0.5); 
+                \end{tikzpicture}
+                \vspace{0.5em}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    % Slide 2: Why XOR is Ideal
+    \begin{frame}[KUL-standard]
+        \frametitle{Why XOR for Projection-Based Learning?}
+        \vspace{1em}
+        \begin{itemize}
+            \item \textbf{Step Activations:} 
+            \small Conviently modeled with \textbf{Step functions} (0 or 1), which have zero gradients almost everywhere.
+            \vspace{0.5em}
+            
+            \item \textbf{Didactic Value:} 
+            \small Fully interpretable weights and projections.
+        \end{itemize}
+        
+        \vspace{1.5em}
+        \centering
+        \textit{"We will now use this XOR classifier as a running example to explain how projection-based learning works."}
+    \end{frame}
+
+    % Methodology Section
+    \begin{frame}[KUL-header]
+        \frametitle{Methodology}
+    \end{frame}
+
+    % XOR Constraints
+    \begin{frame}[KUL-standard]
+        \frametitle{Constraints for the XOR Classifier}
+        \framesubtitle{Formulating the Problem}
+        \vspace{-1em}
+        % Aggressively compact content
+        \footnotesize
+        \setlength{\abovedisplayskip}{2pt}
+        \setlength{\belowdisplayskip}{2pt}
+        \setlength{\abovedisplayshortskip}{0pt}
+        \setlength{\belowdisplayshortskip}{0pt}
+        
+        \begin{columns}[onlytextwidth,T]
+            % Wide column for formulas
+            \begin{column}{0.95\textwidth}
+                \begin{enumerate}
+                    \setlength\itemsep{0.2em} % Very tight item separation
+            
+                    \item \textbf{Data Constraints:} 
+                    \begin{equation*}
+                         \begin{cases}
+                            \forall k, c[k]= 1: y[k] \ge \delta \\[-2pt]
+                            \forall k, c[k]= 0: y[k] \le 0
+                        \end{cases}
+                        \quad \forall k: x[k] = d[k]
+                    \end{equation*}
+        
+                    \item \textbf{Model Constraints:}
+                    \begin{equation*}
+                        \forall k: \quad z[k] = W_{in}[k]
+                        \begin{bmatrix}
+                            x[k]\\
+                            1
+                        \end{bmatrix} \quad
+                        h[k] = \begin{cases}
+                            1 & \text{if } z[k] \ge 0 \\[-2pt]
+                            0 & \text{otherwise}
+                        \end{cases} \quad
+                        y[k] = W_{out}[k]\begin{bmatrix}
+                            h[k]\\
+                            1
+                        \end{bmatrix}
+                    \end{equation*}
+        
+                    \item \textbf{Consensus Constraints:}
+                    \begin{equation*}
+                         \forall k: W_{in}[k] = W_{in}, \quad W_{out}[k] = W_{out}
+                    \end{equation*}
+
+                \end{enumerate}
+            \end{column}
+            
+            % Narrow column for vertical diagram
+            \begin{column}{0.045\textwidth}
+                \centering
+                \vspace{0.5em}
+                \begin{tikzpicture}[
+                    >=Stealth, 
+                    auto, 
+                    node distance=0.6cm, % Tighter spacing
+                    scale=0.7, transform shape, % Smaller scale
+                    var/.style={circle, draw=KUL-BLUE, thick, fill=white, minimum size=0.6cm, inner sep=0pt, font=\small},
+                    op/.style={rectangle, draw=black, thick, rounded corners, fill=gray!10, minimum height=0.4cm, minimum width=0.8cm, align=center, font=\scriptsize},
+                    arr/.style={->, thick, gray!80!black}
+                ]
+                    % Vertical Bottom-Up Layout
+                    \node[var] (x) {$x$};
+                    \node[op, above=of x] (win) {$W_{in}$};
+                    \node[var, above=of win] (z) {$z$};
+                    \node[op, above=of z] (act) {$\sigma$};
+                    \node[var, above=of act] (h) {$h$};
+                    \node[op, above=of h] (wout) {$W_{out}$};
+                    \node[var, above=of wout] (y) {$y$};
+                    
+                    % Edges
+                    \draw[arr] (x) -- (win);
+                    \draw[arr] (win) -- (z);
+                    \draw[arr] (z) -- (act);
+                    \draw[arr] (act) -- (h);
+                    \draw[arr] (h) -- (wout);
+                    \draw[arr] (wout) -- (y);
+                    
+                \end{tikzpicture}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    % Standard Algorithms Slide
+    \begin{frame}[KUL-standard]
+        \frametitle{Solving Feasibility Problems}
+        Find $x \in \bigcap C_i$.\\
+        Projection on to set: $P_C(x) = \arg\min_{y \in C} \|x - y\|$\\
+        
+        \vspace{1em}
+        \textbf{Common Algorithms:}
+        \begin{columns}[onlytextwidth,T]
+            \begin{column}{0.3\textwidth}
+                \textbf{\color{KUL-BLUE} Alternating Projections (AP)}
+                \begin{equation*}
+                    x_{k+1} = P_{C_2}(P_{C_1}(x_k))
+                \end{equation*}
+            \end{column}
+            \begin{column}{0.3\textwidth}
+                \textbf{\color{KUL-BLUE} Douglas-Rachford (DR)}
+                \begin{align*}
+                     R_C &= 2P_C - I \quad \\
+                    x_{k+1} &= \frac{1}{2}(I + R_{C_2}R_{C_1})x_k
+                \end{align*}
+            \end{column}
+            \begin{column}{0.3\textwidth}
+                \textbf{\color{KUL-BLUE} Cyclic, Dykstra , ....}
+                \begin{align*}
+                    x_{k+1} =(x_k)
+                \end{align*}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    % Geometric Intuition Slide
+    \begin{frame}[KUL-standard]
+        \frametitle{Geometric Intuition}
+        \vspace{-1em}
+        \includegraphics[width=0.9\textwidth]{{../thesis/images/douglas rachford}.png}
+    \end{frame}
+
+    % Bilinear Constraint Section
+    % Bilinear Constraint Section
+    % Slide 1: Problem Definition
+    \begin{frame}[KUL-standard]
+        \frametitle{Projection for the Bilinear constraint}
+        \framesubtitle{1. Problem Statement}
+        \textbf{Constraint:}
+        \begin{equation*}
+            C = \{ (y, x, w) \mid y = w^\top x \}
+        \end{equation*}
+        
+        \textbf{Projection Objective:}
+        Find the closest point $(y, x, w)$ to the prior estimate $(y_0, x_0, w_0)$:
+        \begin{equation*}
+             \min_{y, x, w} \quad \|x - x_0\|^2 + \|w - w_0\|^2 + \gamma^2(y - y_0)^2 
+        \end{equation*}
+        \vspace{0.5em}
+    \end{frame}
+
+    % Slide 2: Lagrangian Analysis
+    \begin{frame}[KUL-standard]
+        \frametitle{Projection for the Bilinear constraint}
+        \framesubtitle{2. Lagrangian Formulation}
+        The Lagrangian with multiplier $\lambda$ is:
+        \begin{equation*}
+            L = \|x - x_0\|^2 + \|w - w_0\|^2 + \gamma^2(y - y_0)^2 + \lambda( y - w^\top x)
+        \end{equation*}
+        
+        Setting $\nabla L = 0$ yields the stationarity conditions (with $u = \lambda/2$):
+        \begin{columns}[onlytextwidth,T]
+            \begin{column}{0.48\textwidth}
+                \begin{align*}
+                    x &= x_0 + u w \\
+                    w &= w_0 + u x
+                \end{align*}
+            \end{column}
+            \begin{column}{0.48\textwidth}
+                \begin{align*}
+                    y &= y_0 - \frac{ u}{\gamma^2}
+                \end{align*}
+            \end{column}
+        \end{columns}
+        \vspace{1em}
+        Solving the coupled system for $x$ and $w$:
+        \begin{equation*}
+             x = \frac{x_0 + u w_0}{1 - u^2}, \quad w = \frac{w_0 + u x_0}{1 - u^2}
+        \end{equation*}
+    \end{frame}
+
+    % Slide 3: Solution
+    \begin{frame}[KUL-standard]
+        \frametitle{Projection for the Bilinear constraint}
+        \framesubtitle{3. Analytic Solution}
+        Substituting $x(u), w(u), y(u)$ back into the constraint $ y = w^\top x$:
+        \begin{equation*}
+         \left(y_0 - \frac{u}{\gamma^2}\right) = \frac{(w_0 + u x_0)^\top (x_0 + u w_0)}{(1-u^2)^2}
+        \end{equation*}
+        
+        This simplifies to a scalar root-finding problem $h(u) = 0$:
+        \begin{equation*}
+            h(u) = \frac{p(1+u^2) + q u}{(1-u^2)^2} -y_0 + \frac{u}{\gamma^2} = 0
+        \end{equation*}
+        where $p = w_0^\top x_0$ and $q = \|x_0\|^2 + \|w_0\|^2$.
+        \vspace{1em}
+        
+        \textbf{Solution:} Solve for $u$ (e.g., via Newton's method), then reconstruct $x, w, y$.
+    \end{frame}
+
+
+    % Experiments Section
+    \begin{frame}[KUL-header]
+        \frametitle{Experiments}
+        \framesubtitle{Standard Projections (Pre-PJAX)}
+    \end{frame}
+
+    \begin{frame}[KUL-standard]
+        \frametitle{Experimental Setup}
+        \textbf{Goal:} Evaluate the feasibility and efficiency of projection-based learning compared to standard baselines.
+        \vspace{1em}
+        \begin{itemize}
+            \item \textbf{Datasets:}
+            \begin{itemize}
+                \item LED for NMF.
+                \item Synthetic Binary Vectors for classification.
+            \end{itemize}
+            \item \textbf{Metrics:} Convergence Rate (Error vs Iterations), Execution Time
+            \item \textbf{Hardware:} All experiments run on Intel i5-1135G7 (CPU only).
+        \end{itemize}
+    \end{frame}
+
+    % Experiment 1: Binary XOR Classification
+    \begin{frame}[KUL-standard]
+        \frametitle{Experiment 1: Binary XOR Classification}
+        \vspace*{-1.5em}
+        \begin{columns}[onlytextwidth,T]
+             % Left Column
+            \begin{column}{0.55\textwidth}
+                \begin{itemize}
+                    \item \textbf{Setup:} Revisit the \textbf{Running Example}.
+                    \item \textbf{Task:} Learn XOR mapping $(x \in \{0,1\}^8 \to y \in \{0,1\})$.
+                    \item \textbf{Architecture:} 
+                    \begin{itemize}
+                        \item 1 Hidden Layer (2 units).
+                        \item \textbf{Step Activations} (Non-differentiable).
+                    \end{itemize}
+                \end{itemize}
+                \vspace{1em}
+            \end{column}
+            
+            % Right Column: Stats
+            \begin{column}{0.42\textwidth}
+                \textbf{PERFORMANCE}
+                \begin{KULtable}{\textwidth}{@{}L l l@{}}
+                     \parbox{1.2cm}{\textbf{AP+}\\ \textbf{STEP}} & \rule{2.0cm}{0.8em} & 2.91s \\[0.5em]
+                     \parbox{1.2cm}{\textbf{AP+}\\ \textbf{RELU}} & \rule{2.0cm}{0.8em} & 2.90s \\[0.5em]
+                     \parbox{1.2cm}{\textbf{DR+}\\ \textbf{RELU}} & \rule{3.0cm}{0.8em} & 4.45s \\[0.5em]
+                \end{KULtable}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    % Experiment 2: NMF
+    \begin{frame}[KUL-standard]
+        \frametitle{Experiment 2: Non-negative Matrix Factorization}
+        \vspace*{-1.5em}
+        \begin{columns}[onlytextwidth,T]
+            \begin{column}{0.6\textwidth}
+                \begin{itemize}
+                    \item \textbf{Task:} Factorize input $V \approx WH$ with $W, H \geq 0$.
+                    \item \textbf{Benchmark:} Comparison with Douglas-Rachford and scikit-learn (CD).
+                \end{itemize}
+                
+                \vspace{1em}
+                \begin{KULtable}{\textwidth}{|L|C|C|}
+                    \hline
+                    \KULheadrow{Algorithm, Error (MSE), Time} \\ \hline
+                    Douglas-Rachford (LWL) & -  & 2s \\ \hline
+                    Douglas-Rachford & 3.41e-02 & 8s \\ \hline
+                    scikit-learn & 1.98e-02 & $<$1s \\ \hline
+                \end{KULtable}
+                \vspace{0.5em}
+                \small *LWL: Lin-projected method (referenced)
+            \end{column}
+            \hspace{1em}
+            \begin{column}{0.38\textwidth}
+                \vspace*{-2em}
+                \begin{block}{Configuration}
+                    \smallskip
+                    \begin{itemize}
+                        \item Matrix Size: $6 \times N$
+                        \item Rank: 5
+                        \item Stopping: $\epsilon < 10^{-4}$
+                    \end{itemize}
+                \end{block}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    % Other research avenues
+    \newcommand{\statusbadge}[2]{%
+        \tikz[baseline=(toc.base)]\node[anchor=base,draw=none,fill=#1!20,text=#1!80!black,rounded corners=5pt,inner sep=2pt,font=\tiny\bfseries] (toc) {#2};%
+    }
+    
+    \begin{frame}[KUL-standard]
+        \frametitle{Other Research Avenues (Status)}
+        \vspace*{-1.5em}
+        
+        \begin{KULtable}{\textwidth}{|L|c|}
+            \hline
+            \KULheadrow{Topic, Outcome} \\ \hline
+            
+            \textbf{Integer Weights (SAT Solver)} \newline
+            \scriptsize Functional but slow. High hyperparameter sensitivity.
+            & \statusbadge{green}{DONE} \\ \hline
+            
+            \textbf{Autoencoder} \newline
+            \scriptsize Unstable training across multiple batches.
+            & \statusbadge{red}{DEBUGGING} \\ \hline
+            
+            \textbf{Alternative Bilinear Constraint} \newline
+            \scriptsize Converged to suboptimal local minima compared to standard projection.
+            & \statusbadge{blue}{VALIDATING} \\ \hline
+            
+            \textbf{Regularization (Rank/Ortho)} \newline
+            \scriptsize Did not improve convergence consistently.
+            & \statusbadge{blue}{VALIDATING} \\ \hline
+
+            \textbf{Testing Different Optimizers} \newline
+            \scriptsize Variants of DR/Dykstra being evaluated.
+            & \statusbadge{blue}{VALIDATING} \\ \hline
+             
+             \textbf{Effect of Batch Size} \newline
+             \scriptsize Multi-batch training degrades convergence; under investigation.
+             & \statusbadge{orange}{PLANNED} \\ \hline
+
+             \textbf{Gapped step activation} \newline
+             \scriptsize Testing gapped step vs regular step.
+             & \statusbadge{cyan}{RESEARCHING} \\ \hline
+        \end{KULtable}
+    \end{frame}
+
+    % PJAX Section
+    \begin{frame}[KUL-header]
+        \frametitle{PJAX Framework}
+        \framesubtitle{Differentiable Projections in JAX}
+    \end{frame}
+
+    % PJAX Framework
+    \begin{frame}[KUL-standard]
+        \frametitle{Overview}
+        \vspace*{-1.5em}
+        \begin{columns}[onlytextwidth,T]
+            \begin{column}{0.6\textwidth}
+                \textbf{\large A Projection-based framework for gradient-free learning [2]}
+                \par\vspace{0.5em}
+                PJAX enables the definition of projection-based neural networks using a graph-based API similar to standard deep learning libraries.
+                
+                \vspace{1em}
+                \centering
+                \includegraphics[width=\textwidth]{{../thesis/images/computational graph}.png}
+            \end{column}
+            
+            \begin{column}{0.38\textwidth}
+                \textbf{FEATURES}
+                \par\vspace{0.5em}
+                \begin{itemize}
+                    \item \textbf{Symbolic Graph Definition} \\
+                    \scriptsize Automatic handling of layer connections and projection operators.
+                    \vspace{0.5em}
+                    
+                    \item \textbf{JAX-based Backend} \\
+                    \scriptsize Compiles to XLA for efficient GPU execution.
+                    \vspace{0.5em}
+                    
+                    \item \textbf{Layer Library} \\
+                    \scriptsize Implementations of Dense, CNN, RNN layers.
+                \end{itemize}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    % 1. Implementation of the pjax graph
+    \begin{frame}[KUL-standard]
+        \frametitle{Graph Architecture}
+        \vspace*{-1.5em}
+        \begin{columns}[onlytextwidth,T]
+            \begin{column}{0.3\textwidth}
+                \vspace{2cm}
+                \textbf{\large MODULE} \\
+                \small High-level blocks (CNN, MLP).
+            \end{column}
+            \begin{column}{0.65\textwidth}
+                \begin{tikzpicture}[node distance=0.5cm, auto,
+                    block/.style={rectangle, draw=KUL-BLUE, thick, fill=white, text width=4cm, align=left, rounded corners, minimum height=1.5cm},
+                    line/.style={draw, -Latex, thick}]
+                    
+                    \node (comp) at (0, 2) [text width=3cm, align=left] {\textbf{Computation} \\ \scriptsize e.g. ReLU, Linear};
+                    \node (ops) at (5, 2) [block] {\textbf{Ops \& Projections} \\ \scriptsize Core operations + Projectors};
+                    \draw[line] (comp) -- (ops);
+                    
+                    \draw[thick, KUL-BLACK] (-1, 0.5) -- (8, 0.5); 
+                    
+                    \node (shape) at (0, -1) [text width=3cm, align=left] {\textbf{Transforms} \\ \scriptsize e.g. Reshape};
+                    \node (nops) at (5, -1) [block] {\textbf{No-ops \& Inverse} \\ \scriptsize Static routing/reshaping};
+                    \draw[line] (shape) -- (nops);
+                    
+                    \draw[dashed, orange, thick] (2.8, 3.2) rectangle (7.2, -2.2);
+                    \node[text=orange] at (5, 3.4) {\textbf{\scriptsize THE GRAPH}};
+                \end{tikzpicture}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    % 2. Issues with CNN Layer in pjax
+    \begin{frame}[KUL-standard]
+        \frametitle{CNN Implementation Challenges}
+        \framesubtitle{Naive Implementation}
+        \vspace*{-1em}
+        \begin{columns}[onlytextwidth,T]
+            \begin{column}{0.48\textwidth}
+                \begin{itemize}
+                    \item \textbf{Memory Bottleneck} \\
+                    \scriptsize Explicit construction of the huge constraint matrix for convolution exceeds GPU memory (max 16 hidden units @ 4 layers on 96GB).
+                    \vspace{1em}
+                    \item \textbf{Computational Cost} \\
+                    \scriptsize Projection involves large matrix inversions: $O(N^3)$ complexity.
+                \end{itemize}
+            \end{column}
+            \begin{column}{0.48\textwidth}
+                \centering
+                \includegraphics[width=\textwidth]{example1.png}
+                \tiny \textit{CIFAR-10 - CNN (Limited Scalability)}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    % 3. Removing the Memory Bottleneck
+    \begin{frame}[KUL-standard]
+        \frametitle{FFT-Based Convolution}
+        \vspace*{-1em}
+        \textbf{Solution:} Exploit the Convolution Theorem to diagonalize the operator.
+        \par\vspace{1em}
+        \centering
+        \begin{tikzpicture}[auto,
+            stepnode/.style={circle, text=white, font=\bfseries\large, inner sep=0pt, minimum size=0.8cm},
+            desc/.style={text width=3.5cm, align=left, font=\scriptsize, anchor=north},
+            arrowline/.style={draw=gray!50, line width=2pt, ->, rounded corners}]
+            
+            \node[stepnode, fill=pink] (n1) at (0,0) {1};
+            \node[above=0.2cm] at (n1.north) {\textbf{FFT}};
+            \node[desc] at (0,-0.8) {Transform input and kernel to frequency domain. ($O(N \log N)$)};
+            
+            \node[stepnode, fill=orange] (n2) at (4.5,0) {2};
+            \node[above=0.2cm] at (n2.north) {\textbf{Hadamard}};
+            \node[desc] at (4.5,-0.8) {Element-wise product constraints are separable and cheap ($O(N)$).};
+            
+            \node[stepnode, fill=cyan] (n3) at (9,0) {3};
+            \node[above=0.2cm] at (n3.north) {\textbf{IFFT}};
+            \node[desc] at (9,-0.8) {Transform back to special domain.};
+            
+            \draw[arrowline] (-1, 1.5) -- (0, 1.5) -- (n1);
+            \draw[arrowline] (n3) -- (9, -2.5) -- (8, -2.5);
+            
+        \end{tikzpicture}
+    \end{frame}
+    
+    % 4. Evaluation of the WIP FFT-Based CNN
+    \begin{frame}[KUL-standard]
+        \frametitle{Current Status: FFT-CNN}
+        \vspace*{-1em}
+        \begin{itemize}
+            \item \textbf{Complexity:} Reduced from $O(N^3)$ to $O(N \log N)$.
+            \item \textbf{Current Limitation:} Scale of complex numbers and padding currently limits parallelism on current JAX version.
+        \end{itemize}
+        
+        \vspace{1em}
+        \begin{block}{Ongoing Work}
+             \begin{itemize}
+                 \item Investigating convergence rates (currently lower than naive CNN).
+                 \item Optimizing complex-to-real shape transforms.
+                 \item Implementing full Stride/Pad support to match Conv2D API.
+             \end{itemize}
+        \end{block}
+    \end{frame}
+
+    % 5. Additional PJAX Experiments
+    \begin{frame}[KUL-standard]
+        \frametitle{Ongoing PJAX Experiments}
+        \vspace*{-1.5em}
+        \begin{KULtable}{\textwidth}{|L|c|}
+            \hline
+            \KULheadrow{Topic, Status} \\ \hline
+            
+            \textbf{Autoencoder (PJAX)} \newline
+            \scriptsize Slow convergence compared to standard implementation.
+            & \statusbadge{red}{DEBUGGING} \\ \hline
+            
+            \textbf{MSE Loss Projection} \newline
+            \scriptsize Projection-based MSE loss layer implemented.
+            & \statusbadge{green}{DONE} \\ \hline
+            
+            \textbf{Graph Propagation} \newline
+            \scriptsize Exploring non-local projection updates through the graph.
+            & \statusbadge{cyan}{RESEARCHING} \\ \hline
+            
+            \textbf{Variational Autoencoder} \newline
+            \scriptsize Reformulating KL divergence as a constraint set.
+            & \statusbadge{cyan}{RESEARCHING} \\ \hline
+        \end{KULtable}
+    \end{frame}
+
+    % 6. Timeline
+    \begin{frame}[KUL-standard]
+        \frametitle{Timeline}
+        \vspace*{-1em}
+        \begin{columns}[onlytextwidth,T]
+            % Column 1: Past/Current
+            \begin{column}{0.48\textwidth}
+                \begin{beamercolorbox}[wd=\textwidth, sep=0.5em, rounded=true, shadow=true]{block body}
+                    \textbf{30 JAN - 14 FEB} \\ \scriptsize Implementation Refinement
+                \end{beamercolorbox}
+                \vspace{0.5em}
+                \begin{beamercolorbox}[wd=\textwidth, sep=0.5em, rounded=true, shadow=true]{block body}
+                    \textbf{15 FEB - 19 MAR} \\ \scriptsize Writing Thesis Text
+                \end{beamercolorbox}
+                \vspace{0.5em}
+                \begin{beamercolorbox}[wd=\textwidth, sep=0.5em, rounded=true, shadow=true]{block body}
+                    \textbf{6 MAR - 21 MAR} \\ \scriptsize First Draft Review
+                \end{beamercolorbox}
+            \end{column}
+            
+            % Column 2: Future
+            \begin{column}{0.48\textwidth}
+                \begin{beamercolorbox}[wd=\textwidth, sep=0.5em, rounded=true, shadow=true]{block body}
+                    \textbf{21 MAR - 28 MAR} \\ \scriptsize Feedback Integration
+                \end{beamercolorbox}
+                \vspace{0.5em}
+                \begin{beamercolorbox}[wd=\textwidth, sep=0.5em, rounded=true, shadow=true]{block body}
+                    \textbf{29 MAR - 4 APR} \\ \scriptsize Final Polish
+                \end{beamercolorbox}
+                \vspace{0.5em}
+                \begin{beamercolorbox}[wd=\textwidth, sep=0.5em, rounded=true, shadow=true]{block body}
+                    \textbf{10 APR - 25 MAY} \\ \scriptsize Exam / Defense Preparation
+                \end{beamercolorbox}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    % 7. References
+    \begin{frame}[KUL-standard]
+        \frametitle{References}
+        \scriptsize
+        \begin{thebibliography}{9}
+            \bibitem{parikh2014}
+            Parikh, N., \& Boyd, S. (2014).
+            \textit{Proximal algorithms}.
+            Foundations and Trends in Optimization, 1(3), 127-239.
+
+            \bibitem{kingma2014}
+            Kingma, D. P., \& Ba, J. (2014).
+            \textit{Adam: A method for stochastic optimization}.
+            arXiv preprint arXiv:1412.6980.
+
+            \bibitem{odonoghue2016}
+            O'Donoghue, B., Chu, E., Parikh, N., \& Boyd, S. (2016).
+            \textit{Conic optimization via operator splitting and homogeneous self-dual embedding}.
+            Journal of Optimization Theory and Applications, 169(3), 1042-1068.
+        \end{thebibliography}
+    \end{frame}
+
+    % 8. Questions
+    \begin{frame}[KUL-standard]
+        \centering
+        \vspace*{2cm}
+        \Huge \textbf{Questions ?}
+        \vspace*{2cm}
+        \begin{tikzpicture}[remember picture, overlay]
+            \fill[KUL-BLUE] (current page.south west) rectangle ($(current page.south east) + (0, 0.2)$);
+        \end{tikzpicture}
+    \end{frame}
+
+    \appendix
+    \section*{Appendix}
+    \begin{frame}[KUL-standard]
+        \centering
+        \Huge \textbf{Appendix: Formatting Demo}
+    \end{frame}
+
+    % Formatting
+    \begin{frame}[KUL-standard-notoc]
+        \frametitle{Formatting}
+        \textbf{Bold text}
+        \par\ \par
+        \textit{Italicised text}
+        \par\ \par
+        \textul{Underlined text}
+        \par\ \par
+        \textst{Striked through text}
+        \par\ \par
+        \textsc{Small caps text}
+        \par\ \par
+        \textcolor{red}{Coloured text}
+    \end{frame}
+
+    % Unordered lists
+    \begin{frame}[KUL-standard-notoc]
+        \frametitle{Unordered list}
+        \begin{itemize}
+            \item First level
+            \begin{itemize}
+                \item Second level
+                \begin{itemize}
+                    \item Third level
+                    \begin{itemize}
+                        \item Fourth level
+                        \begin{itemize}
+                            \item Fifth level
+                        \end{itemize}
+                    \end{itemize}
+                \end{itemize}
+            \end{itemize}
+            \item ...
+        \end{itemize}
+    \end{frame}
+
+    % Ordered lists
+    \begin{frame}[KUL-standard-notoc]
+        \frametitle{Ordered list}
+        \begin{enumerate}
+            \item First level
+            \begin{enumerate}
+                \item Second level
+                \begin{enumerate}
+                    \item Third level
+                    \begin{enumerate}
+                        \item Fourth level
+                        \begin{enumerate}
+                            \item Fifth level
+                        \end{enumerate}
+                    \end{enumerate}
+                \end{enumerate}
+            \end{enumerate}
+            \item ...
+        \end{enumerate}
+    \end{frame}
+
+    % Hyperlinks
+    \begin{frame}[KUL-standard-notoc]
+        \frametitle{Hyperlinks}
+        \begin{itemize}
+            \item A hyperlink to some interesting page at
+                  \href{https://en.wikipedia.org/wiki/LaTeX}{wikipedia}.
+            \vspace{2em} % 2 lines of spacing
+            \item The same, but with the full URL:
+                  \url{https://en.wikipedia.org/wiki/LaTeX}
+            \vspace{2em} % 2 lines of spacing
+            \item And a special mailto command:
+                  \mailto{john.doe@example.com}
+        \end{itemize}
+    \end{frame}
+
+    % Images
+    \begin{frame}[KUL-standard-notoc]
+        \frametitle{Images}
+
+        % c = vertically align center, T = vertically align top,
+        % b = vertically align bottom
+        \begin{columns}[onlytextwidth,c]
+            % First column contains some bullet points
+            \begin{column}{0.5\textwidth}
+                \begin{itemize}
+                    \item Some interesting info about the image...
+                    \vspace{2em}
+                    \item More info about the image...
+                    \vspace{2em}
+                    \item Something seems familiar about the image though...
+                \end{itemize}
+            \end{column}
+            % Second column contains the image
+            \begin{column}{0.5\textwidth}
+                % Note that \textwidth here, is the width of the column, not
+                % of the entire slide (like before with the column)
+                \includegraphics[width=\textwidth]{\KULlogopath}
+            \end{column}
+        \end{columns}
+    \end{frame}
+
+    % Tables
+    % ------
+    \begin{frame}[KUL-standard-notoc]
+        \frametitle{Tables}
+    \end{frame}
+
+    % Basic tables
+    \begin{frame}[KUL-standard-notoc]
+        \frametitle{Basic tables}
+
+        \begin{itemize}
+            \item Using a header row
+        \end{itemize}
+
+        \begin{KULtable}{\textwidth}{|L|C|R|}
+            \hline
+            \KULheadrow{Left aligned, Center aligned, Right aligned}
+            \\ \hline
+            a & b & c
+            \\ \hline
+            d & e & f
+            \\ \hline
+            g & h & i
+            \\ \hline
+        \end{KULtable}
+
+        \begin{itemize}
+            \item Using a header column
+        \end{itemize}
+
+        \begin{KULtable}{\textwidth}{|L|C|C|C|}
+            \hline
+            \KULheadcol{First column} & a & b & c
+            \\ \hline
+            \KULheadcol{Second column} & d & e & f
+            \\ \hline
+            \KULheadcol{Third column} & g & h & i
+        \end{KULtable}
+    \end{frame}
+
+    % Combining columns and rows
+    \begin{frame}[KUL-standard-notoc]
+        \frametitle{Combining columns and rows}
+
+        % Note that, since the rows are coloured, a 'multirow' statement needs
+        % to come at the end of a column using a negative amount of rows.
+        \begin{KULtable}{\textwidth}{|L|C|C|}
+            \hline
+            \KULheadrow{Groups, Results A, Results B}
+            \\ \hline
+
+            & 8 & 10
+            \\ \cline{2-3}
+            \multirow{-2}{*}{\cellcolor{KUL-BLUE-TABLE1}Group 1} &
+                \textbf{\color{red}5} & 7
+            \\ \hline
+
+            & 7 & \textbf{\color{red}3}
+            \\ \cline{2-3}
+            \multirow{-2}{*}{\cellcolor{KUL-BLUE-TABLE2}Group 2} &
+                9 & 6
+            \\ \hline
+
+            & \multicolumn{2}{c|}{7} %Note the small letter (i.e. C->c, L->l, ...)
+            \\ \cline{2-3}
+            \multirow{-2}{*}{\cellcolor{KUL-BLUE-TABLE1}Group 3} &
+                \multicolumn{2}{c|}{\textbf{\color{red}2}}
+            \\ \hline
+            & 5 & 6
+            \\ \cline{2-3}
+            \multirow{-2}{*}{\cellcolor{KUL-BLUE-TABLE2}Group 4} &
+                10 & 9
+            \\ \hline
+        \end{KULtable}
+    \end{frame}
+
+    % Vertically aligned tables
+    \begin{frame}[KUL-standard-notoc]
+        \frametitle{Vertically aligned tables}
+
+        \begin{KULtable}{\textwidth}
+        {|V{0.3\textwidth}|Z{0.3\textwidth}|W{0.3\textwidth}|}
+            \hline
+            \KULheadrow{Column 1, Column 2, Column 3}
+            \\ \hline
+                This is a long row with left alignment
+                &
+                This is a long row with center alignment
+                &
+                This is a long row with right alignment
+            \\ \hline
+                This uses \texttt{V}
+                &
+                This uses \texttt{Z}
+                &
+                This uses \texttt{W}
+            \\ \hline
+                Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
+                incididunt ut labore et dolore magna aliqua.
+                &
+                Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
+                incididunt ut labore et dolore magna aliqua.
+                &
+                Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
+                incididunt ut labore et dolore magna aliqua.
+            \\ \hline
+        \end{KULtable}
+    \end{frame}
+
+    % Other fancy stuff
+    % -----------------
+    \begin{frame}[KUL-standard-notoc]
+        \frametitle{Other fancy stuff}
+    \end{frame}
+
+    % Blocks
+    \begin{frame}[KUL-standard-notoc]
+        \frametitle{Blocks}
+        \begin{block}{Block title}
+            This is the format for a standard block
+        \end{block}
+
+        You can also change the width of blocks using the \texttt{varblock} environment.
+        \begin{varblock}[0.5\textwidth]{Variable width block}
+            Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
+            incididunt ut labore et dolore magna aliqua.
+        \end{varblock}
+    \end{frame}
+
+    % Code blocks
+    \begin{frame}[KUL-standard-notoc,fragile] % fragile is required for minted!!!
+        \frametitle{Code blocks}
+        The \texttt{minted} package is include by default, which allows you to highlight code blocks
+        both inline (\mintinline{latex}{\LaTeX{} math: $a^2 + b^2 = c^2$}) and as a block:
+        \begin{minted}[linenos]{latex}
+\documentclass[12pt, a4paper]{article}
+\begin{document}
+    Hi there!
+\end{document}
+        \end{minted}
+        \vfill
+        \textbf{\color{red}Important}: If you use a \texttt{minted} code block, your slide has to be
+        defined as \texttt{fragile}!
+    \end{frame}
+
+    % Code blocks
+    \begin{frame}[KUL-standard-notoc,fragile]
+        \frametitle{Code blocks}
+
+        \newsavebox\BoxCodeInTable
+        \begin{lrbox}{\BoxCodeInTable}
+        \mintinline{latex}{\mintinline}
+        \end{lrbox}
+
+        \newsavebox\BoxCodeInTableLrBox
+        \begin{lrbox}{\BoxCodeInTableLrBox}
+        \mintinline{latex}{\begin{lrbox} ... \end{lrbox}}
+        \end{lrbox}
+
+        \newsavebox\BoxCodeInTableTwo
+        \begin{lrbox}{\BoxCodeInTableTwo}
+        \mintinline{latex}{\textit{italic text}}
+        \end{lrbox}
+
+        \begin{KULtable}{\textwidth}{|C|C|}
+            \hline
+            \KULheadrow{Code,Description}
+            \\ \hline
+            \usebox{\BoxCodeInTable} \newline
+            \usebox{\BoxCodeInTableTwo} \newline
+            \texttt{...}
+            &
+            You cannot use \usebox{\BoxCodeInTable} in certain environments such as tables. To fix
+            this, wrap them inside a \usebox{\BoxCodeInTableLrBox}
+            \\ \hline
+        \end{KULtable}
+    \end{frame}
+\end{document}

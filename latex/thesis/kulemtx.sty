@@ -1,0 +1,439 @@
+%%
+%% This is file `kulemtx.sty',
+%% generated with the docstrip utility.
+%%
+%% The original source files were:
+%%
+%% kulemtx.dtx  (with options: `style')
+%% 
+%% Copyright (C) 2025 by Luc Van Eycken
+%% 
+%% It may be distributed and/or modified under the conditions of
+%% the LaTeX Project Public License (LPPL), either version 1.3c of
+%% this license or (at your option) any later version.  The latest
+%% version of this license is in the file:
+%% 
+%%    https://www.latex-project.org/lppl.txt
+%% 
+\NeedsTeXFormat{LaTeX2e}[2018/04/01]
+\ProvidesExplPackage{kulemtx}{%
+2025-03-30%
+}{%
+1.0%
+}{Additions to the kulemt document class}
+\msg_new:nnn {kulemtx} {no_kulemt}
+  {
+    The~ package~ 'kulemtx'~ can~ only~ be~ used~ with~
+    the~ document~ class~ 'kulemt' #1.
+  }
+\@ifclassloaded {kulemt}
+  {
+    \@ifclasslater {kulemt} {2024-01-01} {}
+      { \msg_critical:nnn {kulemtx} {no_kulemt} {~ version~ 2} }
+  }
+  { \msg_critical:nnn {kulemtx} {no_kulemt} {} }
+\cs_if_free:NT \str_compare:eNeTF
+  {
+    \cs_new:Npn \str_compare:eNeTF #1#2#3
+      {
+        \if_int_compare:w \tex_strcmp:D {#1} {#3} #2 \c_zero_int
+          \prg_return_true:
+        \else:
+          \prg_return_false:
+        \fi:
+      }
+  }
+\cs_if_free:NT \str_casefold:n
+  {
+    \cs_if_exist:NTF \str_foldcase:n
+      {
+        \cs_set_eq:NN \str_casefold:n \str_foldcase:n
+        \cs_set_eq:NN \str_casefold:V \str_foldcase:V
+      }
+      {
+        \cs_set_eq:NN \str_casefold:n \str_fold_case:n
+        \cs_set_eq:NN \str_casefold:V \str_fold_case:V
+      }
+  }
+\keys_define:nn {kulemtx}
+  {
+    manheadstyles .code:n = { \headstyles {kulemtman} },
+    manheadstyles .value_forbidden:n = true
+  }
+\makeheadstyles {kulemtman}
+  {
+    \tl_set:Nn \partnamefont  { \normalfont \huge \sffamily }
+    \tl_set:Nn \partnumfont   { \normalfont \huge \sffamily }
+    \tl_set:Nn \parttitlefont { \normalfont \Huge \sffamily }
+    \chapterstyle {kulemtman}
+    \setsecheadstyle       { \Large \sffamily \raggedright }
+    \setsubsecheadstyle    { \large \sffamily \raggedright }
+    \setsubsubsecheadstyle { \large \sffamily \itshape \raggedright }
+    \setparaheadstyle  { \normalsize \scshape }
+    \setbeforeparaskip { \medskipamount }
+  }
+\makechapterstyle {kulemtman}
+  {
+    \tl_set:Nn \chapnamefont { \sffamily \large }
+    \tl_set:Nn \chapnumfont { \sffamily \Huge }
+    \tl_set:Nn \chaptitlefont { \sffamily \raggedright \huge }
+    \skip_zero:N \beforechapskip
+    \skip_set:Nn \afterchapskip {40pt}
+    \tl_clear:N \printchaptername
+    \tl_clear:N \chapternamenum
+    \tl_clear:N \afterchapternum
+    \tl_set:Nn \printchapternum   { \__kulemtx_printchapternum:N \c_true_bool  }
+    \tl_set:Nn \printchapternonum { \__kulemtx_printchapternum:N \c_false_bool }
+    \cs_set_eq:NN \printchaptertitle \__kulemtx_printchaptertitle:n
+  }
+\dim_new:N \g__kulemtx_wd_num_dim
+\cs_new_protected:Nn \__kulemtx_printchapternum:N
+  {
+    \hbox_set:Nn \l_tmpb_box
+      {
+        \chapnumfont
+        \skip_horizontal:n { 8pt + \fboxsep }
+        \bool_if:NTF #1 { \use:n } { \hphantom } { \thechapter }
+        \skip_horizontal:n { 8pt + \fboxsep }
+        \strut
+      }
+    \box_set_ht:Nn \l_tmpb_box { \box_ht:N \l_tmpb_box + \fboxsep }
+    \box_set_dp:Nn \l_tmpb_box { \box_dp:N \l_tmpb_box + \fboxsep + 55pt }
+    \dim_gset:Nn \g__kulemtx_wd_num_dim { \box_wd:N \l_tmpb_box }
+    \mode_leave_vertical:
+    \vbox:n
+      {
+        \hbox_to_wd:nn { \g__kulemtx_wd_num_dim }
+          {
+            \hss
+            \chapnamefont
+            \bool_if:NT #1 { \@chapapp }
+            \strut
+            \hss
+          }
+        \hbox:n
+          {
+            {
+              \color[gray]{.8}
+              \vrule width \g__kulemtx_wd_num_dim \scan_stop:
+            }
+            \skip_horizontal:n { -\g__kulemtx_wd_num_dim }
+            \box_use_drop:N \l_tmpb_box
+          }
+      }
+  }
+\RequirePackage{color}
+\cs_new_protected:Nn \__kulemtx_printchaptertitle:n
+  {
+    \hfill
+    \vbox_top:n
+      {
+        \chaptitlefont
+        \dim_sub:Nn \hsize { 12pt + \g__kulemtx_wd_num_dim }
+        \hrule height 1pt \scan_stop:
+        \skip_vertical:n {7pt}
+        \strut #1 \par
+      }
+  }
+\keys_define:nn {kulemtx}
+  {
+    mantoc .code:n = { \__kulemtx_manual_toc: },
+    mantoc .value_forbidden:n = true
+  }
+\cs_new_protected:Nn \__kulemtx_manual_toc:
+  {
+    \cs_set_eq:NN \cftchapterfont \sffamily
+    \cs_set_eq:NN \cftchapterdotsep \cftdotsep
+    \tl_set:Nn \cftchapterleader
+      { \normalfont \cftdotfill { \cftchapterdotsep} }
+    \tl_clear:N \cftchapterpagefont
+    \skip_set:Nn \cftbeforechapterskip { \medskipamount }
+    \skip_set:Nn \cftbeforesectionskip { \smallskipamount }
+    \settocdepth {subsection}
+    \tl_put_left:Nn \cftchapterbreak { \par }
+    \tl_set:Nn \cftsubsectionfont { \itshape }
+    \cs_set:Npn \l@subsection ##1 ##2
+      {
+        \skip_set:Nn \leftskip { \cftsubsectionindent }
+        \skip_set:Nn \rightskip { \@tocrmarg }
+        \skip_set:Nn \parfillskip { \fill }
+        \mode_if_horizontal:TF { , \quad } { \noindent }
+        \group_begin:
+          \cs_set_eq:NN \numberline \use_none:n
+          \cftsubsectionfont ##1
+        \group_end:
+        \nobreakspace \nobreakspace
+        \group_begin:
+          \cftsubsectionpagefont ##2
+        \group_end:
+        \ignorespaces
+      }
+  }
+\keys_define:nn {kulemtx}
+  {
+    kuldate .code:n =
+      {
+        \cs_set_nopar:Npn \datebritish
+          {
+            \cs_set_nopar:Npn \today
+              {
+                \number\day \nobreakspace
+                \ifcase \month \or January \or February \or March \or April
+                  \or May \or June \or July \or August \or September
+                  \or October \or November \or December \fi
+                \space \number\year
+              }
+          }
+        \RequireAtEndPackage {biblatex}
+          {
+            \DefineBibliographyExtras {british}
+              { \cs_set_eq:NN \mkbibdatelong \__kulemtx_mkbibdatelong:nnn }
+          }
+      },
+    kuldate .value_forbidden:n = true
+  }
+\cs_new_protected_nopar:Nn \__kulemtx_mkbibdatelong:nnn
+  {
+    \iffieldundef {#3}
+      {}
+      {
+        \stripzeros { \thefield {#3} }
+        \iffieldundef {#2} {} { \nobreakspace }
+      }
+    \iffieldundef {#2}
+      {}
+      {
+        \mkbibmonth { \thefield {#2} }
+        \iffieldundef {#1} {} { \space }
+      }
+    \iffieldbibstring {#1}
+      { \bibstring { \thefield {#1} } }
+      { \dateeraprintpre {#1} \stripzeros { \thefield {#1} } }
+  }
+\keys_define:nn {kulemtx}
+  {
+    manual .meta:n = { manheadstyles, mantoc, kuldate },
+    manual .value_forbidden:n = true
+  }
+\ProcessKeyOptions \scan_stop:
+\seq_new:N \l__kulemtx_tmpa_seq
+\tl_new:N \ConfigFileName
+\tl_set_eq:NN \ConfigFileName \l_kulemt_opt_cfgfile_tl
+\NewDocumentCommand { \ReadConfigFile } {}
+  { \kulemt_read_config_file: }
+\NewDocumentCommand { \PrintConfigFileDate } {}
+  { \__kulemtx_use_configfile_date:n { \today } }
+\cs_new_protected:Nn \__kulemtx_use_configfile_date:n
+  {
+    \prop_get:NnNTF \l_kulemt_cfg_prop {date} \l_tmpa_tl
+      {
+        \exp_last_unbraced:NV \__kulemtx_use_isodate:w \l_tmpa_tl
+          ---\q_stop {#1}
+      }
+      { ??? }
+  }
+\cs_new_protected:Npn \__kulemtx_use_isodate:w #1-#2-#3-#4 \q_stop #5
+  {
+    \group_begin:
+      \int_set:Nn \day {#3}
+      \int_set:Nn \month {#2}
+      \int_set:Nn \year {#1}
+      #5
+    \group_end:
+  }
+\NewDocumentCommand { \PrintConfigFileAcYr } {}
+  {
+    \__kulemtx_use_configfile_date:n
+      {
+        \int_set:Nn \l_tmpa_int
+          { \year \int_compare:nNnT { \month } < {9} { - 1 } }
+        \int_use:N \l_tmpa_int \, -- \, \int_eval:n { \l_tmpa_int + 1 }
+      }
+  }
+\NewDocumentCommand { \PrintMastersInfo } { s m m }
+  {
+    \__kulemtx_handle_master:nnnn {#1} {#2} {#3}
+      { \__kulemtx_print_masterinfo: }
+  }
+\cs_new_protected:Nn \__kulemtx_handle_master:nnnn
+  {
+    \seq_map_inline:Nn \l_kulemt_masters_seq
+      {
+        \IfBooleanTF {#1}
+          { \kulemt_master_obsolete_item:nT }
+          { \kulemt_master_obsolete_item:nF }
+            {##1}
+            {
+              \kulemt_set_master:n {##1}
+              \tl_if_empty:nTF {#2}
+                { \str_clear:N \l_tmpa_str }
+                { \kulemt_master_get_required_item:nN {type} \l_tmpa_str }
+              \tl_if_empty:nTF {#3}
+                { \str_clear:N \l_tmpb_str }
+                { \kulemt_master_get_required_item:nN {language} \l_tmpb_str }
+              \bool_lazy_and:nnT
+                { \str_if_eq_p:Vn \l_tmpa_str {#2} }
+                { \str_if_eq_p:Vn \l_tmpb_str {#3} }
+                { #4 }
+            }
+      }
+  }
+\cs_new_protected:Nn \__kulemtx_print_masterinfo:
+  {
+    \addvspace{\medskipamount}
+    \skip_zero:N \parindent
+    \sidepar
+      {
+        \raggedleft
+        \texttt { \kulemt_master_print_required_item:n {abbreviation} }
+      }
+    \textsc { \kulemt_master_print_required_item:n {name} }
+    \par \nobreak
+    \kulemt_master_get_required_item:nN {language} \l_tmpa_str
+    \kulemt_titlecase_first:V \l_tmpa_str
+    \c_space_tl master
+    \kulemt_master_get_faculty_name:N \l_tmpa_tl
+    \tl_if_empty:NF \l_tmpa_tl { ~ of~ the~ \l_tmpa_tl }
+    . \par \nobreak
+    \__kulemtx_hangfrom:nn { Contact~ info:~ }
+      { \kulemt_master_print_required_item:n {contact.address} }
+    \nobreak
+    \kulemt_master_get_item_or_fallback:nnN {option} {} \l_tmpa_tl
+    \str_case:VnF \l_tmpa_tl
+      {
+        {required}  { A~ master's~ programme~ option~ must~ be~ specified. }
+        {forbidden} { The~ master's~ programme~ doesn't~ allow~ you~ to~
+                      mention~ an~ option. }
+      }
+      { The~ master's~ programme~ doesn't~ require~ you~ to~ mention~
+        an~ option. }
+    \par
+    \kulemt_master_get_item:nN {options} \l_tmpb_seq
+    \seq_if_empty:NF \l_tmpb_seq
+      {
+        \nobreak
+        Known~ master's~ programme~ option~ abbreviations:
+        \par
+        \seq_clear:N \l_tmpa_seq
+        \seq_map_inline:Nn \l_tmpb_seq
+          {
+            \kulemt_master_obsolete_item:nTF {##1}
+              { \seq_put_right:Nn \l_tmpa_seq {##1} }
+              {
+                \nobreak \noindent \enskip
+                \__kulemtx_print_option:n {##1}
+                \par
+              }
+          }
+        \seq_if_empty:NF \l_tmpa_seq
+          {
+            \nobreak
+            \__kulemtx_hangfrom:nn { \quad obsolete: }
+              {
+                \seq_pop_left:NN \l_tmpa_seq \l_tmpa_tl
+                \exp_args:NV \__kulemtx_print_option:n \l_tmpa_tl
+                \seq_map_inline:Nn \l_tmpa_seq
+                  { \\* \strut \__kulemtx_print_option:n {##1} }
+              }
+          }
+      }
+  }
+\cs_new_protected:Nn \__kulemtx_hangfrom:nn
+  {
+    \hbox_set:Nn \l_tmpa_box {#1}
+    \dim_set:Nn \hangindent { \box_wd:N \l_tmpa_box }
+    \noindent \box_use_drop:N \l_tmpa_box
+    #2 \par
+  }
+\cs_new_protected:Nn \__kulemtx_print_option:n
+  {
+    \enskip \textbf{--} \enskip \texttt{#1} \enskip
+    (``\kulemt_master_print_required_item:n { option. #1 }'')
+  }
+\NewDocumentCommand { \ListMastersAndOptions } { m m }
+  {
+    \seq_clear:N \l_tmpa_seq
+    \__kulemtx_handle_master:nnnn { \BooleanFalse } {#1} {#2}
+      { \seq_put_right:Nn \l_tmpa_seq {##1} }
+    \seq_if_empty:NF \l_tmpa_seq
+      {
+        \seq_sort:Nn \l_tmpa_seq
+          {
+            \kulemt_set_master:n {##1}
+            \kulemt_master_get_item:nN {name} \l_tmpa_tl
+            \kulemt_set_master:n {##2}
+            \kulemt_master_get_item:nN {name} \l_tmpb_tl
+            \str_compare:eNeTF
+              { \str_casefold:V \l_tmpa_tl } > { \str_casefold:V \l_tmpb_tl }
+              { \sort_return_swapped: }
+              { \sort_return_same: }
+          }
+        \begin{itemize}
+          \seq_map_inline:Nn \l_tmpa_seq
+            {
+              \kulemt_set_master:n {##1}
+              \item \kulemt_master_print_required_item:n {name} \par
+                \__kulemtx_print_option_names:
+            }
+        \end{itemize}
+      }
+  }
+\cs_new_protected:Nn \__kulemtx_print_option_names:
+  {
+    \kulemt_master_get_item:nN {options} \l_tmpb_seq
+    \seq_if_empty:NF \l_tmpb_seq
+      {
+        \seq_clear:N \l__kulemtx_tmpa_seq
+        \seq_map_inline:Nn \l_tmpb_seq
+          {
+            \kulemt_master_obsolete_item:nF {##1}
+              {
+                \kulemt_master_get_item:nN { option.##1 } \l_tmpa_tl
+                \seq_put_right:NV \l__kulemtx_tmpa_seq \l_tmpa_tl }
+          }
+        \seq_if_empty:NF \l__kulemtx_tmpa_seq
+          {
+            \seq_sort:Nn \l__kulemtx_tmpa_seq
+              {
+                \str_compare:eNeTF
+                  { \str_casefold:n {##1} } > { \str_casefold:n {##2} }
+                  { \sort_return_swapped: }
+                  { \sort_return_same: }
+              }
+            \begin{itemize}
+            \item \seq_use:Nn \l__kulemtx_tmpa_seq { \item }
+            \end{itemize}
+          }
+      }
+  }
+\NewDocumentCommand {\ListMastersWithOptionType} { m m }
+  {
+    \seq_clear:N \l__kulemtx_tmpa_seq
+    \seq_map_inline:Nn \l_kulemt_masters_seq
+      {
+        \kulemt_set_master:n {##1}
+        \kulemt_master_get_item_or_fallback:nnN {option} {?} \l_tmpa_tl
+        \str_if_eq:VnT \l_tmpa_tl {#1}
+          {
+            \kulemt_master_get_required_item:nN {name} \l_tmpa_tl
+            \seq_put_right:NV \l__kulemtx_tmpa_seq \l_tmpa_tl
+          }
+      }
+    \seq_if_empty:NF \l__kulemtx_tmpa_seq
+      {
+        \seq_sort:Nn \l__kulemtx_tmpa_seq
+          {
+            \str_compare:eNeTF
+              { \str_casefold:n {##1} } > { \str_casefold:n {##2} }
+              { \sort_return_swapped: }
+              { \sort_return_same: }
+          }
+        #2
+        \begin{itemize}
+        \item \seq_use:Nn \l__kulemtx_tmpa_seq { \item }
+        \end{itemize}
+      }
+  }
+\endinput
+%%
+%% End of file `kulemtx.sty'.

@@ -7,8 +7,8 @@ rand_key = random.key(123)
 
 # %%
 ## setup problem
-inputDim = 2
-hiddenDim = 3
+inputDim = 8
+hiddenDim = 10
 outputDim = 1
 samples = 2**inputDim
 
@@ -31,7 +31,7 @@ delta = 1
 # %%
 ## implementation using alternating Projections
 error = []
-optInput = optimizer([projections.stepActivation, projections.orthonormalizeMatrix],[projections.bilinearMatrix])
+optInput = optimizer([projections.stepActivation],[projections.bilinearMatrix])
 optHidden = optimizer([], [projections.bilinearMatrix])
 optOutput= optimizer([lambda x,w,y :projections.classifierOutputVector(x,w,y,delta=delta)], [])
 error = []

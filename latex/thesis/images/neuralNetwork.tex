@@ -1,0 +1,71 @@
+\begin{tikzpicture}[
+    x=2.0cm, y=1.2cm,
+    neuron/.style={circle, draw, minimum size=7mm, inner sep=1pt, font=\small},
+    activation/.style={rectangle, draw, minimum size=5mm, font=\scriptsize, rounded corners=2pt, fill=gray!10},
+    >=Stealth,
+    weight/.style={font=\scriptsize, midway, sloped}
+  ]
+
+  % Input layer (3 inputs + bias)
+  \node[neuron] (I1) at (0, 1) {$x_1$};
+  \node[neuron] (I2) at (0, 0) {$x_2$};
+  \node[neuron] (I3) at (0,-1) {$x_3$};
+  \node[neuron] (B)  at (0, 2) {$1$}; % bias
+
+  % Hidden layer (pre-activation)
+  \node[neuron] (H1) at (2, 1) {$h_1$};
+  \node[neuron] (H2) at (2, 0) {$h_2$};
+  \node[neuron] (H3) at (2,-1) {$h_3$};
+
+  % Activation layer
+  \node[activation, right=0.8cm of H1] (A1) {$f(h_1)$};
+  \node[activation, right=0.8cm of H2] (A2) {$f(h_2)$};
+  \node[activation, right=0.8cm of H3] (A3) {$f(h_3)$};
+
+  % Post-activation "x" layer
+  \node[neuron, right=0.8cm of A1] (X1) {$x_1^{(2)}$};
+  \node[neuron, right=0.8cm of A2] (X2) {$x_2^{(2)}$};
+  \node[neuron, right=0.8cm of A3] (X3) {$x_3^{(2)}$};
+
+  % Output layer (single output)
+  \node[neuron, right=0.8cm of X2] (O) {$y$};
+
+  % Input -> hidden
+  \foreach \i in {1,2,3} {
+    \foreach \j in {1,2,3} {
+      \draw[->] (I\i) -- (H\j);
+    }
+  }
+
+  % Bias -> hidden
+  \foreach \j in {1,2,3} {
+    \draw[->] (B) -- (H\j);
+  }
+
+  % Hidden -> activation
+  \foreach \j in {1,2,3} {
+    \draw[->] (H\j) -- (A\j);
+  }
+
+  % Activation -> post-activation x layer
+  \foreach \j in {1,2,3} {
+    \draw[->] (A\j) -- (X\j);
+  }
+
+  % Post-activation x layer -> output
+  \foreach \j in {1,2,3} {
+    \draw[->] (X\j) -- (O);
+  }
+
+  % Add weight labels only for paths involving h1
+  \draw[->] (I1) -- node[weight, above] {$w_{h_1,x_1}^{(1)}$} (H1);
+  \draw[->] (I2) -- node[weight, above] {$w_{h_1,x_2}^{(1)}$} (H1);
+  \draw[->] (I3) -- node[weight, above] {$w_{h_1,x_3}^{(1)}$} (H1);
+  \draw[->] (B)  -- node[weight, above] {$b_{h_1}^{(1)}$} (H1);
+  \draw[->] (X1) -- node[weight, above] {$w_{y,x_1^{(2)}}^{(2)}$} (O);
+
+  % Layer labels
+  \node[above,font=\small] at (0,2.3) {Input layer};
+  \node[above,font=\small] at (5,0.8) {Output layer};
+
+\end{tikzpicture}

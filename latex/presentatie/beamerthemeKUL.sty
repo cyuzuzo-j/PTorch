@@ -1,0 +1,345 @@
+% The KU Leuven LaTeX beamer template
+% Copyright (C) 2021-2024  Naïn Jonckers
+%
+% This program is free software: you can redistribute it and/or modify
+% it under the terms of the GNU General Public License as published by
+% the Free Software Foundation, either version 3 of the License, or
+% (at your option) any later version.
+%
+% This program is distributed in the hope that it will be useful,
+% but WITHOUT ANY WARRANTY; without even the implied warranty of
+% MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+% GNU General Public License for more details.
+%
+% You should have received a copy of the GNU General Public License
+% along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{beamerthemeKUL}[LaTeX KU Leuven beamer theme v2021.4 (dev)]
+\def\KULversion{2021.4 (dev)}
+
+% Package options
+\def\KULlogopath{res/kul_logo.pdf}
+\DeclareOption{logo=geel}{\def\KULlogopath{res/kul_logo_geel.pdf}}
+\ProcessOptions
+
+% New size commands
+% - \tinyer
+\newcommand{\tinyer}{\@setfontsize\tinyer{5}{6}}
+
+\mode<presentation>
+
+% Utility command to parse comma separated strings
+% https://tex.stackexchange.com/questions/429881/splitting-strings-by-comma
+\usepackage{listofitems}
+
+% Graphics handling
+\usepackage{graphicx}
+
+% Set main font to 'Helvetica' clone (usually 'Nimbus Sans')
+% The real KU Leuven template uses 'Arial', but 'Helvetica and 'Arial' are very
+% similar.
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+% Set mono font to 'Courier' clone
+\usepackage{courier}
+
+% Remove the default beamer navigation bar
+\beamertemplatenavigationsymbolsempty
+
+% For multiple columns in the outline
+\usepackage{multicol}
+
+% For syntax highlighting
+\input{builddir.def}
+\usepackage{minted} % requires -shell-escape
+\usemintedstyle{tango}
+
+% Setup enumerations
+% ------------------
+\usepackage{enumitem}
+\setlistdepth{5}
+\setlist[itemize,1]{label=$\bullet$, left=0cm,   before=\normalsize\color{KUL-BLACK}}
+\setlist[itemize,2]{label=$\bullet$, left=0.2cm, before=\small}
+\setlist[itemize,3]{label=$\bullet$, left=0.2cm, before=\footnotesize}
+\setlist[itemize,4]{label=$\bullet$, left=0.2cm, before=\scriptsize}
+\setlist[itemize,5]{label=$\bullet$, left=0.2cm, before=\tiny}
+\renewlist{itemize}{itemize}{5}
+\setlist[enumerate,1]{label=$\arabic*.$, left=0cm,   before=\normalsize\color{KUL-BLACK}}
+\setlist[enumerate,2]{label*=$\arabic*.$, left=0.2cm, before=\small}
+\setlist[enumerate,3]{label*=$\arabic*.$, left=0.2cm, before=\footnotesize}
+\setlist[enumerate,4]{label*=$\arabic*.$, left=0.2cm, before=\scriptsize}
+\setlist[enumerate,5]{label*=$\arabic*.$, left=0.2cm, before=\tiny}
+\renewlist{enumerate}{enumerate}{5}
+
+% Define the template colours
+% ---------------------------
+\definecolor{KUL-WHITE}{RGB}{255, 255, 255}
+\definecolor{KUL-BLACK}{RGB}{47, 77, 93}
+\definecolor{KUL-BLUE}{RGB}{29, 141, 176}
+\definecolor{KUL-BLUE-LIGHT}{RGB}{220, 231, 240}
+\definecolor{KUL-AQUA}{RGB}{82, 189, 236}
+\definecolor{KUL-HREF}{RGB}{70, 110, 135}
+\definecolor{KUL-BLUE-TABLE1}{RGB}{204, 218, 227}
+\definecolor{KUL-BLUE-TABLE2}{RGB}{231, 237, 241}
+\setbeamercolor{normal text}{fg=KUL-BLACK}
+
+% Setup hyperlinks
+% ----------------
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    allcolors=.,
+    urlbordercolor=KUL-HREF,
+    urlcolor=KUL-HREF,
+    linkbordercolor=KUL-HREF,
+    linkcolor=KUL-HREF
+}
+% Renew the 'href', 'url' commands to have a nice underline
+\usepackage{soul}
+\setuldepth{Normal}
+\let\oldhref\href
+\renewcommand*{\href}[2]{\oldhref{#1}{\ul{#2}}}
+\renewcommand*{\url}[1]{\oldhref{#1}{\ul{#1}}}
+% Also add the 'mailto' command
+\newcommand*{\mailto}[1]{\oldhref{mailto:#1}{\ul{#1}}}
+
+% Setup tables
+% ------------
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{hhline}
+\newcolumntype{C}{>{\centering\arraybackslash}X}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+\newcolumntype{R}{>{\raggedleft\arraybackslash}X}
+\newcolumntype{Z}[1]{>{\centering\arraybackslash}m{#1}}
+\newcolumntype{V}[1]{>{\raggedright\arraybackslash}m{#1}}
+\newcolumntype{W}[1]{>{\raggedleft\arraybackslash}m{#1}}
+
+\newlength{\KULarrayrulewidth}
+\setlength{\KULarrayrulewidth}{0.3mm}
+\newenvironment{KULtable}[2]
+{%
+    % save global table settings
+    \let\oldarrayrulewidth\arrayrulewidth
+    \global\let\oldarrayrulecolor\CT@arc@
+    % change global talbe settings
+    \renewcommand{\arrayrulewidth}{\KULarrayrulewidth}
+    \arrayrulecolor{KUL-WHITE}
+    \rowcolors{1}{KUL-BLUE-TABLE2}{KUL-BLUE-TABLE1}
+    % create table
+    \color{KUL-BLACK}
+    \tabularx{#1}{#2}
+}{%
+    \endtabularx
+    % restore global table settings
+    \renewcommand{\arrayrulewidth}{\oldarrayrulewidth}
+    \global\let\CT@arc@\oldarrayrulecolor
+}
+
+%https://tex.stackexchange.com/questions/338852/ampersand-inside-new-command-tabular-environment#338884
+\usepackage{xparse}
+\newcommand{\MakeEntry}[1]
+{%
+    \headersep%
+    \cellcolor{KUL-BLUE}\textbf{\color{KUL-WHITE}#1}%
+    \def\headersep{&}%
+}
+\DeclareDocumentCommand\KULheadrow{ > { \SplitList{,}} m }
+   {\let\headersep\relax% no & needed for first column
+    \ProcessList{#1}{\MakeEntry}\relax%
+   }
+
+\newcommand{\KULheadcol}[1]{\cellcolor{KUL-BLUE}\textbf{\color{KUL-WHITE}#1}}
+
+% Format block environments
+% -------------------------
+\setbeamertemplate{blocks}[rounded][shadow=true]
+\setbeamercolor{block title}{fg=KUL-WHITE, bg=KUL-BLUE}
+\setbeamercolor{block body}{fg=KUL-WHITE, bg=KUL-AQUA}
+\setbeamerfont{block body}{size=\scriptsize}
+
+%https://tex.stackexchange.com/questions/12550/changing-default-width-of-blocks-in-beamer#12551
+\newenvironment<>{varblock}[2][.9\textwidth]{%
+  \setlength{\textwidth}{#1}
+  \begin{actionenv}#3%
+    \def\insertblocktitle{#2}%
+    \par%
+    \usebeamertemplate{block begin}}
+  {\par%
+    \usebeamertemplate{block end}%
+  \end{actionenv}}
+
+% Format the TOC
+% --------------
+\defbeamertemplate*{section in toc}{KUL}
+{%
+    \vskip1.5ex
+    \color{KUL-BLACK}
+    \raisebox{0.22ex}{$\bullet$}~ \inserttocsection\vskip0.5ex
+}
+\defbeamertemplate*{subsection in toc}{KUL}
+{%
+    \color{KUL-BLACK}\scriptsize \hspace{1.5em}
+    \raisebox{0.22ex}{$\bullet$}~ \inserttocsubsection\vskip0.5ex
+}
+\NewDocumentCommand\tableofcontentsTOP{+O{}}
+{%
+    \vskip-1.5ex
+    \begin{columns}[onlytextwidth,T]
+    \begin{column}{\textwidth}
+    \tableofcontents[#1]
+    \end{column}
+    \end{columns}
+}
+
+% Format the title page
+% ---------------------
+\setbeamercolor{KUL-BOX-MAIN-TITLEPAGE}{fg=KUL-WHITE, bg=KUL-BLUE}
+\setbeamercolor{KUL-BOX-SUB-TITLEPAGE}{fg=KUL-BLACK, bg=KUL-BLUE-LIGHT}
+\defbeamertemplate*{title page}{KUL}
+{%
+    \nointerlineskip%
+    \begin{beamercolorbox}[ht=.094\paperheight, wd=\paperwidth]%
+                          {KUL-BOX-TOP-TITLEPAGE}%
+        %EMPTY
+    \end{beamercolorbox}%
+    \nointerlineskip%
+    \begin{beamercolorbox}[wd=\paperwidth]
+                          {KUL-BOX-MAIN-TITLEPAGE}%
+        \begin{minipage}[t][.65\paperheight]{\paperwidth}
+            \setlength{\parindent}{.047\paperwidth}
+            \vspace*{-0.052\paperheight}
+            \hspace*{-0.032\paperwidth}
+            \includegraphics[width=.166\paperwidth]{\KULlogopath}
+            \hspace{0pt}
+            \vfill
+            \LARGE\inserttitle
+            \vfill
+            \large\insertsubtitle
+            \hspace{0pt}
+        \end{minipage}
+    \end{beamercolorbox}%
+    \nointerlineskip%
+    \begin{beamercolorbox}[wd=\paperwidth]%
+                          {KUL-BOX-SUB-TITLEPAGE}%
+        \readlist*\institutelist{\insertinstitute}
+        \normalsize
+        \begin{minipage}[t][.256\paperheight]{\paperwidth}
+            \setlength{\parindent}{.047\paperwidth}
+            \institutelist[1]
+            \phantom{\Huge X} %fiddle with spacing
+            \hfill \insertauthor \hspace{.047\paperwidth}
+            \par
+            \institutelist[2]
+            \vfill
+            \hfill \hspace{.047\paperwidth}
+        \end{minipage}
+    \end{beamercolorbox}%
+    \addtocounter{framenumber}{-1}%
+}
+
+
+% Format standard page
+% --------------------
+\setbeamercolor{KUL-BOX-TITLE-STDPAGE}{fg=KUL-BLUE, bg=KUL-WHITE}
+\setbeamercolor{KUL-BOX-FOOTER-STDPAGE}{fg=KUL-WHITE, bg=KUL-BLUE}
+\newcommand{\frametitletemplate}[1]
+{%
+    % If this isn't the title page
+    \ifnum\value{framenumber}>0%
+        \nointerlineskip%
+        \ifthenelse{\equal{#1}{notoc}}{}{%
+            \subsection{\insertframetitle}%
+        }%
+        \begin{beamercolorbox}[wd=\paperwidth, ht=0.227\paperheight]
+              {KUL-BOX-TITLE-STDPAGE}%
+            \setlength{\parindent}{.047\paperwidth}
+            \hspace{0pt}
+            \vfill
+            \LARGE \insertframetitle
+            \vfill
+            \hspace{0pt}
+        \end{beamercolorbox}%
+        \vspace{-\abovedisplayskip}
+    \fi%
+}
+\defbeamertemplate*{frametitle}{KUL}{\frametitletemplate{}}
+\defbeamertemplate*{frametitle}{KUL-notoc}{\frametitletemplate{notoc}}
+\defbeamertemplate*{footline}{KUL}
+{%
+    \leavevmode%
+    \hbox{%
+        \begin{beamercolorbox}[wd=.5\paperwidth, ht=0.055\paperheight,
+                              dp=0.04\paperheight, left]
+                              {KUL-BOX-FOOTER-STDPAGE}
+            \hspace{.047\paperwidth}
+            \insertframenumber
+        \end{beamercolorbox}%
+        \readlist*\institutelist{\insertinstitute}%
+        \begin{beamercolorbox}[wd=.5\paperwidth, ht=0.055\paperheight,
+                              dp=0.04\paperheight, right]
+                              {KUL-BOX-FOOTER-STDPAGE}
+            \begin{tabular}{r}
+                \textbf{\institutelist[1]} \\
+                \tinyer \institutelist[2]
+            \end{tabular}
+            \hspace{-0.01\paperwidth}
+            \begin{tabular}{c}
+                \includegraphics[width=.083\paperwidth]{\KULlogopath}
+            \end{tabular}
+        \end{beamercolorbox}
+    }\vskip0pt%
+}
+
+
+% Format header page
+% ------------------
+\setbeamercolor{KUL-BOX-TITLE-HEADPAGE}{fg=KUL-BLUE, bg=KUL-BLUE-LIGHT}
+\defbeamertemplate*{frametitle}{KUL-header}
+{%
+    % If this isn't the title page
+    \ifnum\value{framenumber}>0%
+        \nointerlineskip%
+        \section{\insertframetitle}%
+        \begin{beamercolorbox}[wd=\paperwidth] {KUL-BOX-TITLE-HEADPAGE}%
+            \begin{minipage}[t][.945\paperheight]{\paperwidth}
+                \setlength{\parindent}{.047\paperwidth}
+                \hspace{0pt}
+                \vfill
+                \LARGE \insertframetitle
+                \\\indent
+                {\color{KUL-BLACK}\large \insertframesubtitle}
+                \vfill
+                \hspace{0pt}
+            \end{minipage}
+        \end{beamercolorbox}%
+    \fi%
+}
+
+
+% Enable pages as options to 'frame'
+% ----------------------------------
+\define@key{beamerframe}{KUL-header}[true]{%
+    \setbeamertemplate{background canvas}[KUL]%
+    \setbeamertemplate{frametitle}[KUL-header]%
+    \setbeamertemplate{footline}[KUL]%
+}
+\define@key{beamerframe}{KUL-title}[true]{%
+    \setbeamertemplate{title page}[KUL]%
+    \setbeamertemplate{background canvas}[none]%
+    \setbeamertemplate{frametitle}[none]%
+    \setbeamertemplate{footline}{}%
+}
+\define@key{beamerframe}{KUL-standard}[true]{%
+    \setbeamertemplate{background canvas}[KUL]%
+    \setbeamertemplate{frametitle}[KUL]%
+    \setbeamertemplate{footline}[KUL]%
+}
+\define@key{beamerframe}{KUL-standard-notoc}[true]{%
+    \setbeamertemplate{background canvas}[KUL]%
+    \setbeamertemplate{frametitle}[KUL-notoc]%
+    \setbeamertemplate{footline}[KUL]%
+}
+
+\mode<all>

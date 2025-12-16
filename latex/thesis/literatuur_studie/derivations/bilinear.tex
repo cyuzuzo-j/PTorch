@@ -1,0 +1,121 @@
+\begin{itemize}
+    \item  \textbf{motivation}:
+    As we run in to serious memory limitations when trying to calculate the conv2d using the method implemented in pjax an alternative method was developed. By first calculating the fft and padding, and performing the hadamar product, and then reversing the operation we have a more memory efficient implement ion of the convolution. But this requires a new projection to be calculate, this one is presented below
+    
+    \item \textbf{definition}:\\
+    $Y\in\mathbb{C}^{n,n} \in \mathbb{C}, X\in\mathbb{C}^{n,n}, W \in  \mathbb{C}^{n,n}$
+     We try to satisfy the following constraints
+    \begin{equation}
+        \begin{split}
+            & y'=w' \circ x'\\
+            &\min( ||x-x'||^2_F + ||w-w'||^2_F+||y-y'||^2_F)
+        \end{split}
+    \end{equation}
+    \[
+    y = w \circ x, 
+    \qquad w, x, y \in \mathbb{C}.
+    \]
+    
+    Let 
+    \[
+    w = w_r + i w_i, \qquad x = x_r + i x_i.
+    \]
+    
+    Then the Hadamard product (elementwise product) is just complex multiplication:
+    
+    \[
+    y = wx 
+      = (w_r + i w_i)(x_r + i x_i).
+    \]
+    
+    Expanding:
+    
+    \[
+    y 
+    = (w_r x_r - w_i x_i)
+      + i(w_r x_i + w_i x_r).
+    \]
+    
+    Thus
+    
+    \[
+    \boxed{
+    \begin{aligned}
+    y_r &= w_r x_r - w_i x_i, \\
+    y_i &= w_r x_i + w_i x_r.
+    \end{aligned}}
+    \]
+    
+    As we still want our solution to be as close to the original solution as possible, 
+    Given a new  value
+    
+    \[
+    \|y - y'\|^2
+    = (y_r - y_r')^2 + (y_i - y_i')^2.
+    \]
+    \[
+    \|x - x'\|^2
+    = (x_r - x_r')^2 + (x_i - x_i')^2.
+    \]
+    \[
+    \|w -w'\|^2
+    = (w_r - w_r')^2 + (w_i - w_i')^2.
+    \]
+    
+    Constructing the Lagrangian results in the following equation
+    \[
+    \mathcal{L}
+    = \|w -w'\|^2 + \|x - x'\|^2 + \|y - y'\|^2
+    + \lambda_r \big( w_r' x_r' - w_i' x_i' - y_r',\big)
+    + \lambda_i \big(w_r' x_i' + w_i' x_r' - y_i'\big).
+    \]
+    Taking the partial derivatives of this to zero results in the following set of equations
+    \[
+    \left(
+    \begin{array}{c}
+        2(w_r' - w_r) + \lambda_i x_i' + \lambda_r x_r' \\[6pt]
+        2(w_i' - w_i) - \lambda_r x_i' + \lambda_i x_r' \\[6pt]
+        2(x_r' - x_r) + \lambda_i w_i' + \lambda_r w_r' \\[6pt]
+        2(x_i' - x_i) - \lambda_r w_i' + \lambda_i w_r' \\[6pt]
+        2(y_r' - y_r) - \lambda_r \\[6pt]
+        2(y_i' - y_i) - \lambda_i \\[6pt]
+        w_r' x_r' - w_i' x_i' - y_r' \\[6pt]
+        w_r' x_i' + w_i' x_r' - y_i'
+    \end{array}
+    \right)
+    \]   
+    Taking the partial derivatives with respect to real and imaginary components yields a large $8 \times 8$ system. However, we can significantly accelerate the solution by grouping these terms into complex variables. Let $L = (\lambda_r + i\lambda_i)/2$. The stationarity conditions simplify to a compact complex form:
+    
+    \[
+    \begin{aligned}
+    w' - w + L \overline{x'} &= 0 \implies w' = w - L \overline{x'} \\
+    x' - x + L \overline{w'} &= 0 \implies x' = x - L \overline{w'} \\
+    y' - y - L &= 0 \implies y' = y + L
+    \end{aligned}
+    \]
+    
+    We can solve this coupled system for $w'$ and $x'$ explicitly in terms of $L$. By taking the conjugate of the expression for $x'$ and substituting it into the expression for $w'$:
+    
+    \[
+    w' = w - L(\overline{x} - \overline{L} w') = w - L\overline{x} + |L|^2 w'
+    \]
+    
+    Rearranging terms allows us to isolate $w'$ (and similarly $x'$):
+    
+    \[
+    w'(1 - |L|^2) = w - L\overline{x} \implies w' = \frac{w - L\overline{x}}{1 - |L|^2}
+    \]
+    \[
+    x' = \frac{x - L\overline{w}}{1 - |L|^2}
+    \]
+    
+    Finally, substituting these explicit forms back into the constraint $y' = w'x'$ results in a single complex equation for $L$:
+    
+    \[
+    \frac{(w - L\overline{x})(x - L\overline{w})}{(1 - |L|^2)^2} - (y + L) = 0
+    \]
+    
+    This reduces the problem from solving an $8 \times 8$ real system to finding the root of a single complex equation (equivalent to a $2 \times 2$ real system), which is computationally much more efficient and memory friendly.
+
+    
+    \end{itemize}

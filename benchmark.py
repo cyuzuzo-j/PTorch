@@ -94,20 +94,20 @@ CONFIGURATIONS = [
         "extraConstraints": [],
     },
     {
-        "name": "DR2 + Step Activation",
-        "optimizer": DouglassRachford,
-        "activation": projections.stepActivation,
-        "extraConstraints": [],
-    },
-    {
         "name": "AP + Step Activation",
         "optimizer": AlternatingProjection,
         "activation": projections.stepActivation,
         "extraConstraints": [],
     },
     {
-        "name": "AP + sum ReLU Activation",
+        "name": "AP + ReLU Activation",
         "optimizer": AlternatingProjection,
+        "activation": projections.sum_relu_proj,
+        "extraConstraints": [],
+    },
+    {
+        "name": "DR + ReLU Activation",
+        "optimizer": DouglassRachford,
         "activation": projections.sum_relu_proj,
         "extraConstraints": [],
     }
@@ -287,6 +287,19 @@ def run_pytorch_experiment(problem_params, num_iterations=1000, learning_rate=0.
 import random as rn
 if __name__ == "__main__":
     rand_key = random.PRNGKey(rn.randint(0, 10000))
+    
+    # --- Warm-up ---
+    print("--- Starting Warm-up ---")
+    rand_key, subkey = random.split(rand_key)
+    warmup_params = setup_problem(subkey)
+    
+    for config_item in CONFIGURATIONS:
+        # Run briefly to trigger JIT compilation
+        run_experiment(config_item, warmup_params, num_iterations=10)
+        
+    run_pytorch_experiment(warmup_params, num_iterations=10)
+    print("--- Warm-up Complete ---")
+
     all_results = []
     
     for _ in range(50):  # Run multiple trials

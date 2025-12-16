@@ -1,0 +1,110 @@
+\documentclass[master=elt,masteroption=ec]{kulemt}
+\setup{
+  title={thesis},
+  author={Een Auteur\and Tweede Auteur},
+  promotor={Pr },
+  assessor={},
+  assistant={}}
+% Verwijder de "%" op de volgende lijn als je de kaft wil afdrukken
+%\setup{coverpageonly}
+% Verwijder de "%" op de volgende lijn als je enkel de eerste pagina's wil
+% afdrukken en de rest bv. via Word aanmaken.
+%\setup{frontpagesonly}
+
+% Hier kun je dan nog andere pakketten laden of eigen definities voorzien
+
+% Tenslotte wordt hyperref gebruikt voor pdf bestanden.
+% Dit mag verwijderd worden voor de af te drukken versie.
+\usepackage[pdfusetitle,colorlinks,plainpages=false]{hyperref}
+\usepackage{graphicx} % Required for inserting images
+\usepackage[numbers]{natbib} % For \citet and other citation commands
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{tikz}
+\usepackage{comment}
+\usetikzlibrary{positioning,arrows.meta}
+
+%%%%%%%
+% Om wat tekst te genereren wordt hier het lipsum pakket gebruikt.
+% Bij een echte masterproef heb je dit natuurlijk nooit nodig!
+\IfFileExists{lipsum.sty}%
+ {\usepackage{lipsum}\SetLipsumDefault{11-13}}%
+ {\newcommand{\lipsum}[1][11-13]{\par Hier komt wat tekst: lipsum ##1.\par}}
+%%%%%%%
+\usepackage[table]{xcolor} % 'table'optie is handig voor cell backgrounds
+\usepackage{longtable}
+%%%%%%%
+
+%\includeonly{hoofdstuk-n}
+\begin{document}
+
+\begin{preface}
+  Dit is mijn dankwoord om iedereen te danken die mij bezig gehouden heeft.
+  Hierbij dank ik mijn promotor, mijn begeleider en de voltallige jury.
+  Ook mijn familie heeft mij erg gesteund natuurlijk.
+\end{preface}
+
+\tableofcontents*
+
+\begin{abstract}
+  In dit \texttt{abstract} environment wordt een al dan niet uitgebreide
+  samenvatting van het werk gegeven. De bedoeling is wel dat dit tot
+  1~bladzijde beperkt blijft.
+
+  \lipsum[1]
+\end{abstract}
+
+% Een lijst van figuren en tabellen is optioneel
+%\listoffigures
+%\listoftables
+% Bij een beperkt aantal figuren en tabellen gebruik je liever het volgende:
+\listoffiguresandtables
+% De lijst van symbolen is eveneens optioneel.
+% Deze lijst moet wel manueel aangemaakt worden, bv. als volgt:
+\chapter{Lijst van afkortingen en symbolen}
+\section*{Afkortingen}
+\begin{flushleft}
+  \renewcommand{\arraystretch}{1.1}
+  \begin{tabularx}{\textwidth}{@{}p{12mm}X@{}}
+    LoG   & Laplacian-of-Gaussian \\
+    MSE   & Mean Square error \\
+    PSNR  & Peak Signal-to-Noise ratio \\
+  \end{tabularx}
+\end{flushleft}
+\section*{Symbolen}
+\begin{flushleft}
+  \renewcommand{\arraystretch}{1.1}
+  \begin{tabularx}{\textwidth}{@{}p{12mm}X@{}}
+    42    & ``The Answer to the Ultimate Question of Life, the Universe,
+            and Everything'' volgens de \cite{h2g2} \\
+    $c$   & Lichtsnelheid \\
+    $E$   & Energie \\
+    $m$   & Massa \\
+    $\pi$ & Het getal pi \\
+  \end{tabularx}
+\end{flushleft}
+
+% Nu begint de eigenlijke tekst
+\mainmatter
+
+\include{inleiding}
+\include{literature_study}
+\include{hoofdstuk-1}
+\include{hoofdstuk-2}
+
+% ... en zo verder tot
+\include{hoofdstuk-n}
+\include{besluit}
+
+% Indien er bijlagen zijn:
+\appendixpage*          % indien gewenst
+\appendix
+\include{bijlage-1}
+% ... en zo verder tot
+\include{bijlage-n}
+\backmatter
+
+\bibliographystyle{abbrv}
+\bibliography{referenties}
+\include{CoC}
+\end{document}
