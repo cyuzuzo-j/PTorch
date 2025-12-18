@@ -252,8 +252,8 @@
                 \begin{tikzpicture}[
                     >=Stealth, 
                     auto, 
-                    node distance=0.6cm, % Tighter spacing
-                    scale=0.7, transform shape, % Smaller scale
+                    node distance=0.6cm,
+                    scale=0.7, transform shape, 
                     var/.style={circle, draw=KUL-BLUE, thick, fill=white, minimum size=0.6cm, inner sep=0pt, font=\small},
                     op/.style={rectangle, draw=black, thick, rounded corners, fill=gray!10, minimum height=0.4cm, minimum width=0.8cm, align=center, font=\scriptsize},
                     arr/.style={->, thick, gray!80!black}
@@ -574,10 +574,6 @@
                     \node[grey_node] (rp2) at (4.5, -2.5) {repeat};
                     % There is a chain in the image: w1 -> reshape -> repeat -> repeat -> dot
                     \node[grey_node] (rp2_b) at (5.0, -2.5) {repeat}; % Actually let's just do reshape->repeat->dot to be safe if ambiguous, 
-                    % but user said "exact". The image has "repeat" stacked?
-                    % Image: w1 -> reshape -> repeat -> repeat -> dot. Yes.
-                    
-                    % Let's do a cleaner manual layout.
                     
                     % DOT 1
                     \node[green_node] (dot1) at (6, -1) {dot};
@@ -840,11 +836,7 @@
     % 8. Questions
     \begin{frame}[KUL-standard]
         \centering
-        \vspace*{2cm}
+        \vspace*{3.3cm}
         \Huge \textbf{Questions ?}
-        \vspace*{2cm}
-        \begin{tikzpicture}[remember picture, overlay]
-            \fill[KUL-BLUE] (current page.south west) rectangle ($(current page.south east) + (0, 0.2)$);
-        \end{tikzpicture}
     \end{frame}
 \end{document}
