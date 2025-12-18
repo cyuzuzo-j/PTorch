@@ -66,7 +66,7 @@
     % -------
     \begin{frame}[KUL-standard-notoc]
         \frametitle{Agenda}
-        \vspace{-1em}
+        \vspace{-1.5em}
         \begin{columns}[onlytextwidth,T]
              \begin{column}{0.95\textwidth}
                 \large
@@ -86,7 +86,8 @@
                     \item PJAX experiments
                 \end{itemize}
                 \vspace{0.8em}
-                \textbf{03 Planning}
+                \large
+                \textbf{03 Planning}\\
             \end{column}
         \end{columns}
     \end{frame}
@@ -204,7 +205,7 @@
 
     % Running Example Section
     \begin{frame}[KUL-header]
-        \frametitle{Running Example: Binary XOR Classification}
+        \frametitle{Example: Binary XOR Classification}
     \end{frame}
 
     % Slide 1: Problem Definition
@@ -239,12 +240,6 @@
             \end{column}
         \end{columns}
     \end{frame}
-
-    % Methodology Section
-    \begin{frame}[KUL-header]
-        \frametitle{Methodology}
-    \end{frame}
-
     % General Constraints
     \begin{frame}[KUL-standard]
         \frametitle{Neuron Constraints}
@@ -745,7 +740,7 @@
     \node[rednode, above right=1.5cm and 0.2cm of dot2] (crossentropy) {cross\\entropy};
 
     % 10. Target Array (Green, Top Right)
-    \node[greennode, right=1cm of crossentropy, anchor=center] (array2) {Array};
+    \node[greennode, right=1cm of crossentropy, anchor=center] (array2) {target};
 
     % --- Edges ---
 
@@ -992,8 +987,9 @@
     \end{frame}
 
     % 7. References
-    \begin{frame}[allowframebreaks, KUL-standard]
+    \begin{frame}[KUL-standard]
         \frametitle{References}
+        \tiny
         \bibliographystyle{plain}
         \bibliography{../thesis/references}
     \end{frame}
