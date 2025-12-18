@@ -168,7 +168,7 @@
                 \vspace{1em}
                 \begin{itemize}
                     \item \textbf{Input:} $x_{\text{data}} \in \{0,1\}^2$
-                    \item \textbf{Output:} $y \in \{0,1\}$ (1 iff $x_1 \neq x_2$)
+                    \item \textbf{Output:} $y_{\text{data}} \in \{0,1\}$ (1 iff $x_1 \neq x_2$)
                     \item \textbf{Datapoints:} $k=4$\\
                     \item \textbf{Challenge:} Not linearly separable.
                     \item \textbf{Requirement:} Needs at least one hidden layer. %find reference for this
@@ -215,8 +215,8 @@
                     \item \textbf{Data Constraints:} 
                     \begin{equation*}
                          \begin{cases}
-                            \forall k, c[k]= 1: y[k] \ge \delta \\[-2pt]
-                            \forall k, c[k]= 0: y[k] \le 0
+                            \forall k, y_{\text{data}}[k]= 1: y[k] \ge \delta \\[-2pt]
+                            \forall k, y_{\text{data}}[k]= 0: y[k] \le 0
                         \end{cases}
                         \quad \forall k: x[k] = x_{\text{data}}[k]
                     \end{equation*}
@@ -285,7 +285,7 @@
         \frametitle{Solving Feasibility Problems}
         Find $x \in \bigcap C_i$.\\
         Projection on to set: $P_C(x) = \arg\min_{y \in C} \|x - y\|$\\
-        \scriptsize{ Strong theoretical results in the convex case; but not in the non-convex case.\\}
+        {\scriptsize Strong theoretical results in the convex case; but not in the non-convex case.\\}
 
         \vspace{1em}
         \textbf{Common Algorithms:}
@@ -764,7 +764,7 @@
                     \caption{Performance on Synthetic benchmark}
                 \end{figure}
             \end{column}
-            \begin{column}{0.33\textwidth}
+            \begin{column}{0.32\textwidth}
                 \begin{figure}
                     \includegraphics[width=\textwidth]{accuracy_curves.png}
                     \caption{Performance on mnist}
