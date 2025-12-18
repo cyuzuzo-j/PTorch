@@ -100,40 +100,86 @@
     \begin{frame}[KUL-standard]
         \frametitle{Paradigm Shift}
         \framesubtitle{Optimization as Feasibility}
+        \vspace*{-1.5em} 
         \begin{columns}[onlytextwidth,T]
             % Gradient Based
             \begin{column}{0.48\textwidth}
-                \textbf{\large Gradient Based}\\
-                \vspace{0.5em}
-                Minimize a loss function: % moet technisch gezien cost zijn denk ik 
+                \textbf{Gradient Based}
                 \begin{equation*}
-                    \min_{\theta} \mathcal{L}(f(x;\theta), y)
+                    \minimize_{\theta} \quad \mathcal{L}(f(x;\theta), y)
                 \end{equation*}
                 
                 Update step (Gradient Descent):
                 \begin{equation*}
-                    \theta \leftarrow \theta - \eta \nabla_\theta \mathcal{L}
+                     \theta^{k+1} = \theta^k - \eta \nabla_\theta \mathcal{L}
                 \end{equation*}
-                \vfill
+                
+                \vspace{0.5em}
+                \centering
+                \begin{tikzpicture}[scale=0.8]
+                    % Concave function graph
+                    \draw[->, gray!50] (-1.8,0) -- (1.8,0); 
+                    \draw[->, gray!50] (0,-0.2) -- (0,2.5);
+                    \draw[thick, KUL-BLUE, domain=-1.5:1.5, samples=100] plot (\x, {\x*\x});
+                    
+                    % Point and Gradient Vector
+                    \coordinate (x0) at (-1.1, 1.21); % Point at x = -1.1
+                    \fill[red] (x0) circle (2.5pt) node[left, font=\scriptsize, text=black, xshift=-2pt] {$\theta^k$};
+                    
+                    % Tangent/Gradient arrow
+                    % Slope at x=-1.1 is 2*(-1.1) = -2.2.
+                    % We want to go "downhill", so direction is positive x.
+                    % Vector (1, -2.2) normalized roughly. 
+                    % Let's just draw a vector pointing down along the curve.
+                    \draw[->, >=latex, red, thick] (x0) -- ++(0.5, -1) node[midway, above right, font=\tiny, inner sep=1pt] {$-\nabla \mathcal{L}$};
+                    
+                    % Dashed drop line to axis (optional, but adds context)
+                    \draw[dashed, gray] (x0) -- (-1.1, 0);
+                    \node[below, font=\tiny, gray] at (-1.1, 0) {$\theta^k$};
+
+                    % Target min
+                    \fill[gray] (0,0) circle (1.5pt);
+                \end{tikzpicture}
             \end{column}
             
             \hspace{0.5em}
 
             % Projection Based
             \begin{column}{0.48\textwidth}
-                \vspace{-0.1em}
-                \textbf{\large Feasibility Based}\\
-                \vspace{0.5em}
-                Find a point in the intersection of constraints:
+                \textbf{ Feasibility Based}
                 \begin{equation*}
-                    \theta \in \bigcap_{i=1}^m C_i
+                    \theta \in \cap_{i=1}^m C_i
                 \end{equation*}
                 
-                Update step (e.g. Cyclic Projections):
+                Update step (Projections):
                 \begin{equation*}
-                    \theta \leftarrow P_{C_1}P_{C_2} \ldots P_{C_m}(\theta)
+                    \theta_{k+1} = P_{C_1}P_{C_2} \ldots P_{C_m}(\theta_k)
                 \end{equation*}
-                \vfill
+                
+                \vspace{0.5em}
+                \centering
+                \begin{tikzpicture}[scale=0.8]
+                    % Nice intersecting sets
+                    \fill[KUL-BLUE!15, draw=KUL-BLUE, thick] (0.5, 0.8) circle (0.9);
+                    \node[KUL-BLUE] at (0.5, 1.9) {$C_1$};
+                    
+                    \fill[KUL-BLUE!30, draw=KUL-BLUE, thick, fill opacity=0.5] (0, -0.6) rectangle (2.0, 0.6);
+                    \node[KUL-BLUE] at (2.3, 0) {$C_2$};
+                    
+                    % Projection path
+                    \coordinate (start) at (-1.0, 1.2);
+                    % Visual approximation for clarity
+                    \coordinate (p1) at (-0.3, 1.1); 
+                    \coordinate (p2) at (0.2, 0.6);
+                    \coordinate (p3) at (0.4, 0.75);
+
+                    \fill[red] (start) circle (2pt);
+                    \draw[->, >=latex, red, thick] (start) -- (p1) node[midway, above, font=\tiny, black] {$P_{C_1}$};
+                    \fill[red] (p1) circle (1.5pt);
+                    \draw[->, >=latex, red, thick] (p1) -- (p2) node[midway, right, font=\tiny, black] {$P_{C_2}$};
+                    \fill[red] (p2) circle (1.5pt);
+                    \draw[->, >=latex, red, thick] (p2) -- (p3);
+                \end{tikzpicture}
             \end{column}
         \end{columns}
     \end{frame}
