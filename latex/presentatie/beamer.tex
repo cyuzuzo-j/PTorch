@@ -247,6 +247,102 @@
         \frametitle{Methodology}
     \end{frame}
 
+    % General Constraints
+    \begin{frame}[KUL-standard]
+        \frametitle{Neuron Constraints}
+        \framesubtitle{General Formulation}
+        \vspace{-1em}
+        \footnotesize
+        \setlength{\abovedisplayskip}{2pt}
+        \setlength{\belowdisplayskip}{2pt}
+        \setlength{\abovedisplayshortskip}{0pt}
+        \setlength{\belowdisplayshortskip}{0pt}
+        
+        \begin{columns}[onlytextwidth,T]
+            \begin{column}{0.49\textwidth}
+                \begin{itemize}
+                    \setlength\itemsep{1.5em} 
+                    
+                    \item \textbf{Consensus Constraint} \\
+                    \small Parameters identical across batch samples.
+                    
+                    \item \textbf{Bilinear Constraint} ($y = w^\top x$) \\
+                    \small Enforces input-output consistency.
+                    
+                    \item \textbf{Normalization Constraint} ($\|w\| \le c$) \\
+                    \small (optional) Regularizes weights for stability.
+                \end{itemize}
+            \end{column}
+            \begin{column}{0.5\textwidth}
+            \vspace{2em}
+            \centering
+            \begin{tikzpicture}[
+                >=Stealth, 
+                scale=0.5, transform shape,
+                var/.style={circle, draw=gray!80, thick, fill=white, minimum size=0.8cm, inner sep=0pt},
+                hidden/.style={circle, draw=KUL-BLUE!80!orange, thick, fill=white, minimum size=0.8cm, inner sep=0pt},
+                block/.style={rectangle, draw=gray, fill=gray!20, minimum width=1.5cm, minimum height=0.8cm, rounded corners=2pt},
+                conn/.style={-, gray!50},
+                boldconn/.style={-, KUL-BLUE!80!orange, thick}
+            ]
+                % Layer 1 (Input) - 4 nodes
+                \foreach \y [count=\i] in {3, 2, 1, 0} {
+                    \node[var] (l1-\i) at (0, \y*1.5) {};
+                }
+                
+                % Layer 2 (Hidden) - 3 nodes
+                \foreach \y [count=\i] in {2.5, 1.5, 0.5} {
+                    \node[hidden] (l2-\i) at (4, \y*1.5) {};
+                }
+                
+                % Layer 3 (Blocks) - 3 rectangles
+                \foreach \y [count=\i] in {2.5, 1.5, 0.5} {
+                    \node[block] (l3-\i) at (6, \y*1.5) {};
+                }
+                
+                % Layer 4 (Output/Next) - 3 nodes
+                \foreach \y [count=\i] in {2.5, 1.5, 0.5} {
+                    \node[var] (l4-\i) at (8, \y*1.5) {};
+                }
+
+                % Connections
+                % Fully connected L1 -> L2
+                \foreach \i in {1,...,4} {
+                    \foreach \j in {1,...,3} {
+                        \draw[conn] (l1-\i) -- (l2-\j);
+                    }
+                }
+                
+                % L2 -> L3
+                \foreach \i in {1,...,3} {
+                    \draw[conn] (l2-\i) -- (l3-\i);
+                }
+                
+                % L3 -> L4
+                \foreach \i in {1,...,3} {
+                    \draw[conn] (l3-\i) -- (l4-\i);
+                }
+                
+                % Some bold connections to mimic the orange/highlighted paths
+                \draw[boldconn] (l1-1) -- (l2-1);
+                \draw[boldconn] (l1-2) -- (l2-1);
+                \draw[boldconn] (l1-3) -- (l2-1);
+                \draw[boldconn] (l1-4) -- (l2-1);
+
+                % Final node far right?
+                \node[var] (out) at (11, 2.25) {};
+                
+                % Connections to final
+                \foreach \i in {1,...,3} {
+                    \draw[conn] (l4-\i) -- (out);
+                }
+
+            \end{tikzpicture}
+            \end{column}
+        \end{columns}
+        
+    \end{frame}
+
     % XOR Constraints
     \begin{frame}[KUL-standard]
         \frametitle{Constraints for the XOR Classifier}
