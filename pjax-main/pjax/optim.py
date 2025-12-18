@@ -328,7 +328,7 @@ class DouglasRachford(BipartiteOptimizer):
         )
 
 
-class DouglasRachfordMonumentum(BipartiteOptimizer):
+class DouglasRachfordMomentum(BipartiteOptimizer):
     """Douglas-Rachford optimizer for bipartite constraint satisfaction.
 
     Implements the Douglas-Rachford algorithm using reflection operators:
@@ -339,27 +339,28 @@ class DouglasRachfordMonumentum(BipartiteOptimizer):
         steps_per_update: number of optimization steps per update call.
         change_projection_order: whether to reverse the order of projections.
         relaxation: relaxation parameter :math:`\\lambda \\in (0, 1]`, controls step size and convergence.
+        beta: momentum parameter :math:`\\beta \\in [0, 1)`, controls the look-ahead step.
 
     Attributes:
         relaxation: the relaxation parameter for the Douglas-Rachford iteration.
+        beta: the momentum parameter.
     """
 
-    def __init__(self, steps_per_update=50, change_projection_order=False, relaxation=0.5):
+    def __init__(self, steps_per_update=50, change_projection_order=False, relaxation=0.5, beta=0.9):
         super().__init__(steps_per_update, change_projection_order)
         self.relaxation = relaxation
-        self.beta = 0.9
+        self.beta = beta
         self.learning_rate = 1
         self.uses_velocity = True
-
 
     def _step(self, vars, projection_a, projection_b, velocity):
         def reflection(projection, vars):
             return jax.tree.map(lambda x, y: 2.0 * x - y, projection(vars), vars)
 
-        vars_look_ahead = jax.tree.map(lambda x, d: x + 0.9*d , vars, velocity)
+        vars_look_ahead = jax.tree.map(lambda x, d: x + self.beta * d, vars, velocity)
         new_vars = jax.tree.map(
             lambda x, y: (1.0 - self.relaxation) * x + self.relaxation * y,
-            vars,
+            vars_look_ahead,
             reflection(projection_b, reflection(projection_a, vars_look_ahead)),
         )
         velocity = jax.tree.map(lambda x, y: x - y, new_vars, vars)

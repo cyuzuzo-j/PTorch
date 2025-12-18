@@ -634,7 +634,7 @@ if __name__ == "__main__":
             elif opt_name == "dr":
                 optimizer = optim.DouglasRachford(steps_per_update=args.steps_per_update)
             elif opt_name == "dr_mon":
-                optimizer = optim.DouglasRachfordMonumentum(steps_per_update=args.steps_per_update)
+                optimizer = optim.DouglasRachfordMomentum(steps_per_update=args.steps_per_update)
             elif opt_name == "dm":
                 optimizer = optim.DifferenceMap(beta=args.dm_beta)
             elif opt_name == "ar":

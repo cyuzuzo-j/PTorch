@@ -22,7 +22,7 @@
 
 % Setup the title page
 \title{Learning with Projections}
-\subtitle{Feasability based optimization for Neural Networks}
+\subtitle{Feasibility based optimization for Neural Networks}
 \institute{Promotor: Panos Patrinos, Daily Supervisor: Jan Quan}
 \author{Jeff Jambé}
 %---------------%
@@ -284,7 +284,7 @@
     \begin{frame}[KUL-standard]
         \frametitle{Solving Feasibility Problems}
         Find $x \in \bigcap C_i$.\\
-        Projection on to set: $P_C(x) \in \arg\min_{y \in C} \|x - y\|$\\
+        Projection on to set: $P_C(x) = \arg\min_{y \in C} \|x - y\|$\\
         
         \vspace{1em}
         \textbf{Common Algorithms:}
@@ -329,7 +329,7 @@
         \end{equation*}
         
         \textbf{Projection Objective:}
-        Find closest point $(y, x, w) \in \mathbb{R} \times \mathbb{R}^{n} \times \mathbb{R}^{n}$ to the prior estimate $(y_0, x_0, w_0)$ (If $\gamma$ is $\infty$: $y=y_0$):\\
+        Find closest point $(y, x, w) \in \mathbb{R} \times \mathbb{R}^{n} \times \mathbb{R}^{n}$ to the prior estimate $(y_0, x_0, w_0)$ (If $\gamma$ $\to$ $\infty$: $y=y_0$):\\
         \begin{equation*}
              \minimize_{y, x, w} \quad \|x - x_0\|^2 + \|w - w_0\|^2 + \gamma^2(y - y_0)^2 
         \end{equation*}
@@ -390,7 +390,7 @@
     % Experiments Section
     \begin{frame}[KUL-header]
         \frametitle{Experiments}
-        \framesubtitle{Standard Projections (no PJAX)}
+        \framesubtitle{JAX optimizer}
     \end{frame}
 
     \begin{frame}[KUL-standard]
@@ -426,9 +426,9 @@
                 \textbf{perfomance}\\
                 \vspace{0.2em}
                 \begin{KULtable}{\textwidth}{@{}L l l@{}}
-                     \parbox{1.2cm}{\textbf{AP+STEP}} & \rule{2.669cm}{0.8em} & 26.69s \\[0.5em]
-                     \parbox{1.2cm}{\textbf{AP+RELU}} & \rule{4.0cm}{0.8em} & 40.0s \\[0.5em]
-                     \parbox{1.2cm}{\textbf{ADAM + RELU}} & \rule{0.198cm}{0.8em} & 1.98s \\[0.5em]
+                     \parbox{2cm}{\textbf{AP+STEP}} & \rule{2.669cm}{0.8em} & 26.69s \\[0.5em]
+                     \parbox{2cm}{\textbf{AP+RELU}} & \rule{4.0cm}{0.8em} & 40.0s \\[0.5em]
+                     \parbox{2cm}{\textbf{ADAM}} & \rule{0.198cm}{0.8em} & 1.98s \\[0.5em]
                 \end{KULtable}
             \end{column}
             
