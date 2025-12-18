@@ -1,9 +1,6 @@
-% 4:3 (default) aspect ratio
-%\documentclass[t, xcolor=table]{beamer}
 % 16:9 aspect ratio
 \documentclass[t, xcolor=table, aspectratio=169]{beamer}
 
-% Basic packages which are recommended for the KUL beamer theme
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage[UKenglish]{datetime}
@@ -25,13 +22,12 @@
 
 % Setup the title page
 \title{Learning with Projections}
-\subtitle{Gradient-free optimization for Neural Networks}
+\subtitle{Feasability based optimization for Neural Networks}
 \institute{Promotor: Panos Patrinos, Daily Supervisor: Jan Quan}
 \author{Jeff Jambé}
 %---------------%
 % Main document %
 %---------------%
-% Redefine footer to remove institute info (fix errors and clutter)
 \makeatletter
 \expandafter\let\csname beamer@@tmpop@footline@KUL\endcsname\relax
 \makeatother
@@ -55,6 +51,8 @@
     }\vskip0pt%
 }
 
+\DeclareMathOperator*{\minimize}{minimize}
+
 \begin{document}
     % Title page
     % ----------
@@ -67,9 +65,25 @@
     % Outline
     % -------
     \begin{frame}[KUL-standard-notoc]
-        \frametitle{Outline}
+        \frametitle{Agenda}
         \vspace{-1em}
-        \tableofcontentsTOP
+        \begin{columns}[onlytextwidth,T]
+             \begin{column}{0.95\textwidth}
+                \large
+                \textbf{01 Introduction}
+                \begin{itemize}
+                    \normalsize
+                    \setlength\itemsep{0.2em}
+                    \item Constraints in neural networks
+                    \item Projections of common constraints
+                    \item Solving feasibility problems
+                \end{itemize}
+                \vspace{0.8em}
+                \textbf{02 Experiments}\\
+                \vspace{0.8em}
+                \textbf{04 Planning}
+            \end{column}
+        \end{columns}
     \end{frame}
 
     % Introduction Section
@@ -77,7 +91,6 @@
         \frametitle{Introduction}
     \end{frame}
 
-    % Mathematical Formulation Slide
     % Mathematical Formulation Slide
     \begin{frame}[KUL-standard]
         \frametitle{Paradigm Shift}
@@ -121,7 +134,6 @@
     \end{frame}
 
     % Motivation Slide
-    % Motivation Slide
     \begin{frame}[KUL-standard]
         \frametitle{Motivation}
         \vspace{1em}
@@ -135,6 +147,9 @@
             \item[\color{KUL-BLUE}\large $\blacktriangleright$] 
             \textbf{High degrees of parallelization} \\
             \small Projections can often be computed in parallel, enabling efficient large-scale training.
+            
+            \item[\color{KUL-BLUE}\large $\blacktriangleright$] 
+            \textbf{Feasible in the overparametrized case} \\
         \end{itemize}
     \end{frame}
 
@@ -152,8 +167,9 @@
                 \textbf{\large The XOR Problem}
                 \vspace{1em}
                 \begin{itemize}
-                    \item \textbf{Input:} $x \in \{0,1\}^2$
-                    \item \textbf{Output:} $y \in \{0,1\}$ (1 if $x_1 \neq x_2$)
+                    \item \textbf{Input:} $x_{\text{data}} \in \{0,1\}^2$
+                    \item \textbf{Output:} $y \in \{0,1\}$ (1 iff $x_1 \neq x_2$)
+                    \item \textbf{Datapoints:} $k=4$\\
                     \item \textbf{Challenge:} Not linearly separable.
                     \item \textbf{Requirement:} Needs at least one hidden layer. %find reference for this
                 \end{itemize}
@@ -175,24 +191,6 @@
         \end{columns}
     \end{frame}
 
-    % Slide 2: Why XOR is Ideal
-    \begin{frame}[KUL-standard]
-        \frametitle{Why XOR for Projection-Based Learning?}
-        \vspace{1em}
-        \begin{itemize}
-            \item \textbf{Step Activations:} 
-            \small Conviently modeled with \textbf{Step functions} (0 or 1), which have zero gradients almost everywhere.
-            \vspace{0.5em}
-            
-            \item \textbf{Didactic Value:} 
-            \small Fully interpretable weights and projections.
-        \end{itemize}
-        
-        \vspace{1.5em}
-        \centering
-        \textit{"We will now use this XOR classifier as a running example to explain how projection-based learning works."}
-    \end{frame}
-
     % Methodology Section
     \begin{frame}[KUL-header]
         \frametitle{Methodology}
@@ -203,7 +201,6 @@
         \frametitle{Constraints for the XOR Classifier}
         \framesubtitle{Formulating the Problem}
         \vspace{-1em}
-        % Aggressively compact content
         \footnotesize
         \setlength{\abovedisplayskip}{2pt}
         \setlength{\belowdisplayskip}{2pt}
@@ -211,10 +208,9 @@
         \setlength{\belowdisplayshortskip}{0pt}
         
         \begin{columns}[onlytextwidth,T]
-            % Wide column for formulas
             \begin{column}{0.95\textwidth}
                 \begin{enumerate}
-                    \setlength\itemsep{0.2em} % Very tight item separation
+                    \setlength\itemsep{0.2em} 
             
                     \item \textbf{Data Constraints:} 
                     \begin{equation*}
@@ -222,38 +218,37 @@
                             \forall k, c[k]= 1: y[k] \ge \delta \\[-2pt]
                             \forall k, c[k]= 0: y[k] \le 0
                         \end{cases}
-                        \quad \forall k: x[k] = d[k]
-                    \end{equation*}
-        
-                    \item \textbf{Model Constraints:}
-                    \begin{equation*}
-                        \forall k: \quad z[k] = W_{in}[k]
-                        \begin{bmatrix}
-                            x[k]\\
-                            1
-                        \end{bmatrix} \quad
-                        h[k] = \begin{cases}
-                            1 & \text{if } z[k] \ge 0 \\[-2pt]
-                            0 & \text{otherwise}
-                        \end{cases} \quad
-                        y[k] = W_{out}[k]\begin{bmatrix}
-                            h[k]\\
-                            1
-                        \end{bmatrix}
+                        \quad \forall k: x[k] = x_{\text{data}}[k]
                     \end{equation*}
         
                     \item \textbf{Consensus Constraints:}
                     \begin{equation*}
                          \forall k: W_{in}[k] = W_{in}, \quad W_{out}[k] = W_{out}
                     \end{equation*}
-
+ 
+                    \item \textbf{Model Constraints:}
+                    \begin{equation*}
+                        \forall k: z[k] = W_{in}[k];
+                        \begin{bmatrix}
+                            x[k]\\
+                            1
+                        \end{bmatrix};
+                        h[k] = \sigma(z[k]) = \begin{cases}
+                            1 & \text{if } z[k] \ge 0 \\[-2pt]
+                            0 & \text{otherwise}
+                        \end{cases};
+                        y[k] = W_{out}[k]\begin{bmatrix}
+                            h[k]\\
+                            1
+                        \end{bmatrix}
+                    \end{equation*}
                 \end{enumerate}
             \end{column}
             
             % Narrow column for vertical diagram
             \begin{column}{0.045\textwidth}
                 \centering
-                \vspace{0.5em}
+                \vspace{-1em}
                 \begin{tikzpicture}[
                     >=Stealth, 
                     auto, 
@@ -289,7 +284,7 @@
     \begin{frame}[KUL-standard]
         \frametitle{Solving Feasibility Problems}
         Find $x \in \bigcap C_i$.\\
-        Projection on to set: $P_C(x) = \arg\min_{y \in C} \|x - y\|$\\
+        Projection on to set: $P_C(x) \in \arg\min_{y \in C} \|x - y\|$\\
         
         \vspace{1em}
         \textbf{Common Algorithms:}
@@ -308,9 +303,9 @@
                 \end{align*}
             \end{column}
             \begin{column}{0.3\textwidth}
-                \textbf{\color{KUL-BLUE} Cyclic, Dykstra , ....}
+                \textbf{\color{KUL-BLUE} Cyclic, Dykstra , etc.}
                 \begin{align*}
-                    x_{k+1} =(x_k)
+                    x_{k+1} =f(x_k)
                 \end{align*}
             \end{column}
         \end{columns}
@@ -324,7 +319,6 @@
     \end{frame}
 
     % Bilinear Constraint Section
-    % Bilinear Constraint Section
     % Slide 1: Problem Definition
     \begin{frame}[KUL-standard]
         \frametitle{Projection for the Bilinear constraint}
@@ -335,9 +329,9 @@
         \end{equation*}
         
         \textbf{Projection Objective:}
-        Find the closest point $(y, x, w)$ to the prior estimate $(y_0, x_0, w_0)$:
+        Find closest point $(y, x, w) \in \mathbb{R} \times \mathbb{R}^{n} \times \mathbb{R}^{n}$ to the prior estimate $(y_0, x_0, w_0)$ (If $\gamma$ is $\infty$: $y=y_0$):\\
         \begin{equation*}
-             \min_{y, x, w} \quad \|x - x_0\|^2 + \|w - w_0\|^2 + \gamma^2(y - y_0)^2 
+             \minimize_{y, x, w} \quad \|x - x_0\|^2 + \|w - w_0\|^2 + \gamma^2(y - y_0)^2 
         \end{equation*}
         \vspace{0.5em}
     \end{frame}
@@ -351,7 +345,7 @@
             L = \|x - x_0\|^2 + \|w - w_0\|^2 + \gamma^2(y - y_0)^2 + \lambda( y - w^\top x)
         \end{equation*}
         
-        Setting $\nabla L = 0$ yields the stationarity conditions (with $u = \lambda/2$):
+        Setting $\nabla L = 0$ yields (with $u = \lambda/2$):
         \begin{columns}[onlytextwidth,T]
             \begin{column}{0.48\textwidth}
                 \begin{align*}
@@ -361,7 +355,8 @@
             \end{column}
             \begin{column}{0.48\textwidth}
                 \begin{align*}
-                    y &= y_0 - \frac{ u}{\gamma^2}
+                    y &= y_0 - \frac{ u}{\gamma^2}\\
+                    y &= w^\top x
                 \end{align*}
             \end{column}
         \end{columns}
@@ -395,7 +390,7 @@
     % Experiments Section
     \begin{frame}[KUL-header]
         \frametitle{Experiments}
-        \framesubtitle{Standard Projections (Pre-PJAX)}
+        \framesubtitle{Standard Projections (no PJAX)}
     \end{frame}
 
     \begin{frame}[KUL-standard]
@@ -415,31 +410,34 @@
 
     % Experiment 1: Binary XOR Classification
     \begin{frame}[KUL-standard]
-        \frametitle{Experiment 1: Binary XOR Classification}
+        \frametitle{Experiment 1: Binary Classification}
         \vspace*{-1.5em}
         \begin{columns}[onlytextwidth,T]
              % Left Column
             \begin{column}{0.55\textwidth}
                 \begin{itemize}
-                    \item \textbf{Setup:} Revisit the \textbf{Running Example}.
-                    \item \textbf{Task:} Learn XOR mapping $(x \in \{0,1\}^8 \to y \in \{0,1\})$.
+                    \item \textbf{Task:} Learn random mapping $(x \in \{0,1\}^5 \to y \in \{0,1\})$.
                     \item \textbf{Architecture:} 
                     \begin{itemize}
-                        \item 1 Hidden Layer (2 units).
-                        \item \textbf{Step Activations} (Non-differentiable).
+                        \item 1 Hidden Layer (1024 units).
                     \end{itemize}
                 \end{itemize}
                 \vspace{1em}
+                \textbf{perfomance}\\
+                \vspace{0.2em}
+                \begin{KULtable}{\textwidth}{@{}L l l@{}}
+                     \parbox{1.2cm}{\textbf{DR+STEP}} & \rule{2.669cm}{0.8em} & 26.69s \\[0.5em]
+                     \parbox{1.2cm}{\textbf{DR+RELU}} & \rule{4.0cm}{0.8em} & 40.0s \\[0.5em]
+                     \parbox{1.2cm}{\textbf{TORCH}} & \rule{0.198cm}{0.8em} & 1.98s \\[0.5em]
+                \end{KULtable}
             \end{column}
             
             % Right Column: Stats
             \begin{column}{0.42\textwidth}
-                \textbf{PERFORMANCE}
-                \begin{KULtable}{\textwidth}{@{}L l l@{}}
-                     \parbox{1.2cm}{\textbf{AP+}\\ \textbf{STEP}} & \rule{2.0cm}{0.8em} & 2.91s \\[0.5em]
-                     \parbox{1.2cm}{\textbf{AP+}\\ \textbf{RELU}} & \rule{2.0cm}{0.8em} & 2.90s \\[0.5em]
-                     \parbox{1.2cm}{\textbf{DR+}\\ \textbf{RELU}} & \rule{3.0cm}{0.8em} & 4.45s \\[0.5em]
-                \end{KULtable}
+            \begin{figure}
+                \includegraphics[width=\textwidth]{benchmark_convergence.png}
+                \caption{Convergence Rate}
+            \end{figure}
             \end{column}
         \end{columns}
     \end{frame}
@@ -449,34 +447,30 @@
         \frametitle{Experiment 2: Non-negative Matrix Factorization}
         \vspace*{-1.5em}
         \begin{columns}[onlytextwidth,T]
-            \begin{column}{0.6\textwidth}
+            \begin{column}{0.49\textwidth}
                 \begin{itemize}
-                    \item \textbf{Task:} Factorize input $V \approx WH$ with $W, H \geq 0$.
-                    \item \textbf{Benchmark:} Comparison with Douglas-Rachford and scikit-learn (CD).
+                    \item \textbf{Formal Definition:} \\
+                    Given $V \in \mathbb{R}^{m \times n}$ and rank $r$:
+                    \vspace{-0.5em}
+                    \begin{equation*}
+                        \minimize_{W \in \mathbb{R}^{m \times r}_{\geq 0}, H \in \mathbb{R}^{r \times n}_{\geq 0}} \frac{1}{2} \| V - WH \|_F^2
+                    \end{equation*}
                 \end{itemize}
-                
-                \vspace{1em}
-                \begin{KULtable}{\textwidth}{|L|C|C|}
-                    \hline
-                    \KULheadrow{Algorithm, Error (MSE), Time} \\ \hline
-                    Douglas-Rachford (LWL) & -  & 2s \\ \hline
-                    Douglas-Rachford & 3.41e-02 & 8s \\ \hline
-                    scikit-learn & 1.98e-02 & $<$1s \\ \hline
-                \end{KULtable}
-                \vspace{0.5em}
-                \small *LWL: Lin-projected method (referenced)
+                \begin{itemize}
+                    \item Matrix Size: $6 \times 6$
+                    \item Rank: 5
+                \end{itemize}
             \end{column}
             \hspace{1em}
-            \begin{column}{0.38\textwidth}
-                \vspace*{-2em}
-                \begin{block}{Configuration}
-                    \smallskip
-                    \begin{itemize}
-                        \item Matrix Size: $6 \times N$
-                        \item Rank: 5
-                        \item Stopping: $\epsilon < 10^{-4}$
-                    \end{itemize}
-                \end{block}
+            \begin{column}{0.49\textwidth}
+                \vspace{0.5em}
+                \begin{KULtable}{\textwidth}{|L|C|C|}
+                    \hline
+                    \KULheadrow{Algorithm , Error (MSE), Time} \\ \hline
+                    Douglas-Rachford (LWL) & -  & 2s \\ \hline
+                    Douglas-Rachford & 3.41e-02 & 8s \\ \hline
+                    scikit-learn (CD) & 1.98e-02 & $<$1s \\ \hline
+                \end{KULtable}
             \end{column}
         \end{columns}
     \end{frame}
@@ -511,7 +505,7 @@
             & \statusbadge{blue}{VALIDATING} \\ \hline
 
             \textbf{Testing Different Optimizers} \newline
-            \scriptsize Variants of DR/Dykstra being evaluated.
+            \scriptsize Variants being evaluated.
             & \statusbadge{blue}{VALIDATING} \\ \hline
              
              \textbf{Effect of Batch Size} \newline
@@ -526,8 +520,8 @@
 
     % PJAX Section
     \begin{frame}[KUL-header]
-        \frametitle{PJAX Framework}
-        \framesubtitle{Differentiable Projections in JAX}
+        \frametitle{PJAX}
+        \framesubtitle{Projection-based framework}
     \end{frame}
 
     % PJAX Framework
@@ -536,21 +530,113 @@
         \vspace*{-1.5em}
         \begin{columns}[onlytextwidth,T]
             \begin{column}{0.6\textwidth}
-                \textbf{\large A Projection-based framework for gradient-free learning [2]}
-                \par\vspace{0.5em}
-                PJAX enables the definition of projection-based neural networks using a graph-based API similar to standard deep learning libraries.
-                
-                \vspace{1em}
+                \textbf{\large A Projection-based framework for gradient-free learning [2]}                
                 \centering
-                \includegraphics[width=\textwidth]{{../thesis/images/computational graph}.png}
+\resizebox{\linewidth}{!}{
+                \begin{tikzpicture}[
+                    node distance=0.8cm and 0.8cm,
+                    inner sep=2pt,
+                    font=\scriptsize\bfseries,
+                    red_node/.style={circle, draw=none, fill=red!70!black, text=white, minimum size=1.1cm, align=center},
+                    green_node/.style={circle, draw=none, fill=green!60!black, text=white, minimum size=1.1cm, align=center},
+                    grey_node/.style={circle, draw=none, fill=gray!30, text=black, minimum size=1.0cm, align=center},
+                    arr/.style={-Latex, thick}
+                ]
+                    % --- Branch 1: In Array ---
+                    \node[red_node] (in_arr) at (0,0) {Array};
+                    \node[grey_node, right=of in_arr] (r1) {reshape};
+                    \node[grey_node, right=of r1] (rp1) {repeat};
+                    
+                    % --- Branch 2: W1 ---
+                    \node[red_node, below=2.5cm of in_arr] (w1) {dense\_0\\weight};
+                    \node[grey_node] (r2) at (w1 -| r1) {reshape};
+                    \node[grey_node, right=of r2] (rp2) {repeat};
+                    \node[grey_node, above=of rp2] (rp2_b) {repeat}; % Extra repeat in image? No, looks like 1 repeat.
+                    % Wait, user image has "repeat" then "repeat" sometimes?
+                    % Let's stick to 1 reshape, 1 repeat per branch as typical, unless image shows double.
+                    % Image branch 2: w1 -> reshape -> repeat -> repeat -> dot.
+                    % Let's add the second repeat to match "exact".
+                    \node[grey_node] (rp2_2) at ($(rp2)!0.5!(rp1) + (0.8, -0.5)$) {repeat}; 
+                    % Ideally align logically.
+                    
+                    % Let's Simplify placement by defining the merge point first.
+                    \node[green_node] (dot1) at (6, -1.5) {dot};
+                    
+                    % Align branches to dot1
+                    % Branch 1 Re-do
+                    \node[red_node] (in_arr) at (0,0) {Array};
+                    \node[grey_node] (r1) at (2.5, 0) {reshape};
+                    \node[grey_node] (rp1) at (4.5, 0) {repeat};
+                    
+                    % Branch 2 Re-do
+                    \node[red_node] (w1) at (2.0, -4.5) {dense\_0\\.weight};
+                    \node[grey_node] (r2) at (3.5, -3.5) {reshape};
+                    \node[grey_node] (rp2) at (4.5, -2.5) {repeat};
+                    % There is a chain in the image: w1 -> reshape -> repeat -> repeat -> dot
+                    \node[grey_node] (rp2_b) at (5.0, -2.5) {repeat}; % Actually let's just do reshape->repeat->dot to be safe if ambiguous, 
+                    % but user said "exact". The image has "repeat" stacked?
+                    % Image: w1 -> reshape -> repeat -> repeat -> dot. Yes.
+                    
+                    % Let's do a cleaner manual layout.
+                    
+                    % DOT 1
+                    \node[green_node] (dot1) at (6, -1) {dot};
+                    
+                    % Input Path -> Dot1
+                    \node[red_node] (in_arr) at (0, -1) {Array};
+                    \node[grey_node] (r1) at (2, -1) {reshape};
+                    \node[grey_node] (rp1) at (4, -1) {repeat};
+                    \draw[arr] (in_arr) -- (r1); \draw[arr] (r1) -- (rp1); \draw[arr] (rp1) -- (dot1);
+
+                    % Weight1 Path -> Dot1 ( Diagonal up)
+                    \node[red_node] (w1) at (3, -5) {dense\_0\\.weight};
+                    \node[grey_node] (r2) at (4, -4) {reshape};
+                    \node[grey_node] (rp2) at (5, -3) {repeat};
+                    \node[grey_node] (rp2b) at (5.5, -2) {repeat};
+                    \draw[arr] (w1) -- (r2); \draw[arr] (r2) -- (rp2); \draw[arr] (rp2) -- (rp2b); \draw[arr] (rp2b) -- (dot1);
+                    
+                    % SUM RELU
+                    \node[red_node] (sum_relu) at (7.5, 0) {sum\\relu};
+                    \draw[arr] (dot1) -- (sum_relu);
+                    
+                    % Bias Path -> Sum Relu (Diagonal up)
+                    \node[green_node] (bias) at (8, -5) {relu\_0\\.bias};
+                    \node[grey_node] (r3) at (8, -4) {reshape};
+                    \node[grey_node] (rp3) at (8, -2.5) {repeat};
+                    \draw[arr] (bias) -- (r3); \draw[arr] (r3) -- (rp3); \draw[arr] (rp3) -- (sum_relu);
+                    
+                    % DOT 2
+                    \node[green_node] (dot2) at (10.5, 2.5) {dot};
+                    
+                    % SumRelu -> Dot 2 (Diagonal up)
+                    \node[grey_node] (r4) at (8.5, 1.0) {reshape};
+                    \node[grey_node] (rp4) at (9.5, 1.8) {repeat};
+                    \draw[arr] (sum_relu) -- (r4); \draw[arr] (r4) -- (rp4); \draw[arr] (rp4) -- (dot2);
+                    
+                    % Weight 2 Path -> Dot 2 (Diagonal up from below)
+                    \node[red_node] (w2) at (11.5, -1) {out\\.weight};
+                    \node[grey_node] (r5) at (11.5, 0.2) {reshape};
+                    \node[grey_node] (rp5) at (11.5, 1.4) {repeat};
+                    \draw[arr] (w2) -- (r5); \draw[arr] (r5) -- (rp5); \draw[arr] (rp5) -- (dot2);
+                    
+                    % LOSS
+                    \node[red_node] (loss) at (12, 4.5) {cross\\entropy};
+                    \draw[arr] (dot2) -- (loss);
+                    
+                    % Target Path -> Loss
+                    \node[green_node] (target) at (13.5, 3.5) {Array};
+                    \draw[arr] (target) -- (loss);
+                    
+                \end{tikzpicture}
+                }
             \end{column}
             
             \begin{column}{0.38\textwidth}
                 \textbf{FEATURES}
                 \par\vspace{0.5em}
                 \begin{itemize}
-                    \item \textbf{Symbolic Graph Definition} \\
-                    \scriptsize Automatic handling of layer connections and projection operators.
+                    \item \textbf{Graph based} \\
+                    \scriptsize Elegant  handling of layer connections and projection operators.
                     \vspace{0.5em}
                     
                     \item \textbf{JAX-based Backend} \\
@@ -558,7 +644,7 @@
                     \vspace{0.5em}
                     
                     \item \textbf{Layer Library} \\
-                    \scriptsize Implementations of Dense, CNN, RNN layers.
+                    \scriptsize Implementations of Dense, CNN layers.
                 \end{itemize}
             \end{column}
         \end{columns}
@@ -579,14 +665,14 @@
                     block/.style={rectangle, draw=KUL-BLUE, thick, fill=white, text width=4cm, align=left, rounded corners, minimum height=1.5cm},
                     line/.style={draw, -Latex, thick}]
                     
-                    \node (comp) at (0, 2) [text width=3cm, align=left] {\textbf{Computation} \\ \scriptsize e.g. ReLU, Linear};
-                    \node (ops) at (5, 2) [block] {\textbf{Ops \& Projections} \\ \scriptsize Core operations + Projectors};
+                    \node (comp) at (0, 2) [text width=3cm, align=left] {\textbf{Computation} \\ \scriptsize e.g.\ ReLU, Linear};
+                    \node (ops) at (5, 2) [block] {\textbf{Ops \& Projections} \\ \scriptsize Core operations + Projections};
                     \draw[line] (comp) -- (ops);
                     
-                    \draw[thick, KUL-BLACK] (-1, 0.5) -- (8, 0.5); 
+                    \draw[thick, KUL-BLACK] (-2, 0.5) -- (8, 0.5); 
                     
-                    \node (shape) at (0, -1) [text width=3cm, align=left] {\textbf{Transforms} \\ \scriptsize e.g. Reshape};
-                    \node (nops) at (5, -1) [block] {\textbf{No-ops \& Inverse} \\ \scriptsize Static routing/reshaping};
+                    \node (shape) at (0, -1) [text width=3cm, align=left] {\textbf{Transforms} \\ \scriptsize e.g.\ Reshape};
+                    \node (nops) at (5, -1) [block] {\textbf{No-ops \& Inverse} \\ \scriptsize Reshape + Inverse};
                     \draw[line] (shape) -- (nops);
                     
                     \draw[dashed, orange, thick] (2.8, 3.2) rectangle (7.2, -2.2);
@@ -604,16 +690,16 @@
         \begin{columns}[onlytextwidth,T]
             \begin{column}{0.48\textwidth}
                 \begin{itemize}
+                    \item \textbf{Slow convergence} \\
+
                     \item \textbf{Memory Bottleneck} \\
-                    \scriptsize Explicit construction of the huge constraint matrix for convolution exceeds GPU memory (max 16 hidden units @ 4 layers on 96GB).
+                    \scriptsize “4-layer CNN necessitated reducing the number of hidden units per layer to 16 to fit within the available 96GB GPU memory”.
                     \vspace{1em}
-                    \item \textbf{Computational Cost} \\
-                    \scriptsize Projection involves large matrix inversions: $O(N^3)$ complexity.
                 \end{itemize}
             \end{column}
             \begin{column}{0.48\textwidth}
                 \centering
-                \includegraphics[width=\textwidth]{example1.png}
+                \includegraphics[width=\textwidth]{convergence_cnn.png}
                 \tiny \textit{CIFAR-10 - CNN (Limited Scalability)}
             \end{column}
         \end{columns}
@@ -622,8 +708,6 @@
     % 3. Removing the Memory Bottleneck
     \begin{frame}[KUL-standard]
         \frametitle{FFT-Based Convolution}
-        \vspace*{-1em}
-        \textbf{Solution:} Exploit the Convolution Theorem to diagonalize the operator.
         \par\vspace{1em}
         \centering
         \begin{tikzpicture}[auto,
@@ -633,19 +717,15 @@
             
             \node[stepnode, fill=pink] (n1) at (0,0) {1};
             \node[above=0.2cm] at (n1.north) {\textbf{FFT}};
-            \node[desc] at (0,-0.8) {Transform input and kernel to frequency domain. ($O(N \log N)$)};
+            \node[desc] at (0,-0.8) {Transform input and kernel to frequency domain.};
             
             \node[stepnode, fill=orange] (n2) at (4.5,0) {2};
             \node[above=0.2cm] at (n2.north) {\textbf{Hadamard}};
-            \node[desc] at (4.5,-0.8) {Element-wise product constraints are separable and cheap ($O(N)$).};
+            \node[desc] at (4.8,-0.8) {Element-wise product.};
             
             \node[stepnode, fill=cyan] (n3) at (9,0) {3};
             \node[above=0.2cm] at (n3.north) {\textbf{IFFT}};
-            \node[desc] at (9,-0.8) {Transform back to special domain.};
-            
-            \draw[arrowline] (-1, 1.5) -- (0, 1.5) -- (n1);
-            \draw[arrowline] (n3) -- (9, -2.5) -- (8, -2.5);
-            
+            \node[desc] at (9.7,-0.8) {Transform back.};            
         \end{tikzpicture}
     \end{frame}
     
@@ -654,24 +734,39 @@
         \frametitle{Current Status: FFT-CNN}
         \vspace*{-1em}
         \begin{itemize}
-            \item \textbf{Complexity:} Reduced from $O(N^3)$ to $O(N \log N)$.
-            \item \textbf{Current Limitation:} Scale of complex numbers and padding currently limits parallelism on current JAX version.
+            \item \textbf{Complexity:} having many filters results in weak performance. 
+            \item \textbf{Current Limitation:}  variable padding and stride are not supported.
         \end{itemize}
         
-        \vspace{1em}
+        \vspace{0.5em}
         \begin{block}{Ongoing Work}
-             \begin{itemize}
-                 \item Investigating convergence rates (currently lower than naive CNN).
-                 \item Optimizing complex-to-real shape transforms.
-                 \item Implementing full Stride/Pad support to match Conv2D API.
-             \end{itemize}
+        \begin{columns}[onlytextwidth,T]
+            \begin{column}{0.33\textwidth}
+                \begin{figure}
+                    \includegraphics[width=\textwidth]{batch.png}
+                    \caption{Scaling of forward}
+                \end{figure}
+            \end{column}
+            \begin{column}{0.33\textwidth}
+                \begin{figure}
+                    \includegraphics[width=\textwidth]{conv2d_vs_fftconv2d_benchmark.png}
+                    \caption{performance on Synthetic benchmark}
+                \end{figure}
+            \end{column}
+            \begin{column}{0.33\textwidth}
+                \begin{figure}
+                    \includegraphics[width=\textwidth]{accuracy_curves.png}
+                    \caption{performance on mnist}
+                \end{figure}
+            \end{column}
+        \end{columns}
         \end{block}
     \end{frame}
 
     % 5. Additional PJAX Experiments
     \begin{frame}[KUL-standard]
         \frametitle{Ongoing PJAX Experiments}
-        \vspace*{-1.5em}
+        \vspace*{-1.6em}
         \begin{KULtable}{\textwidth}{|L|c|}
             \hline
             \KULheadrow{Topic, Status} \\ \hline
@@ -684,17 +779,26 @@
             \scriptsize Projection-based MSE loss layer implemented.
             & \statusbadge{green}{DONE} \\ \hline
             
-            \textbf{Graph Propagation} \newline
-            \scriptsize Exploring non-local projection updates through the graph.
-            & \statusbadge{cyan}{RESEARCHING} \\ \hline
+            \textbf{Douglas–Rachford Variants} \newline
+            \scriptsize Different DR formulations are being evaluated to study their effect on convergence.
+            & \statusbadge{purple}{VALIDATING} \\ \hline
             
-            \textbf{Variational Autoencoder} \newline
-            \scriptsize Reformulating KL divergence as a constraint set.
+            \textbf{Alternative Optimization Strategy} \newline
+            \scriptsize Exploring the effect of propagating updates through the computational graph rather than using strictly local projections.
             & \statusbadge{cyan}{RESEARCHING} \\ \hline
+
+            \textbf{Variational Autoencoder} \newline
+            \scriptsize Work is ongoing to express the KL divergence term as a set of constraints suitable for projection-based optimization.
+            & \statusbadge{cyan}{RESEARCHING} \\ \hline
+
+            \textbf{Diffusion Neural Network} \newline
+            \scriptsize Initial testing indicates that PJAX’s current performance limits make large convolution-based diffusion architectures impractical; further optimization is required..
+            & \statusbadge{gray}{ON HOLD} \\ \hline
         \end{KULtable}
     \end{frame}
 
     % 6. Timeline
+
     \begin{frame}[KUL-standard]
         \frametitle{Timeline}
         \vspace*{-1em}
@@ -702,57 +806,37 @@
             % Column 1: Past/Current
             \begin{column}{0.48\textwidth}
                 \begin{beamercolorbox}[wd=\textwidth, sep=0.5em, rounded=true, shadow=true]{block body}
-                    \textbf{30 JAN - 14 FEB} \\ \scriptsize Implementation Refinement
+                    \textbf{30 JAN - 14 FEB} \\ \scriptsize Optimizing and profiling PJAX
                 \end{beamercolorbox}
                 \vspace{0.5em}
                 \begin{beamercolorbox}[wd=\textwidth, sep=0.5em, rounded=true, shadow=true]{block body}
-                    \textbf{15 FEB - 19 MAR} \\ \scriptsize Writing Thesis Text
+                    \textbf{19 FEB - 4 MAR} \\ \scriptsize Diffusion neural net
                 \end{beamercolorbox}
                 \vspace{0.5em}
                 \begin{beamercolorbox}[wd=\textwidth, sep=0.5em, rounded=true, shadow=true]{block body}
-                    \textbf{6 MAR - 21 MAR} \\ \scriptsize First Draft Review
+                    \textbf{8 MAR - 21 MAR} \\ \scriptsize Transformer layer
                 \end{beamercolorbox}
             \end{column}
             
             % Column 2: Future
             \begin{column}{0.48\textwidth}
                 \begin{beamercolorbox}[wd=\textwidth, sep=0.5em, rounded=true, shadow=true]{block body}
-                    \textbf{21 MAR - 28 MAR} \\ \scriptsize Feedback Integration
+                    \textbf{21 MAR - 28 MAR} \\ \scriptsize Positional embeddings
                 \end{beamercolorbox}
                 \vspace{0.5em}
                 \begin{beamercolorbox}[wd=\textwidth, sep=0.5em, rounded=true, shadow=true]{block body}
-                    \textbf{29 MAR - 4 APR} \\ \scriptsize Final Polish
+                    \textbf{29 MAR - 4 APR} \\ \scriptsize Benchmarking and testing the transformer
                 \end{beamercolorbox}
                 \vspace{0.5em}
                 \begin{beamercolorbox}[wd=\textwidth, sep=0.5em, rounded=true, shadow=true]{block body}
-                    \textbf{10 APR - 25 MAY} \\ \scriptsize Exam / Defense Preparation
+                    \textbf{16 APR - } \\ \scriptsize Poster and writing
                 \end{beamercolorbox}
             \end{column}
         \end{columns}
     \end{frame}
 
     % 7. References
-    \begin{frame}[KUL-standard]
-        \frametitle{References}
-        \scriptsize
-        \begin{thebibliography}{9}
-            \bibitem{parikh2014}
-            Parikh, N., \& Boyd, S. (2014).
-            \textit{Proximal algorithms}.
-            Foundations and Trends in Optimization, 1(3), 127-239.
-
-            \bibitem{kingma2014}
-            Kingma, D. P., \& Ba, J. (2014).
-            \textit{Adam: A method for stochastic optimization}.
-            arXiv preprint arXiv:1412.6980.
-
-            \bibitem{odonoghue2016}
-            O'Donoghue, B., Chu, E., Parikh, N., \& Boyd, S. (2016).
-            \textit{Conic optimization via operator splitting and homogeneous self-dual embedding}.
-            Journal of Optimization Theory and Applications, 169(3), 1042-1068.
-        \end{thebibliography}
-    \end{frame}
-
+    
     % 8. Questions
     \begin{frame}[KUL-standard]
         \centering
@@ -762,289 +846,5 @@
         \begin{tikzpicture}[remember picture, overlay]
             \fill[KUL-BLUE] (current page.south west) rectangle ($(current page.south east) + (0, 0.2)$);
         \end{tikzpicture}
-    \end{frame}
-
-    \appendix
-    \section*{Appendix}
-    \begin{frame}[KUL-standard]
-        \centering
-        \Huge \textbf{Appendix: Formatting Demo}
-    \end{frame}
-
-    % Formatting
-    \begin{frame}[KUL-standard-notoc]
-        \frametitle{Formatting}
-        \textbf{Bold text}
-        \par\ \par
-        \textit{Italicised text}
-        \par\ \par
-        \textul{Underlined text}
-        \par\ \par
-        \textst{Striked through text}
-        \par\ \par
-        \textsc{Small caps text}
-        \par\ \par
-        \textcolor{red}{Coloured text}
-    \end{frame}
-
-    % Unordered lists
-    \begin{frame}[KUL-standard-notoc]
-        \frametitle{Unordered list}
-        \begin{itemize}
-            \item First level
-            \begin{itemize}
-                \item Second level
-                \begin{itemize}
-                    \item Third level
-                    \begin{itemize}
-                        \item Fourth level
-                        \begin{itemize}
-                            \item Fifth level
-                        \end{itemize}
-                    \end{itemize}
-                \end{itemize}
-            \end{itemize}
-            \item ...
-        \end{itemize}
-    \end{frame}
-
-    % Ordered lists
-    \begin{frame}[KUL-standard-notoc]
-        \frametitle{Ordered list}
-        \begin{enumerate}
-            \item First level
-            \begin{enumerate}
-                \item Second level
-                \begin{enumerate}
-                    \item Third level
-                    \begin{enumerate}
-                        \item Fourth level
-                        \begin{enumerate}
-                            \item Fifth level
-                        \end{enumerate}
-                    \end{enumerate}
-                \end{enumerate}
-            \end{enumerate}
-            \item ...
-        \end{enumerate}
-    \end{frame}
-
-    % Hyperlinks
-    \begin{frame}[KUL-standard-notoc]
-        \frametitle{Hyperlinks}
-        \begin{itemize}
-            \item A hyperlink to some interesting page at
-                  \href{https://en.wikipedia.org/wiki/LaTeX}{wikipedia}.
-            \vspace{2em} % 2 lines of spacing
-            \item The same, but with the full URL:
-                  \url{https://en.wikipedia.org/wiki/LaTeX}
-            \vspace{2em} % 2 lines of spacing
-            \item And a special mailto command:
-                  \mailto{john.doe@example.com}
-        \end{itemize}
-    \end{frame}
-
-    % Images
-    \begin{frame}[KUL-standard-notoc]
-        \frametitle{Images}
-
-        % c = vertically align center, T = vertically align top,
-        % b = vertically align bottom
-        \begin{columns}[onlytextwidth,c]
-            % First column contains some bullet points
-            \begin{column}{0.5\textwidth}
-                \begin{itemize}
-                    \item Some interesting info about the image...
-                    \vspace{2em}
-                    \item More info about the image...
-                    \vspace{2em}
-                    \item Something seems familiar about the image though...
-                \end{itemize}
-            \end{column}
-            % Second column contains the image
-            \begin{column}{0.5\textwidth}
-                % Note that \textwidth here, is the width of the column, not
-                % of the entire slide (like before with the column)
-                \includegraphics[width=\textwidth]{\KULlogopath}
-            \end{column}
-        \end{columns}
-    \end{frame}
-
-    % Tables
-    % ------
-    \begin{frame}[KUL-standard-notoc]
-        \frametitle{Tables}
-    \end{frame}
-
-    % Basic tables
-    \begin{frame}[KUL-standard-notoc]
-        \frametitle{Basic tables}
-
-        \begin{itemize}
-            \item Using a header row
-        \end{itemize}
-
-        \begin{KULtable}{\textwidth}{|L|C|R|}
-            \hline
-            \KULheadrow{Left aligned, Center aligned, Right aligned}
-            \\ \hline
-            a & b & c
-            \\ \hline
-            d & e & f
-            \\ \hline
-            g & h & i
-            \\ \hline
-        \end{KULtable}
-
-        \begin{itemize}
-            \item Using a header column
-        \end{itemize}
-
-        \begin{KULtable}{\textwidth}{|L|C|C|C|}
-            \hline
-            \KULheadcol{First column} & a & b & c
-            \\ \hline
-            \KULheadcol{Second column} & d & e & f
-            \\ \hline
-            \KULheadcol{Third column} & g & h & i
-        \end{KULtable}
-    \end{frame}
-
-    % Combining columns and rows
-    \begin{frame}[KUL-standard-notoc]
-        \frametitle{Combining columns and rows}
-
-        % Note that, since the rows are coloured, a 'multirow' statement needs
-        % to come at the end of a column using a negative amount of rows.
-        \begin{KULtable}{\textwidth}{|L|C|C|}
-            \hline
-            \KULheadrow{Groups, Results A, Results B}
-            \\ \hline
-
-            & 8 & 10
-            \\ \cline{2-3}
-            \multirow{-2}{*}{\cellcolor{KUL-BLUE-TABLE1}Group 1} &
-                \textbf{\color{red}5} & 7
-            \\ \hline
-
-            & 7 & \textbf{\color{red}3}
-            \\ \cline{2-3}
-            \multirow{-2}{*}{\cellcolor{KUL-BLUE-TABLE2}Group 2} &
-                9 & 6
-            \\ \hline
-
-            & \multicolumn{2}{c|}{7} %Note the small letter (i.e. C->c, L->l, ...)
-            \\ \cline{2-3}
-            \multirow{-2}{*}{\cellcolor{KUL-BLUE-TABLE1}Group 3} &
-                \multicolumn{2}{c|}{\textbf{\color{red}2}}
-            \\ \hline
-            & 5 & 6
-            \\ \cline{2-3}
-            \multirow{-2}{*}{\cellcolor{KUL-BLUE-TABLE2}Group 4} &
-                10 & 9
-            \\ \hline
-        \end{KULtable}
-    \end{frame}
-
-    % Vertically aligned tables
-    \begin{frame}[KUL-standard-notoc]
-        \frametitle{Vertically aligned tables}
-
-        \begin{KULtable}{\textwidth}
-        {|V{0.3\textwidth}|Z{0.3\textwidth}|W{0.3\textwidth}|}
-            \hline
-            \KULheadrow{Column 1, Column 2, Column 3}
-            \\ \hline
-                This is a long row with left alignment
-                &
-                This is a long row with center alignment
-                &
-                This is a long row with right alignment
-            \\ \hline
-                This uses \texttt{V}
-                &
-                This uses \texttt{Z}
-                &
-                This uses \texttt{W}
-            \\ \hline
-                Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
-                incididunt ut labore et dolore magna aliqua.
-                &
-                Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
-                incididunt ut labore et dolore magna aliqua.
-                &
-                Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
-                incididunt ut labore et dolore magna aliqua.
-            \\ \hline
-        \end{KULtable}
-    \end{frame}
-
-    % Other fancy stuff
-    % -----------------
-    \begin{frame}[KUL-standard-notoc]
-        \frametitle{Other fancy stuff}
-    \end{frame}
-
-    % Blocks
-    \begin{frame}[KUL-standard-notoc]
-        \frametitle{Blocks}
-        \begin{block}{Block title}
-            This is the format for a standard block
-        \end{block}
-
-        You can also change the width of blocks using the \texttt{varblock} environment.
-        \begin{varblock}[0.5\textwidth]{Variable width block}
-            Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor
-            incididunt ut labore et dolore magna aliqua.
-        \end{varblock}
-    \end{frame}
-
-    % Code blocks
-    \begin{frame}[KUL-standard-notoc,fragile] % fragile is required for minted!!!
-        \frametitle{Code blocks}
-        The \texttt{minted} package is include by default, which allows you to highlight code blocks
-        both inline (\mintinline{latex}{\LaTeX{} math: $a^2 + b^2 = c^2$}) and as a block:
-        \begin{minted}[linenos]{latex}
-\documentclass[12pt, a4paper]{article}
-\begin{document}
-    Hi there!
-\end{document}
-        \end{minted}
-        \vfill
-        \textbf{\color{red}Important}: If you use a \texttt{minted} code block, your slide has to be
-        defined as \texttt{fragile}!
-    \end{frame}
-
-    % Code blocks
-    \begin{frame}[KUL-standard-notoc,fragile]
-        \frametitle{Code blocks}
-
-        \newsavebox\BoxCodeInTable
-        \begin{lrbox}{\BoxCodeInTable}
-        \mintinline{latex}{\mintinline}
-        \end{lrbox}
-
-        \newsavebox\BoxCodeInTableLrBox
-        \begin{lrbox}{\BoxCodeInTableLrBox}
-        \mintinline{latex}{\begin{lrbox} ... \end{lrbox}}
-        \end{lrbox}
-
-        \newsavebox\BoxCodeInTableTwo
-        \begin{lrbox}{\BoxCodeInTableTwo}
-        \mintinline{latex}{\textit{italic text}}
-        \end{lrbox}
-
-        \begin{KULtable}{\textwidth}{|C|C|}
-            \hline
-            \KULheadrow{Code,Description}
-            \\ \hline
-            \usebox{\BoxCodeInTable} \newline
-            \usebox{\BoxCodeInTableTwo} \newline
-            \texttt{...}
-            &
-            You cannot use \usebox{\BoxCodeInTable} in certain environments such as tables. To fix
-            this, wrap them inside a \usebox{\BoxCodeInTableLrBox}
-            \\ \hline
-        \end{KULtable}
     \end{frame}
 \end{document}
