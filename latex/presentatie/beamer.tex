@@ -177,8 +177,6 @@
                     \draw[->, >=latex, red, thick] (start) -- (p1) node[midway, above, font=\tiny, black] {$P_{C_1}$};
                     \fill[red] (p1) circle (1.5pt);
                     \draw[->, >=latex, red, thick] (p1) -- (p2) node[midway, right, font=\tiny, black] {$P_{C_2}$};
-                    \fill[red] (p2) circle (1.5pt);
-                    \draw[->, >=latex, red, thick] (p2) -- (p3);
                 \end{tikzpicture}
             \end{column}
         \end{columns}
@@ -461,7 +459,7 @@
 
     % Geometric Intuition Slide
     \begin{frame}[KUL-standard]
-        \frametitle{Geometric Intuition\cite{lindstrom2020surveyyearsdouglasrachford}}
+        \frametitle{Geometric Intuition \cite{lindstrom2020surveyyearsdouglasrachford}}
         \vspace{-1em}
         \includegraphics[width=0.9\textwidth]{{../thesis/images/douglas rachford}.png}
     \end{frame}
@@ -469,7 +467,7 @@
     % Bilinear Constraint Section
     % Slide 1: Problem Definition
     \begin{frame}[KUL-standard]
-        \frametitle{Projection for the Bilinear constraint\cite{v}}
+        \frametitle{Projection for the Bilinear constraint \cite{elser2019learning}}
         \framesubtitle{1. Problem Statement}
         \textbf{Constraint:}
         \begin{equation*}
@@ -477,7 +475,7 @@
         \end{equation*}
         
         \textbf{Projection Objective:}
-        Find closest point $(y, x, w) \in \mathbb{R} \times \mathbb{R}^{n} \times \mathbb{R}^{n}$ to the prior estimate $(y_0, x_0, w_0)$ (If $\gamma$ $\to$ $\infty$: $y=y_0$):\\
+        Find closest point $(y, x, w) \in \mathbb{R} \times \mathbb{R}^{n} \times \mathbb{R}^{n}$ to the prior estimate $(y_0, x_0, w_0)$ (If $\gamma$ $\to$ $\infty$: $y \to y_0$):\\
         \begin{equation*}
              \minimize_{y, x, w} \quad \|x - x_0\|^2 + \|w - w_0\|^2 + \gamma^2(y - y_0)^2 
         \end{equation*}
@@ -486,7 +484,7 @@
 
     % Slide 2: Lagrangian Analysis
     \begin{frame}[KUL-standard]
-        \frametitle{Projection for the Bilinear constraint\cite{elser2019learning}}
+        \frametitle{Projection for the Bilinear constraint \cite{elser2019learning}}
         \framesubtitle{2. Lagrangian Formulation}
         The Lagrangian with multiplier $\lambda$ is:
         \begin{equation*}
