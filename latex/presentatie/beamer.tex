@@ -532,98 +532,111 @@
             \begin{column}{0.6\textwidth}
                 \textbf{\large A Projection-based framework for gradient-free learning [2]}                
                 \centering
-\resizebox{\linewidth}{!}{
-                \begin{tikzpicture}[
-                    node distance=0.8cm and 0.8cm,
-                    inner sep=2pt,
-                    font=\scriptsize\bfseries,
-                    red_node/.style={circle, draw=none, fill=red!70!black, text=white, minimum size=1.1cm, align=center},
-                    green_node/.style={circle, draw=none, fill=green!60!black, text=white, minimum size=1.1cm, align=center},
-                    grey_node/.style={circle, draw=none, fill=gray!30, text=black, minimum size=1.0cm, align=center},
-                    arr/.style={-Latex, thick}
-                ]
-                    % --- Branch 1: In Array ---
-                    \node[red_node] (in_arr) at (0,0) {Array};
-                    \node[grey_node, right=of in_arr] (r1) {reshape};
-                    \node[grey_node, right=of r1] (rp1) {repeat};
-                    
-                    % --- Branch 2: W1 ---
-                    \node[red_node, below=2.5cm of in_arr] (w1) {dense\_0\\weight};
-                    \node[grey_node] (r2) at (w1 -| r1) {reshape};
-                    \node[grey_node, right=of r2] (rp2) {repeat};
-                    \node[grey_node, above=of rp2] (rp2_b) {repeat}; % Extra repeat in image? No, looks like 1 repeat.
-                    % Wait, user image has "repeat" then "repeat" sometimes?
-                    % Let's stick to 1 reshape, 1 repeat per branch as typical, unless image shows double.
-                    % Image branch 2: w1 -> reshape -> repeat -> repeat -> dot.
-                    % Let's add the second repeat to match "exact".
-                    \node[grey_node] (rp2_2) at ($(rp2)!0.5!(rp1) + (0.8, -0.5)$) {repeat}; 
-                    % Ideally align logically.
-                    
-                    % Let's Simplify placement by defining the merge point first.
-                    \node[green_node] (dot1) at (6, -1.5) {dot};
-                    
-                    % Align branches to dot1
-                    % Branch 1 Re-do
-                    \node[red_node] (in_arr) at (0,0) {Array};
-                    \node[grey_node] (r1) at (2.5, 0) {reshape};
-                    \node[grey_node] (rp1) at (4.5, 0) {repeat};
-                    
-                    % Branch 2 Re-do
-                    \node[red_node] (w1) at (2.0, -4.5) {dense\_0\\.weight};
-                    \node[grey_node] (r2) at (3.5, -3.5) {reshape};
-                    \node[grey_node] (rp2) at (4.5, -2.5) {repeat};
-                    % There is a chain in the image: w1 -> reshape -> repeat -> repeat -> dot
-                    \node[grey_node] (rp2_b) at (5.0, -2.5) {repeat}; % Actually let's just do reshape->repeat->dot to be safe if ambiguous, 
-                    
-                    % DOT 1
-                    \node[green_node] (dot1) at (6, -1) {dot};
-                    
-                    % Input Path -> Dot1
-                    \node[red_node] (in_arr) at (0, -1) {Array};
-                    \node[grey_node] (r1) at (2, -1) {reshape};
-                    \node[grey_node] (rp1) at (4, -1) {repeat};
-                    \draw[arr] (in_arr) -- (r1); \draw[arr] (r1) -- (rp1); \draw[arr] (rp1) -- (dot1);
+                \resizebox{0.65\linewidth}{!}{
+\begin{tikzpicture}[
+    % Define standard styles for the nodes
+    node distance=2.5cm and 1.8cm,
+    font=\sffamily\large,
+    % Base style for all nodes
+    base/.style={
+        circle, 
+        draw=none, 
+        align=center, 
+        minimum size=2.2cm, 
+        inner sep=0pt
+    },
+    % Specific color styles matching the image
+    rednode/.style={base, fill=red!60!gray!50, text=black},
+    greennode/.style={base, fill=green!60!gray!50, text=black},
+    greynode/.style={base, fill=lightgray!50, text=black},
+    % Arrow style
+    arrow/.style={-Latex, thick, draw=black}
+]
 
-                    % Weight1 Path -> Dot1 ( Diagonal up)
-                    \node[red_node] (w1) at (3, -5) {dense\_0\\.weight};
-                    \node[grey_node] (r2) at (4, -4) {reshape};
-                    \node[grey_node] (rp2) at (5, -3) {repeat};
-                    \node[grey_node] (rp2b) at (5.5, -2) {repeat};
-                    \draw[arr] (w1) -- (r2); \draw[arr] (r2) -- (rp2); \draw[arr] (rp2) -- (rp2b); \draw[arr] (rp2b) -- (dot1);
-                    
-                    % SUM RELU
-                    \node[red_node] (sum_relu) at (7.5, 0) {sum\\relu};
-                    \draw[arr] (dot1) -- (sum_relu);
-                    
-                    % Bias Path -> Sum Relu (Diagonal up)
-                    \node[green_node] (bias) at (8, -5) {relu\_0\\.bias};
-                    \node[grey_node] (r3) at (8, -4) {reshape};
-                    \node[grey_node] (rp3) at (8, -2.5) {repeat};
-                    \draw[arr] (bias) -- (r3); \draw[arr] (r3) -- (rp3); \draw[arr] (rp3) -- (sum_relu);
-                    
-                    % DOT 2
-                    \node[green_node] (dot2) at (10.5, 2.5) {dot};
-                    
-                    % SumRelu -> Dot 2 (Diagonal up)
-                    \node[grey_node] (r4) at (8.5, 1.0) {reshape};
-                    \node[grey_node] (rp4) at (9.5, 1.8) {repeat};
-                    \draw[arr] (sum_relu) -- (r4); \draw[arr] (r4) -- (rp4); \draw[arr] (rp4) -- (dot2);
-                    
-                    % Weight 2 Path -> Dot 2 (Diagonal up from below)
-                    \node[red_node] (w2) at (11.5, -1) {out\\.weight};
-                    \node[grey_node] (r5) at (11.5, 0.2) {reshape};
-                    \node[grey_node] (rp5) at (11.5, 1.4) {repeat};
-                    \draw[arr] (w2) -- (r5); \draw[arr] (r5) -- (rp5); \draw[arr] (rp5) -- (dot2);
-                    
-                    % LOSS
-                    \node[red_node] (loss) at (12, 4.5) {cross\\entropy};
-                    \draw[arr] (dot2) -- (loss);
-                    
-                    % Target Path -> Loss
-                    \node[green_node] (target) at (13.5, 3.5) {Array};
-                    \draw[arr] (target) -- (loss);
-                    
-                \end{tikzpicture}
+    % --- Lower Section (First Dot Product) ---
+
+    % 1. The central 'dot' node (Green)
+    \node[greennode] (dot1) {dot};
+
+    % 2. Input Array Branch (Left)
+    \node[greynode, left=1cm of dot1] (repeat1) {repeat};
+    \node[greynode, left=1cm of repeat1] (reshape1) {reshape};
+    \node[rednode, left=1.5cm of reshape1] (array1) {Array};
+
+    % 3. Dense Weight Branch (Bottom-Left diagonal)
+    \node[greynode, below left=1.5cm and 0.5cm of dot1] (repeat2) {repeat};
+    \node[greynode, below left=1cm and 0.2cm of repeat2] (reshape2) {reshape};
+    \node[rednode, below left=1cm and 0.2cm of reshape2] (dense) {dense\_0\\weight};
+
+    % --- Middle Section (Sum Relu) ---
+
+    % 4. Sum Relu Node (Red)
+    \node[rednode, above right=1.5cm and 0.2cm of dot1] (sumrelu) {sum\_relu};
+
+    % 5. Bias Branch (Connecting to Sum Relu)
+    \node[greynode, below right=1.5cm and 0.2cm of sumrelu] (repeat3) {repeat};
+    \node[greynode, below=1cm of repeat3] (reshape3) {reshape};
+    \node[greennode, below=1cm of reshape3] (bias) {relu\_0\\bias};
+
+    % --- Upper Section (Second Dot Product) ---
+
+    % 6. Reshape/Repeat chain from Sum Relu
+    \node[greynode, above right=1.5cm and 0.5cm of sumrelu] (reshape4) {reshape};
+    \node[greynode, above right=1cm and 0.2cm of reshape4] (repeat4) {repeat};
+
+    % 7. The second 'dot' node (Green)
+    \node[greennode, above right=1cm and 0.2cm of repeat4] (dot2) {dot};
+
+    % 8. Out Weight Branch (Right)
+    \node[greynode, below right=1.5cm and 0.5cm of dot2] (repeat5) {repeat};
+    \node[greynode, below=1cm of repeat5] (reshape5) {reshape};
+    \node[rednode, below=1cm of reshape5] (outweight) {out\\weight};
+
+    % --- Top Section (Cross Entropy) ---
+
+    % 9. Cross Entropy Node (Red)
+    \node[rednode, above right=1.5cm and 0.2cm of dot2] (crossentropy) {cross\\entropy};
+
+    % 10. Target Array (Green, Top Right)
+    \node[greennode, right=1cm of crossentropy, anchor=center] (array2) {Array};
+
+    % --- Edges ---
+
+    % Path 1: Input to Dot1
+    \draw[arrow] (array1) -- (reshape1);
+    \draw[arrow] (reshape1) -- (repeat1);
+    \draw[arrow] (repeat1) -- (dot1);
+
+    % Path 2: Dense Weight to Dot1
+    \draw[arrow] (dense) -- (reshape2);
+    \draw[arrow] (reshape2) -- (repeat2);
+    \draw[arrow] (repeat2) -- (dot1);
+
+    % Path 3: Dot1 to SumRelu
+    \draw[arrow] (dot1) -- (sumrelu);
+
+    % Path 4: Bias to SumRelu
+    \draw[arrow] (bias) -- (reshape3);
+    \draw[arrow] (reshape3) -- (repeat3);
+    \draw[arrow] (repeat3) -- (sumrelu);
+
+    % Path 5: SumRelu to Dot2
+    \draw[arrow] (sumrelu) -- (reshape4);
+    \draw[arrow] (reshape4) -- (repeat4);
+    \draw[arrow] (repeat4) -- (dot2);
+
+    % Path 6: Out Weight to Dot2
+    \draw[arrow] (outweight) -- (reshape5);
+    \draw[arrow] (reshape5) -- (repeat5);
+    \draw[arrow] (repeat5) -- (dot2);
+
+    % Path 7: Dot2 to CrossEntropy
+    \draw[arrow] (dot2) -- (crossentropy);
+
+    % Path 8: Target Array to CrossEntropy
+    \draw[arrow] (array2) -- (crossentropy);
+
+\end{tikzpicture}
                 }
             \end{column}
             
