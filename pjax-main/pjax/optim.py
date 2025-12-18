@@ -182,7 +182,7 @@ class Optimizer(ABC):
             velocity = jax.tree.map(lambda x: x * 0, inputs)
         # optimize
         def loss_fn(old, new):
-            diffs = [jnp.mean((x - y) ** 2) for x, y in zip(jax.tree.leaves(old), jax.tree.leaves(new))]
+            diffs = [jnp.mean(jnp.abs(x - y) ** 2) for x, y in zip(jax.tree.leaves(old), jax.tree.leaves(new))]
             return sum(diffs) / len(diffs)
 
         if self.uses_velocity:

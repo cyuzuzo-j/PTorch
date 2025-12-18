@@ -81,7 +81,7 @@
                 \vspace{0.8em}
                 \textbf{02 Experiments}\\
                 \vspace{0.8em}
-                \textbf{04 Planning}
+                \textbf{03 Planning}
             \end{column}
         \end{columns}
     \end{frame}
@@ -121,12 +121,12 @@
                 \vspace{0.5em}
                 Find a point in the intersection of constraints:
                 \begin{equation*}
-                    x \in \bigcap_{i=1}^m C_i
+                    \theta \in \bigcap_{i=1}^m C_i
                 \end{equation*}
                 
                 Update step (e.g. Cyclic Projections):
                 \begin{equation*}
-                    x \leftarrow P_{C_1}P_{C_2} \ldots P_{C_m}(x)
+                    \theta \leftarrow P_{C_1}P_{C_2} \ldots P_{C_m}(\theta)
                 \end{equation*}
                 \vfill
             \end{column}
@@ -228,7 +228,7 @@
  
                     \item \textbf{Model Constraints:}
                     \begin{equation*}
-                        \forall k: z[k] = W_{in}[k];
+                        \forall k: z[k] = W_{in}[k]
                         \begin{bmatrix}
                             x[k]\\
                             1
@@ -285,7 +285,8 @@
         \frametitle{Solving Feasibility Problems}
         Find $x \in \bigcap C_i$.\\
         Projection on to set: $P_C(x) = \arg\min_{y \in C} \|x - y\|$\\
-        
+        \scriptsize{ Strong theoretical results in the convex case; but not in the non-convex case.\\}
+
         \vspace{1em}
         \textbf{Common Algorithms:}
         \begin{columns}[onlytextwidth,T]
@@ -760,13 +761,13 @@
             \begin{column}{0.33\textwidth}
                 \begin{figure}
                     \includegraphics[width=\textwidth]{conv2d_vs_fftconv2d_benchmark.png}
-                    \caption{performance on Synthetic benchmark}
+                    \caption{Performance on Synthetic benchmark}
                 \end{figure}
             \end{column}
             \begin{column}{0.33\textwidth}
                 \begin{figure}
-                    \includegraphics[width=\textwidth]{example1.png}
-                    \caption{performance on mnist}
+                    \includegraphics[width=\textwidth]{accuracy_curves.png}
+                    \caption{Performance on mnist}
                 \end{figure}
             \end{column}
         \end{columns}
