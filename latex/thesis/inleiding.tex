@@ -1,13 +1,30 @@
 \chapter{Inleiding}
 \label{inleiding}
-In dit hoofdstuk wordt het werk ingeleid. Het doel wordt gedefinieerd en er
-wordt uitgelegd wat de te volgen weg is (beter bekend als de rode draad).
+Modern neural networks are powered by optimization algorithms: they enable the training of massive language models, robust perception systems, and many other large-scale learning pipelines. Despite this success, today’s training stack relies heavily on gradient-based methods, which constrains the types of models and constraints we can handle efficiently. In this thesis, we explore an alternative viewpoint training as a feasibility problem building on \citet{elser2019learning} and \citet{bergmeister2025projection}, where gradient descent is replaced by projection based operators.
+\\
+\newline
+A feasibility formulation replaces the explicit minimization of a single objective by the search for a point satisfying a collection of constraints that encode (i) the network’s forward relations, (ii) data consistency, and (iii) structural requirements such as normalization or activation constraints. This viewpoint naturally connects neural network training to operator-splitting and projection methods from convex and nonconvex feasibility theory, and it enables algorithmic variants that do not require differentiability of every component.
 
-Als je niet goed weet wat een masterproef is, kan je altijd
-Wikipedia\cite{wiki} eens nakijken.
+\section{Gradient-based optimization}
+Let $\{(x_i,y_i)\}_{i=1}^N$ denote a training set, where $x_i \in \mathcal{X}$ and $y_i \in \mathcal{Y}$. A neural network defines a parametrized map $f_\theta:\mathcal{X}\to\mathcal{Y}$ with parameters $\theta \in \mathbb{R}^p$. The training task is then defined as empirical risk minimization with respect to a loss function $\ell:\mathcal{Y} \times \mathcal{Y}\to \mathbb{R}$.
+\begin{equation*}
+  \min_{\theta}\; \mathcal{L}(\theta)
+  \;:=\; \frac{1}{N}\sum_{i=1}^N \ell\bigl(f_\theta(x_i),y_i\bigr).
+\end{equation*}
+Gradient-based methods generate an iterate sequence $(\theta_k)_{k\ge 0}$ by repeated forward evaluation of $f_{\theta_k}$ and backpropagation to compute $\nabla \mathcal{L}(\theta_k)$, followed by an update such as
+\begin{equation*}
+  \theta_{k+1} = \theta_k - \alpha_k\nabla \mathcal{L}(\theta_k).
+\end{equation*}
 
-\section{Lorem ipsum 4--5}
-\lipsum[4-5]
+with an appropriate step size. This perspective has proven highly effective, but it ties learning to differentiability and to an explicit optimization objective, motivating alternative formulations such as feasibility and projection-based approaches.
 
-\section{Lorem ipsum 6--7}
-\lipsum[6-7]
+\begin{figure}[t]
+  \centering
+  \input{../drawings/gradientDescent}
+  \caption{Schematic illustration of a gradient-descent update.}
+  \label{fig:gradient-descent}
+\end{figure}
+
+
+\section{feasibility-based optimization}
+In the field of singal processing feasibility-based algorithms are common. In this optimization paradigm, a set of constraints is defined and 
