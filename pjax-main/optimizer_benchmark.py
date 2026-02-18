@@ -1,7 +1,7 @@
 ################################################
 ###   Test suite for all of the optimizers   ###
 ################################################
-
+import gc
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -11,7 +11,6 @@ from data import (
     MNISTDataModule,
     CIFAR10DataModule
 ) 
-from itertools import cycle
 import tqdm
 import time
 from mlp import MLP_pjax
@@ -46,41 +45,77 @@ tasks = [
 
 optimizers = [
     {
-        "name": "DouglasRachford + projection",
-        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, add_projection_at_end=True),
-    },
-    {
-        "name":"douglas rachford",
-        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS),
-    },
-    {
-        "name": "dykstra",
-        "optimizer":optim.Dykstra(steps_per_update=PROJECTION_STEPS),
-    },
-    {
-        "name":"alternating projections",
+        "name": "AP",
         "optimizer":optim.AlternatingProjections(steps_per_update=PROJECTION_STEPS),
     },
     {
-        "name":"ap momentum",
+        "name": "AP++",
         "optimizer":optim.AlternatingProjectionsMonumentum(steps_per_update=PROJECTION_STEPS),
     },
     {
-        "name":"dr momentum",
-        "optimizer":optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS),
+        "name": "DR (0.5)",
+        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=0.5),
+    },
+    {
+        "name": "DR (0.75)",
+        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=0.9),
+    },
+    {
+        "name": "DR (1)",
+        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=1),
+    },
+    {
+        "name": "DR (1.5)",
+        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=1.5),
+    },
+    {
+        "name": "DR (2)",
+        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=2),
+    },
+    {
+        "name": "DR (0.1)",
+        "optimizer": optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=0.1),
+    },
+    {
+        "name": "DR++ (0.1)",
+        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=0.1),
+    },
+    {
+        "name": "DR++ (0.5)",
+        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=0.5),
+    },
+    {
+        "name": "DR++ (0.75)",
+        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=0.75),
+    },
+    {
+        "name": "DR++ (1)",
+        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=1),
+    },
+    {
+        "name": "DR++ (1.5)",
+        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=1.5),
+    },
+    {
+        "name": "DR++ (2)",
+        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=2),
+    }   
+    {
+        "name": "Dykstra",
+        "optimizer": optim.Dykstra(steps_per_update=PROJECTION_STEPS),
     }
 ]
 
 
 
-def run_task(task, opt_info, jax_random_key, eval_every=100, patience=5, max_steps=None, run_number=1):
+def run_task(task, opt_info, jax_random_key, eval_every=100, patience=10, max_steps=None, run_number=1):
     # Split key into independent sub-keys for data, model init, and naming
     data_key, model_key, name_key = jax.random.split(jax_random_key, 3)
     
     # Setup Data
     data_seed = int(jax.random.randint(data_key, (), 0, 2**30))
     dataset = task["dataset"](batch_size=BATCH_SIZE, seed=data_seed)
-    train_iter = cycle(dataset.train_dataloader())
+    train_iter = dataset.train_iterator()
     val_loader = dataset.val_dataloader()
     test_loader = dataset.test_dataloader()
     
@@ -156,6 +191,10 @@ def run_task(task, opt_info, jax_random_key, eval_every=100, patience=5, max_ste
                     no_improve_cycles = 0
                 else:
                     no_improve_cycles += 1
+                    if "decay" in opt_info and opt_info["decay"] == True:
+                        optimizer.relaxation *= 0.9
+                        print(f"  Decay: relaxation -> {optimizer.relaxation:.4f}")
+                        run.track(optimizer.relaxation, name="relaxation", step=step)
                 
                 if no_improve_cycles >= patience:
                     print(f"Early stopping at step {step}")
@@ -202,4 +241,10 @@ if __name__ == "__main__":
                 print(f"\n--- Optimizer: {opt_info['name']} | Run {run_number}/{NUM_RUNS} ---")
                 run_key = all_keys[key_idx]
                 key_idx += 1
-                results = run_task(task_info, opt_info, run_key, eval_every=50, max_steps=500, run_number=run_number)
+                results = run_task(task_info, opt_info, run_key, eval_every=50, max_steps=1000, run_number=run_number)
+                gc.collect()
+                jax.clear_caches()
+                from pjax.core.computation import vmap_ids_order
+                vmap_ids_order.clear()
+                from pjax.optim import prune_shape_transforms
+                prune_shape_transforms.cache_clear()
