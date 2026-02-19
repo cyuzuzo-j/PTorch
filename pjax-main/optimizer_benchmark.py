@@ -17,15 +17,15 @@ from mlp import MLP_pjax
 from cnn import CNN_pjax
 from aim import Run
 
-## generate experiment names (so that its easy to refer to them)
+## generate experiment names (so that its easy to refer to them, was a stupid idea)
 from faker import Faker
 fake = Faker()
 
 
-BATCH_SIZE = 128
+BATCH_SIZE = 32
 RANDOM_SEED = 42
 PROJECTION_STEPS = 10
-MAX_STEPS = 1000
+MAX_STEPS = 4*5000
 NUM_RUNS = 3
 jax_random_key = jax.random.key(RANDOM_SEED)
 
@@ -34,67 +34,10 @@ tasks = [
         "name":"MNIST",
         "dataset":MNISTDataModule,
         "model":MLP_pjax([256],28*28,10),
-        "vectorise":True
     },
 ]
 
 optimizers = [
-    {
-        "name": "AP",
-        "optimizer":optim.AlternatingProjections(steps_per_update=PROJECTION_STEPS),
-    },
-    {
-        "name": "AP++",
-        "optimizer":optim.AlternatingProjectionsMonumentum(steps_per_update=PROJECTION_STEPS),
-    },
-    {
-        "name": "DR (0.5)",
-        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=0.5),
-    },
-    {
-        "name": "DR (0.75)",
-        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=0.75),
-    },
-    {
-        "name": "DR (1)",
-        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=1),
-    },
-    {
-        "name": "DR (1.5)",
-        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=1.5),
-    },
-    {
-        "name": "DR (2)",
-        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=2),
-    },
-    {
-        "name": "DR (0.1)",
-        "optimizer": optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=0.1),
-    },
-    {
-        "name": "DR++ (0.1)",
-        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=0.1),
-    },
-    {
-        "name": "DR++ (0.5)",
-        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=0.5),
-    },
-    {
-        "name": "DR++ (0.75)",
-        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=0.75),
-    },
-    {
-        "name": "DR++ (1)",
-        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=1),
-    },
-    {
-        "name": "DR++ (1.5)",
-        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=1.5),
-    },
-    {
-        "name": "DR++ (2)",
-        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=2),
-    } ,
     {
         "name": "Dykstra",
         "optimizer": optim.Dykstra(steps_per_update=PROJECTION_STEPS),
