@@ -181,14 +181,24 @@ class Optimizer(ABC):
             projections = projections[::-1]
 
         # initialize optional states
-        if self.uses_velocity:
-            velocity = jax.tree.map(lambda x: x * 0, inputs)
+        if self.uses_p:
+            p = jax.tree.map(lambda x: x * 0, inputs)
+        if self.uses_q:
+            q = jax.tree.map(lambda x: x * 0, inputs)
+
         # optimize
         def loss_fn(old, new):
             diffs = [jnp.mean(jnp.abs(x - y) ** 2) for x, y in zip(jax.tree.leaves(old), jax.tree.leaves(new))]
             return sum(diffs) / len(diffs)
 
-        if self.uses_velocity:
+        if self.uses_p and self.uses_q:
+            def step(carry, _):
+                vars_, p_, q_ = carry
+                new_vars, new_p, new_q = self._step(vars_, *projections, p_, q_)
+                loss = loss_fn(vars_, new_vars)
+                return (new_vars, new_p, new_q), loss
+            (inputs, p, q), losses = jax.lax.scan(step, (inputs, p, q), None, length=steps_per_update)
+        elif self.uses_p:
             def step(carry, _):
                 vars_, p_ = carry
                 new_vars, new_p = self._step(vars_, *projections, p_)
@@ -359,19 +369,19 @@ class DouglasRachfordMomentum(BipartiteOptimizer):
         self.learning_rate = 1
         self.uses_p = True
 
-    def _step(self, vars, projection_a, projection_b, velocity):
+    def _step(self, vars, projection_a, projection_b, p):
         def reflection(projection, vars):
             return jax.tree.map(lambda x, y: 2.0 * x - y, projection(vars), vars)
 
-        vars_look_ahead = jax.tree.map(lambda x, d: x + self.beta * d, vars, velocity)
+        vars_look_ahead = jax.tree.map(lambda x, d: x + self.beta * d, vars, p)
         new_vars = jax.tree.map(
             lambda x, y: (1.0 - self.relaxation) * x + self.relaxation * y,
             vars_look_ahead,
             reflection(projection_b, reflection(projection_a, vars_look_ahead)),
         )
-        p = jax.tree.map(lambda x, y: x - y, new_vars, vars)
+        new_p = jax.tree.map(lambda x, y: x - y, new_vars, vars)
 
-        return new_vars, p
+        return new_vars, new_p
 
 
 

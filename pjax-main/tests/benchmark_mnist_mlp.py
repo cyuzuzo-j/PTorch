@@ -113,7 +113,7 @@ def run_benchmark(setup_name, steps=50, profile=False):
     params = model.init(key)
     
     # Setup Optimizer
-    optimizer = optim.DouglasRachford(steps_per_update=1)
+    optimizer = optim.AlternatingProjections(steps_per_update=1)
     
     # JIT Compile / First Step
     log("  Compiling / First step...")
