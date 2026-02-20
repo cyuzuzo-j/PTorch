@@ -534,3 +534,193 @@ def corss_entropy_prox(logits, labels, _, /):
 
 
 cross_entropy = make_computation("cross_entropy", cross_entropy_op, corss_entropy_prox)
+
+def matmul_op(a, b, /):
+    """Matrix multiplication operation."""
+    return jnp.matmul(a, b)
+    
+def matmul_proj(a, b, z, /):
+    """Project onto matrix multiplication constraint."""
+    # helper to compute projection for a single matrix multiplication
+    # (M, K) @ (K, N) = (M, N)
+    def project_2d(a, b, z):
+        # We handle this by vmapping the bilinear projection logic over the M and N dimensions
+        # a: (M, K), b: (K, N), z: (M, N)
+        
+        # Expand dims to broadcast against each other
+        # a_exp: (M, 1, K)
+        # b_exp: (1, N, K) (transpose b for easier dot product alignment if using bilinear_proj logic)
+        # But wait, bilinear_proj assumes dot product a.b = z.
+        # matmul element z_ij = row_i(a) . col_j(b)
+        
+        M, K = a.shape
+        N = b.shape[1]
+        
+        # Prepare inputs for M*N dot product projections
+        # We want to project (row_i, col_j, z_ij) -> (row_i_new, col_j_new) for all i, j
+        
+        a_rows = a[:, None, :]  # (M, 1, K)
+        b_cols = b.T[None, :, :] # (1, N, K). Note b is (K, N), so b.T is (N, K).
+        z_vals = z[:, :, None] # (M, N, 1) to match dimensionality if needed, or just (M, N)
+        
+        # we can use vectorized bilinear_proj
+        # bilinear_proj takes (K,), (K,), () -> (K,), (K,)
+        # We map over M and N.
+        
+        # vmap over N (cols of b)
+        # vmap over M (rows of a)
+        # vmap over K is inside bilinear_proj (dot product)
+        
+        # bilinear_proj_vmapped = jax.vmap(jax.vmap(bilinear_proj, in_axes=(None, 0, 0)), in_axes=(0, None, 0))
+        # Wait, if we use in_axes=(None, 0, 0) for the inner vmap (over N):
+        #   a (one row) is shared (None).
+        #   b (all cols) are mapped (0).
+        #   z (row of scalars) is mapped (0).
+        # Output: (N, K), (N, K) -> updates for the row of A, updates for all cols of B.
+        
+        # Outer vmap (over M):
+        #   a (all rows) are mapped (0).
+        #   b (cols) are shared (None) -> actually passed as full array
+        #   z (matrix) is mapped (0).
+        
+        project_single = bilinear_proj
+        
+        # Map over cols of B (and elements of Z row)
+        # input: a_row (K,), b_cols (N, K), z_row (N,)
+        # output: a_row_updates (N, K), b_cols_updates (N, K)
+        project_row = jax.vmap(project_single, in_axes=(None, 1, 0)) 
+        
+        # Map over rows of A (and rows of Z)
+        # input: a (M, K), b (K, N), z (M, N)
+        # output: a_updates (M, N, K), b_updates (M, N, K)
+        project_matrix = jax.vmap(project_row, in_axes=(0, None, 0))
+        
+        a_updates, b_updates = project_matrix(a, b, z)
+        
+        # a is updated N times (once for each col of b). Average these.
+        a_new = jnp.mean(a_updates, axis=1) # (M, K)
+        
+        # b is updated M times (once for each row of a). Average these.
+        # b_updates is (M, N, K). The output from project_row for 'b' was (N, K) which corresponds to b.T.
+        # Wait, project_single returns (K,), (K,).
+        # project_row returns (N, K), (N, K).
+        # project_matrix returns (M, N, K), (M, N, K).
+        # The second output corresponds to 'b'. In project_row, we passed b as (K, N) but used in_axes=1.
+        # So b_updates[i, j, :] is the update for col j of b, from row i of a.
+        # We need to average over i (rows of a) to get the update for col j.
+        # AND we need to transpose it back to (K, N) because b_updates stored it as (K,) vectors.
+        # b_updates shape is (M, N, K).
+        # Average over M: (N, K).
+        # Transpose to (K, N).
+        
+        b_new = jnp.mean(b_updates, axis=0).T
+        
+        return a_new, b_new
+    # Detect batch dimensions
+    # Current limitation: supports simple broadcasting where 'a' has batch dims and 'b' does not, or vice versa?
+    # Or strict 'a' is broadcasted?
+    # User's efficient matmul request implied broadcasting.
+    # Typically: a is (B, M, K), b is (K, N). z is (B, M, N).
+    
+    a_ndim = a.ndim
+    b_ndim = b.ndim
+    z_ndim = z.ndim
+    
+    # Assume standard matmul broadcasting rules: 
+    # Last 2 dims are matrix dims. Leading dims are batch.
+    # We only handle the case where one is broadcasted against the other for now, or simple repeats.
+    
+    if a_ndim > b_ndim:
+        # Case: A has batch dims, B does not.
+        # Flatten batch dims of A and Z for scanning.
+        batch_shape = a.shape[:-2]
+        M, K = a.shape[-2:]
+        N = b.shape[-1]
+        
+        # Check shapes match expectation
+        assert b.shape == (K, N)
+        assert z.shape == batch_shape + (M, N)
+        
+        # Flatten batch dims
+        a_flat = a.reshape(-1, M, K)
+        z_flat = z.reshape(-1, M, N)
+        num_batches = a_flat.shape[0]
+        
+        # Scan over batches to compute average update for b and individual updates for a
+        # We use a recursive mean formula for b.
+        # mean_n = mean_{n-1} + (x_n - mean_{n-1}) / n
+        
+        def scan_fn(carry, inputs):
+            b_mean, n = carry
+            a_i, z_i = inputs
+            
+            # Project current batch
+            a_new_i, b_new_i = project_2d(a_i, b_mean, z_i) 
+            # Note: technically we should project against the *original* b? 
+            # Or the running mean b? 
+            # In alternating projections, we project the *current estimate*.
+            # But here 'b' is a shared parameter. 
+            # The 'repeat_inverse' logic averages the projections of the SAME input 'b'.
+            # So we should use 'b' (the input to this function) for all projections?
+            # Yes, standard repeat_inverse takes 'z' (the outputs of the branches) and averages them.
+            # Here, the 'branches' are the projections of (a_i, b, z_i).
+            # So we should pass 'b' (the constant input from outside) to project_2d.
+            # BUT, we want to return the average of the *outputs* (b_new_i).
+            
+            # Wait, the scan carry should be the running mean of the *updates*.
+            # The input 'b' to project_2d should be the *original input b*.
+            
+            # We can't use 'b_mean' as input to project_2d because that would imply sequential updates (like SGD).
+            # This is a projection operator, it's stateless within the step.
+            # So we use 'b' from the outer scope.
+            
+            a_new_i, b_new_i = project_2d(a_i, b, z_i)
+            
+            # Update running mean of b_new
+            # n is 1-based index (current count)
+            n += 1
+            b_mean_new = b_mean + (b_new_i - b_mean) / n
+            
+            return (b_mean_new, n), a_new_i
+        # Initialize running mean with zeros or first element logic?
+        # A simple trick is to start with 0 and count. 
+        # But we need shape of b_new_i. It's same as b.
+        
+        init_carry = (jnp.zeros_like(b), 0)
+        
+        # Run scan
+        (b_new, _), a_new_flat = jax.lax.scan(scan_fn, init_carry, (a_flat, z_flat))
+        
+        # Reshape a_new back
+        a_new = a_new_flat.reshape(a.shape)
+        
+        return a_new, b_new
+    elif b_ndim > a_ndim:
+        # Symmetric case: B has batch dims, A does not.
+        raise NotImplementedError("Broadcasting A (batch dims in B) not yet implemented in efficient matmul.")
+    else:
+        # Standard matrix mult (no broadcasting or same batch dims)
+        # If same batch dims, we just vmap over them (no averaging needed).
+        # If no batch dims, just project_2d.
+        if a_ndim == 2:
+             return project_2d(a, b, z)
+        else:
+             # Same batch dims: vmap project_2d over the batch dims
+             # Treat all leading dims as batch
+             # We need to flatten them typically or use vmap recursively/repeatedly?
+             # jax.vmap handles arbitrary leading dims if mapped.
+             # But inputs are a, b, z.
+             # project_2d handles (M,K), (K,N), (M,N).
+             # We can just vmap project_2d appropriate number of times or flatten.
+             
+             # Flatten
+             batch_shape = a.shape[:-2]
+             a_flat = a.reshape(-1, a.shape[-2], a.shape[-1])
+             b_flat = b.reshape(-1, b.shape[-2], b.shape[-1])
+             z_flat = z.reshape(-1, z.shape[-2], z.shape[-1])
+             
+             project_2d_vmapped = jax.vmap(project_2d)
+             a_new_flat, b_new_flat = project_2d_vmapped(a_flat, b_flat, z_flat)
+             
+             return a_new_flat.reshape(a.shape), b_new_flat.reshape(b.shape)
+matmul = make_computation("matmul", matmul_op, matmul_proj)

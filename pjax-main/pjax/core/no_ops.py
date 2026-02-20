@@ -138,51 +138,94 @@ def conv_patch_transform(a, /, *, kernel_shape, strides, padding):
 
 
 def conv_patch_inverse(a, z, /, *, kernel_shape, strides, padding):
-    """Inverse of convolution patch extraction: reconstructs the original array."""
+    """Inverse of convolution patch extraction: reconstructs the original array.
+    
+    Optimized implementation using scatter_add instead of conv_transpose.
+    """
     N, H_in, W_in, C_in = a.shape
     _, H_out, W_out, _ = z.shape
     H_k, W_k = kernel_shape
+    
+    # Parse padding
+    # We assume 'padding' is ((top, bottom), (left, right)).
+    if isinstance(padding, str):
+         # If "SAME" or "VALID", we should compute explicit padding.
+         # For now, raise error or rely on user passing tuple as per plan.
+         # But wait, existing code might pass "SAME"? 
+         # The benchmark passed "SAME" before I fixed it.
+         # Let's add basic support for SAME/VALID strings if possible, 
+         # but actually jax.lax.conv_general_dilated_patches handles strings.
+         # For inverse, we need explicit padding to map indices correctly.
+         # We can't easily reverse "SAME" without knowing input shape (which we have: a.shape).
+         # So we could compute it. But for safety, let's enforce tuple or try to compute.
+         pass
+         
+    if isinstance(padding, str):
+        # Very rough fallback or error
+        # Assuming H_out was computed correctly by patches:
+        # H_out = (H_in + pad_total - H_k) // stride + 1
+        # It's hard to distinguish left/right padding from just "SAME".
+        # But usually "SAME" means total padding s.t. output size is ceil(H_in/stride).
+        # Let's error out for now as agreed in plan constraints.
+        raise ValueError("conv_patch_inverse optimized requires explicit padding tuples.")
+        
+    (pad_top, _), (pad_left, _) = padding
 
-    # Calculate inverse padding
-    inv_padding = (
-        (H_k - 1 - padding[0][0], H_k - 1 - padding[0][1]),
-        (W_k - 1 - padding[1][0], W_k - 1 - padding[1][1]),
-    )
-
-    # Reshape z to (N*C_in, H_out, W_out, H_k*W_k)
-    feature_patches = (
-        z.reshape(N, H_out, W_out, C_in, H_k * W_k).transpose(0, 3, 1, 2, 4).reshape(N * C_in, H_out, W_out, H_k * W_k)
-    )
-
-    # Kernel to sum contributions from patches
-    sum_kernel = jax.nn.one_hot(jnp.flip(jnp.arange(H_k * W_k)), H_k * W_k, dtype=z.dtype).reshape(
-        H_k, W_k, H_k * W_k, 1
-    )
-
-    # Sum patch contributions via transposed convolution
-    # (N*C_in, H_out, W_out, H_k*W_k) * (H_k, W_k, H_k*W_k, 1) -> (N*C_in, H_in, W_in, 1)
-    summed_patches = jax.lax.conv_transpose(
-        feature_patches,
-        sum_kernel,
-        strides=strides,
-        padding=inv_padding,
-        dimension_numbers=("NHWC", "HWIO", "NHWC"),
-    )
-
-    # Calculate the number of patches contributing to each pixel
-    # (1, H_out, W_out, 1) * (H_k, W_k, 1, 1) -> (1, H_in, W_in, 1)
-    num_summed = jax.lax.conv_transpose(
-        jnp.ones((1, H_out, W_out, 1), dtype=z.dtype),
-        jnp.ones((H_k, W_k, 1, 1), dtype=z.dtype),
-        strides=strides,
-        padding=inv_padding,
-        dimension_numbers=("NHWC", "HWIO", "NHWC"),
-    )
-
-    # Normalize and reshape back to original shape
-    out_flat = summed_patches / num_summed
-    out = out_flat.reshape(N, C_in, H_in, W_in).transpose(0, 2, 3, 1)  # Reshape and transpose to (N, H_in, W_in, C_in)
-    return out
+    # 1. Coordinate grids
+    h_out_idx = jnp.arange(H_out)
+    w_out_idx = jnp.arange(W_out)
+    h_k_idx = jnp.arange(H_k)
+    w_k_idx = jnp.arange(W_k)
+    
+    # Meshgrid including kernel dimensions
+    # Shape: (H_out, W_out, H_k, W_k)
+    hh, ww, hk, wk = jnp.meshgrid(h_out_idx, w_out_idx, h_k_idx, w_k_idx, indexing='ij')
+    
+    # Compute input coordinates
+    stride_h, stride_w = strides
+    h_in_idx = hh * stride_h + hk - pad_top
+    w_in_idx = ww * stride_w + wk - pad_left
+    
+    # 2. Reshape z and transpose for scattering
+    # Input z: (N, H_out, W_out, C_in * H_k * W_k) -> reshape to separate dims
+    
+    z_reshaped = z.reshape(N, H_out, W_out, C_in, H_k, W_k)
+    
+    # We want to add z values to target at (n, c, h_in, w_in).
+    
+    # Transpose z to (N, C_in, H_out, W_out, H_k, W_k) to align with target (N, C_in, H, W)
+    z_tr = z_reshaped.transpose(0, 3, 1, 2, 4, 5)
+    
+    # Initialize target and count buffers
+    # (N, C_in, H_in, W_in)
+    target = jnp.zeros((N, C_in, H_in, W_in), dtype=z.dtype)
+    counts = jnp.zeros((N, C_in, H_in, W_in), dtype=z.dtype)
+    
+    # Handle negative indices (padding) wrapping around in JAX .at[] indexing
+    valid_h = (h_in_idx >= 0) & (h_in_idx < H_in)
+    valid_w = (w_in_idx >= 0) & (w_in_idx < W_in)
+    valid_mask = valid_h & valid_w
+    
+    # Expand valid_mask to broadcast with z_tr: (1, 1, H_out, W_out, H_k, W_k)
+    valid_mask_exp = jnp.expand_dims(valid_mask, axis=(0, 1))
+    
+    z_tr = jnp.where(valid_mask_exp, z_tr, jnp.array(0.0, dtype=z.dtype))
+    count_inc = jnp.where(valid_mask_exp, jnp.array(1.0, dtype=z.dtype), jnp.array(0.0, dtype=z.dtype))
+    
+    # Send invalid indices to 0 safely (they will add 0 due to the mask above)
+    h_in_idx_safe = jnp.where(valid_mask, h_in_idx, 0)
+    w_in_idx_safe = jnp.where(valid_mask, w_in_idx, 0)
+    
+    # Use index_add (scatter_add) with broadcasting.
+    target = target.at[:, :, h_in_idx_safe, w_in_idx_safe].add(z_tr)
+    counts = counts.at[:, :, h_in_idx_safe, w_in_idx_safe].add(count_inc)
+    
+    # Safe division
+    counts = jnp.maximum(counts, 1.0)
+    out = target / counts
+    
+    # Return to NHWC
+    return out.transpose(0, 2, 3, 1)
 
 def detach_complex_transform(a, /):
     """Detach complex tensor by separating real and imaginary parts.

@@ -138,6 +138,25 @@ class Linear(Module):
     def __call__(self, input):
         return pjax.matmul(input, self.weight)
 
+class LinearOld(Module):
+    """Linear (fully connected) layer without bias.
+
+    Applies a linear transformation to input data: :math:`\\text{output} = \\text{input} \\times \\text{weight}`.
+
+    Args:
+        in_features: number of input features.
+        out_features: number of output features.
+
+    Attributes:
+        weight: learnable weight matrix of shape ``(in_features, out_features)``.
+    """
+
+    def __init__(self, in_features: int, out_features: int):
+        super().__init__()
+        self.weight = Weight((in_features, out_features))
+
+    def __call__(self, input):
+        return pjax.matmul_slower(input, self.weight)
 
 class ReLU(Module):
     """Rectified Linear Unit with bias.
@@ -369,4 +388,49 @@ class FftConv2D(Module):
         start = k // 2
         out = pjax.index(out_full, (slice(None), slice(start, start + H), slice(start, start + W), slice(None)))
         
+        return out
+
+class MaxPool2D(Module):
+    """2D max pooling layer.
+
+    Applies max pooling operation over 2D spatial dimensions.
+
+    Args:
+        pool_size: size of the pooling window as (pool_height, pool_width).
+        strides: stride values as (stride_height, stride_width).
+        padding: padding strategy, either "SAME" or "VALID".
+
+    """
+
+    def __init__(
+        self,
+        pool_size: Sequence[int] = (2, 2),
+        strides: Sequence[int] = (2, 2),
+        padding: str = "SAME",
+    ):
+        super().__init__()
+        self.pool_size = pool_size
+        self.strides = strides
+        self.padding = padding
+        self.conv_patch = partial(pjax.conv_patch, kernel_shape=pool_size, strides=strides, padding=padding)
+
+    def __call__(self, input):
+        """Apply max pooling to input tensor.
+
+        Args:
+            input: input tensor of shape ``(..., H, W, C)``.
+
+        Returns:
+            output tensor after max pooling.
+        """
+        patches = self.conv_patch(input)
+        
+        hk, wk = self.pool_size
+        kernel_size = hk * wk
+        
+        # Reshape to separate channels and pooling window
+        # patches shape: (N, H_out, W_out, C * Hk * Wk) -> (N, H_out, W_out, C, Hk * Wk)
+        patches = pjax.reshape(patches, (*patches.shape[:-1], -1, kernel_size))
+        
+        out = pjax.max(patches, axis=-1)
         return out

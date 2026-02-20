@@ -211,6 +211,35 @@ def matmul(a: Computation, b: Computation) -> Computation:
     if b.ndim == 1:
         b_ = expand_dims(b, 1)
 
+    # call efficient op
+    out = ops.matmul(a_, b_)
+
+    # squeeze dimensions if necessary
+    if a.ndim == 1:
+        out = squeeze(out, axis=-2)
+    if b.ndim == 1:
+        out = squeeze(out, axis=-1)
+    return out
+
+
+def matmul_slower(a: Computation, b: Computation) -> Computation:
+    """Matrix product of two arrays with element-wise scaling of the result.
+
+    Args:
+        a: array of shape ``(N,)`` or ``(..., K, N)``.
+        b: array of shape ``(N,)`` or ``(..., N, M)``. In the latter case, the leading dimensions must be broadcastable.
+
+    Returns:
+        array containing the matrix product of the two arrays, with leading dimensions broadcasted. If ``b.ndim == 1`` shape is ``a.shape[:-1]``. Otherwise, shape is ``(..., K, M)``.
+    """
+    a_, b_ = a, b
+
+    # expand dimensions if necessary
+    if a.ndim == 1:
+        a_ = expand_dims(a, 0)
+    if b.ndim == 1:
+        b_ = expand_dims(b, 1)
+
     # broadcast leading dimensions
     max_ndim = max(a_.ndim, b_.ndim)
     max_shape = tuple([max([s[-i] for s in [a_.shape, b_.shape] if i <= len(s)]) for i in range(1, max_ndim + 1)])[::-1]

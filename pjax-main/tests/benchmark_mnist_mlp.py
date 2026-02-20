@@ -30,7 +30,7 @@ def synthetic_mnist_iterator(batch_size=128):
 
 # --- Model Definition (Copied from comparison.py) ---
 class MLP_pjax(nn.Module):
-    def __init__(self, hidden_features, in_features, classes, skip=True):
+    def __init__(self, hidden_features, in_features, classes, skip=True, inefff=True):
         super().__init__()
         self.hidden_features = hidden_features
         self.skip = skip
@@ -41,7 +41,7 @@ class MLP_pjax(nn.Module):
             last_f = f
 
         out_features = sum(hidden_features) if skip else hidden_features[-1]
-        self.out = nn.Linear(out_features, classes)
+        self.out = nn.Linear(out_features, classes) if not inefff else nn.LinearOld(out_features, classes)
 
     def __call__(self, x):
         # Flatten input for MLP
@@ -57,38 +57,6 @@ class MLP_pjax(nn.Module):
 
         return self.out(x)
 
-# --- Inefficient Matmul (Old Implementation) ---
-def inefficient_matmul(a, b):
-    # This recreates the logic that causes explicit Repeat nodes
-    a_, b_ = a, b
-
-    # expand dimensions if necessary
-    if a.ndim == 1:
-        a_ = expand_dims(a, 0)
-    if b.ndim == 1:
-        b_ = expand_dims(b, 1)
-
-    # broadcast leading dimensions
-    max_ndim = max(a_.ndim, b_.ndim)
-    max_shape = tuple([max([s[-i] for s in [a_.shape, b_.shape] if i <= len(s)]) for i in range(1, max_ndim + 1)])[::-1]
-    a_ = broadcast_to(a_, max_shape[:-2] + a_.shape[-2:])
-    b_ = broadcast_to(b_, max_shape[:-2] + b_.shape[-2:])
-
-    # vectorize dot product
-    fn = partial(ops.dot)  # without partial, we get recompilation errors
-    fn = vmap(fn, in_axes=(None, -1))
-    fn = vmap(fn, in_axes=(-2, None))
-
-    for _ in range(max(a_.ndim - 2, 0)):
-        fn = vmap(fn)
-    out = fn(a_, b_)
-
-    # squeeze dimensions if necessary
-    if a.ndim == 1:
-        out = squeeze(out, axis=-2)
-    if b.ndim == 1:
-        out = squeeze(out, axis=-1)
-    return out
 
 def log(msg):
     print(msg, flush=True)
@@ -96,17 +64,17 @@ def log(msg):
         f.write(msg + "\n")
 
 # --- Benchmark Runner ---
-def run_benchmark(setup_name, steps=50, profile=False):
+def run_benchmark(setup_name, steps=50, profile=False, old=False):
     log(f"\nRunning Benchmark: {setup_name}")
     
     # Setup Data
-    BATCH_SIZE = 128
+    BATCH_SIZE = 64
     train_iter = synthetic_mnist_iterator(batch_size=BATCH_SIZE)
     
     # Setup Model
     input_features = 28 * 28
     classes = 10
-    model = MLP_pjax(hidden_features=[256, 256], in_features=input_features, classes=classes, skip=True)
+    model = MLP_pjax(hidden_features=[256, 256], in_features=input_features, classes=classes, skip=True, inefff=old)
     
     # Init Params
     key = jax.random.key(0)
@@ -189,16 +157,8 @@ if __name__ == "__main__":
     
     # 2. Run with Inefficient Matmul (Patched)
     log("\nPatching pjax.matmul with inefficient implementation...")
-    original_matmul = api.matmul
-    api.matmul = inefficient_matmul
-    pjax.matmul = inefficient_matmul # Just in case it's imported directly
     
-    try:
-        results.append(run_benchmark("Inefficient Matmul (Old)", steps=20, profile=True))
-    finally:
-        api.matmul = original_matmul
-        pjax.matmul = original_matmul
-        log("\nRestored original matmul.")
+    results.append(run_benchmark("Inefficient Matmul (Old)", steps=20, profile=True, old=True))
         
     # Print Comparison Table
     log("\n" + "="*60)

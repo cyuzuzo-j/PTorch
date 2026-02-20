@@ -22,6 +22,7 @@ class DataModule(ABC):
         overfit_batches: int = 0,
         preload: bool = False,
         seed: int = 42,
+        grayscale: bool = False,
     ):
         super().__init__()
         self.batch_size = batch_size
@@ -29,6 +30,7 @@ class DataModule(ABC):
         self.data_dir = data_dir
         self.preload = preload
         self.seed = seed
+        self.grayscale = grayscale
 
         # Load train/val dataset
         full_dataset = self.dataset_cls(data_dir, train=True, download=True)
@@ -71,6 +73,11 @@ class DataModule(ABC):
         images, labels = zip(*batch)
         x = np.array(images, dtype=np.float32) / 255.0
         y = np.array(labels, dtype=np.int64)
+
+        if self.grayscale and x.ndim == 4 and x.shape[-1] == 3:
+            # Convert RGB to grayscale by averaging channels
+            x = np.mean(x, axis=-1, keepdims=True) # Resulting shape (batch, H, W, 1)
+
         if x.ndim == 3:
             x = x[..., None]  # add channel dim
         if self.normalize:
@@ -136,17 +143,26 @@ class MNISTDataModule(DataModule):
 class CIFAR10DataModule(DataModule):
     """CIFAR-10 dataset module with standard preprocessing."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if getattr(self, "grayscale", False):
+            self._data_mean = (0.4734,) # Average of (0.4914, 0.4822, 0.4465)
+            self._data_std = (0.2009,) # Average of (0.2023, 0.1994, 0.2010)
+        else:
+            self._data_mean = (0.4914, 0.4822, 0.4465)
+            self._data_std = (0.2023, 0.1994, 0.2010)
+
     @property
     def dataset_cls(self):
         return CIFAR10
 
     @property
     def data_mean(self):
-        return (0.4914, 0.4822, 0.4465)
+        return self._data_mean
 
     @property
     def data_std(self):
-        return (0.2023, 0.1994, 0.2010)
+        return self._data_std
 
 
 class CIFAR10_CModule(CIFAR10DataModule):
@@ -173,9 +189,10 @@ class CIFAR10_CModule(CIFAR10DataModule):
         data_dir: str = "./dataset",
         preload: bool = False,
         seed: int = 42,
+        grayscale: bool = False,
     ):
         # Initialize train/val using parent class, test will be overwritten below
-        super().__init__(batch_size, normalize, data_dir=data_dir, preload=preload, seed=seed)
+        super().__init__(batch_size, normalize, data_dir=data_dir, preload=preload, seed=seed, grayscale=grayscale)
 
         # download the corrupted CIFAR10 test set if it doesn't exist
         import tarfile
