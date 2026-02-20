@@ -17,14 +17,15 @@ from mlp import MLP_pjax
 from cnn import CNN_pjax
 from aim import Run
 
-## generate experiment names (so that its easy to refer to them)
+## generate experiment names (so that its easy to refer to them, was a stupid idea)
 from faker import Faker
 fake = Faker()
 
 
-BATCH_SIZE = 128
+BATCH_SIZE = 32
 RANDOM_SEED = 42
-PROJECTION_STEPS = 50
+PROJECTION_STEPS = 10
+MAX_STEPS = 4*5000
 NUM_RUNS = 3
 jax_random_key = jax.random.key(RANDOM_SEED)
 
@@ -33,14 +34,7 @@ tasks = [
         "name":"MNIST",
         "dataset":MNISTDataModule,
         "model":MLP_pjax([256],28*28,10),
-        "vectorise":True
     },
-    {
-        "name":"CIFAR10",
-        "dataset":CIFAR10DataModule,
-        "model":CNN_pjax([256, 256],3,32,10),
-        "vectorise":False
-    }
 ]
 
 optimizers = [
@@ -129,8 +123,6 @@ optimizers = [
         "optimizer": optim.Dykstra(steps_per_update=PROJECTION_STEPS),
     }, 
 ]
-
-
 
 def run_task(task, opt_info, jax_random_key, eval_every=100, patience=10, max_steps=None, run_number=1):
     # Split key into independent sub-keys for data, model init, and naming
@@ -265,7 +257,7 @@ if __name__ == "__main__":
                 print(f"\n--- Optimizer: {opt_info['name']} | Run {run_number}/{NUM_RUNS} ---")
                 run_key = all_keys[key_idx]
                 key_idx += 1
-                results = run_task(task_info, opt_info, run_key, eval_every=50, max_steps=1000, run_number=run_number)
+                results = run_task(task_info, opt_info, run_key, eval_every=50, max_steps=MAX_STEPS, run_number=run_number)
                 gc.collect()
                 jax.clear_caches()
                 from pjax.core.computation import vmap_ids_order

@@ -1,13 +1,15 @@
+from __future__ import annotations
+
 import math
 from functools import partial
-from typing import Sequence
+from typing import Optional, Sequence, Union
 
 from jax import numpy as jnp
 import jax
 from . import no_ops, ops
 from .computation import Computation, vmap
 
-Axis = Sequence[int] | int | None
+Axis = Union[Sequence[int], int, None]
 
 
 def broadcast_to(a: Computation, shape: Sequence[int]) -> Computation:
