@@ -148,8 +148,9 @@ class Optimizer(ABC):
     def __init__(self, steps_per_update=50, change_projection_order=False):
         self.steps_per_update = steps_per_update
         self.change_projection_order = change_projection_order
-        self.uses_velocity = False
-        self.uses_variance = False  # added: allow second-moment state
+        self.uses_p = False
+        self.uses_q = False
+        self.add_projection_at_end = False
 
     def update(self, fun, params: FrozenDict, steps_per_update=None):
         steps_per_update = steps_per_update or self.steps_per_update
@@ -187,11 +188,11 @@ class Optimizer(ABC):
 
         if self.uses_velocity:
             def step(carry, _):
-                vars_, vel = carry
-                new_vars, new_vel = self._step(vars_, *projections, vel)
+                vars_, p_ = carry
+                new_vars, new_p = self._step(vars_, *projections, p_)
                 loss = loss_fn(vars_, new_vars)
-                return (new_vars, new_vel), loss
-            (inputs, velocity), losses = jax.lax.scan(step, (inputs, velocity), None, length=steps_per_update)
+                return (new_vars, new_p), loss
+            (inputs, p), losses = jax.lax.scan(step, (inputs, p), None, length=steps_per_update)
         else:
             def step(carry, _):
                 vars_ = carry
@@ -200,6 +201,9 @@ class Optimizer(ABC):
                 return new_vars, loss
             inputs, losses = jax.lax.scan(step, inputs, None, length=steps_per_update)
 
+        if self.add_projection_at_end:
+            inputs = projections[0](inputs)
+            
         # update params
         new_params = {}
         for name, computation in params.items():
@@ -266,19 +270,18 @@ class AlternatingProjectionsMonumentum(BipartiteOptimizer):
     """
     def __init__(self, steps_per_update=50, change_projection_order=False):
         super().__init__(steps_per_update, change_projection_order)
-        self.velocity = None
         self.beta = 0
         self.learning_rate = 1
-        self.uses_velocity = True
+        self.uses_p = True
         
-    def _step(self, vars, projection_a, projection_b, velocity):
+    def _step(self, vars, projection_a, projection_b, p):
 
-        vars_look_ahead = jax.tree.map(lambda x, d: x + 0.9*d , vars, velocity)
+        vars_look_ahead = jax.tree.map(lambda x, d: x + 0.9*d , vars, p)
         new_vars = projection_b(projection_a(vars_look_ahead))
-        velocity = jax.tree.map(lambda x, y: x - y, new_vars, vars)
-        #velocity = jax.tree.map(lambda x, y, v: self.beta*v + (1-self.beta)*(x - y), new_vars, vars, velocity)
+        p = jax.tree.map(lambda x, y: x - y, new_vars, vars)
+        #p = jax.tree.map(lambda x, y, v: self.beta*v + (1-self.beta)*(x - y), new_vars, vars, p)
 
-        return new_vars, velocity
+        return new_vars, p
     
 
 class AlternatingReflections(BipartiteOptimizer):
@@ -312,9 +315,10 @@ class DouglasRachford(BipartiteOptimizer):
         relaxation: the relaxation parameter for the Douglas-Rachford iteration.
     """
 
-    def __init__(self, steps_per_update=50, change_projection_order=False, relaxation=0.5):
+    def __init__(self, steps_per_update=50, change_projection_order=False, relaxation=0.5, add_projection_at_end=False):
         super().__init__(steps_per_update, change_projection_order)
         self.relaxation = relaxation
+        self.add_projection_at_end = add_projection_at_end
 
 
     def _step(self, vars, projection_a, projection_b):
@@ -351,7 +355,7 @@ class DouglasRachfordMomentum(BipartiteOptimizer):
         self.relaxation = relaxation
         self.beta = beta
         self.learning_rate = 1
-        self.uses_velocity = True
+        self.uses_p = True
 
     def _step(self, vars, projection_a, projection_b, velocity):
         def reflection(projection, vars):
@@ -363,9 +367,9 @@ class DouglasRachfordMomentum(BipartiteOptimizer):
             vars_look_ahead,
             reflection(projection_b, reflection(projection_a, vars_look_ahead)),
         )
-        velocity = jax.tree.map(lambda x, y: x - y, new_vars, vars)
+        p = jax.tree.map(lambda x, y: x - y, new_vars, vars)
 
-        return new_vars, velocity
+        return new_vars, p
 
 
 
@@ -462,3 +466,26 @@ class CyclicDouglasRachford(CyclicOptimizer):
             vars = d_r(vars, projections[i], projections[(i + 1) % len(projections)])
 
         return vars
+
+class Dykstra(BipartiteOptimizer):
+    """
+    Dykstra's projection algorithm for solving convex feasibility problems.
+
+    Args:
+        
+    """
+    def __init__(self, steps_per_update=50, change_projection_order=False):
+        super().__init__(steps_per_update, change_projection_order)
+        self.uses_p = True
+        self.uses_q = True
+        
+    def _step(self, vars, projection_a, projection_b, p, q):
+
+        y = jax.tree.map(lambda x, p: x + p , vars, p)
+        y_new = projection_a(y)
+        p_new = jax.tree.map(lambda x, p, y: x + p - y, vars, p, y_new)
+
+        new_vars = jax.tree.map(lambda y, q: y + q , y_new, q)
+        new_vars = projection_b(new_vars)
+        q_new = jax.tree.map(lambda y, q, new_vars: y + q - new_vars, y_new, q, new_vars)
+        return new_vars, p_new, q_new
