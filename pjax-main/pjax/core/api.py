@@ -65,6 +65,7 @@ def _unary_op(op, a: Computation, axis: Axis = None, keepdims: bool = False) -> 
         axis = tuple(range(a.ndim))
     if isinstance(axis, int):
         axis = (axis,)
+    axis = tuple(ax if ax >= 0 else a.ndim + ax for ax in axis)
 
     def fn(a):
         out = op(reshape(a, -1))

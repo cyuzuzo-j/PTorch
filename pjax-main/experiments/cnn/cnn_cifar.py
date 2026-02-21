@@ -18,23 +18,46 @@ import numpy as np
 
 import pjax
 from pjax import nn, optim
-from experiments.shared.data import CIFAR10DataModule
+from experiments.shared.data import InfiniteCifarLoader
 
 # Configure logging
 def log(msg):
     print(f"[INFO] {msg}")
 
 # --- Constants ---
-BATCH_SIZE = 8
+BATCH_SIZE = 128
 EPOCHS = 3
 IMAGE_SIZE = 32
-INPUT_CHANNELS = 1
+INPUT_CHANNELS = 3
 
 # Load Data
-log("Loading CIFAR-10 dataset (grayscale)...")
-dataset = CIFAR10DataModule(batch_size=BATCH_SIZE, grayscale=True)
-train_data = dataset.train_dataloader()
-test_data = dataset.test_dataloader()
+log("Loading CIFAR-10 dataset using InfiniteCifarLoader...")
+
+hyp = {
+    'aug': {
+        'flip': True,
+        'translate': 4,
+        'cutout': 12,
+    }
+}
+
+base_train_loader = InfiniteCifarLoader('./dataset', train=True, batch_size=BATCH_SIZE, aug=hyp['aug'])
+base_test_loader = InfiniteCifarLoader('./dataset', train=False, batch_size=BATCH_SIZE)
+
+class EpochWrapper:
+    def __init__(self, loader, num_samples):
+        self.loader_iter = iter(loader)
+        self.steps = num_samples // loader.batch_size
+
+    def __iter__(self):
+        for _ in range(self.steps):
+            _, images, labels = next(self.loader_iter)
+            images = images.float().permute(0, 2, 3, 1).cpu().numpy()
+            labels = labels.cpu().numpy()
+            yield images, labels
+
+train_data = EpochWrapper(base_train_loader, 50000)
+test_data = EpochWrapper(base_test_loader, 10000)
 gc.collect()
 
 # --- Model Definitions ---
@@ -71,25 +94,66 @@ class LeNet_FFT(nn.Module):
         x = self.relu4(self.fc2(x))
         return self.out(x)
 
+class Conv(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.conv = nn.Conv2D(in_channels, out_channels, kernel_shape=(3, 3), padding="SAME")
+
+    def __call__(self, x):
+        return self.conv(x)
+
+class ConvGroup(nn.Module):
+    def __init__(self, channels_in, channels_out):
+        super().__init__()
+        self.conv1 = Conv(channels_in, channels_out)
+        self.pool = nn.MaxPool2D(pool_size=(2, 2), strides=(2, 2))
+        self.conv2 = Conv(channels_out, channels_out)
+        self.activ = nn.ReLU(channels_out)
+
+    def __call__(self, x):
+        x = self.conv1(x)
+        x = self.pool(x)
+        x = self.activ(x)
+        x = self.conv2(x)
+        x = self.activ(x)
+        return x
+
 class CNN_PJAX_Standard(nn.Module):
     """
     PJAX CNN model using Standard Convolution.
     """
-    def __init__(self, classes, image_size=IMAGE_SIZE, input_channels=INPUT_CHANNELS):
+    def __init__(self, classes=10, image_size=IMAGE_SIZE, input_channels=INPUT_CHANNELS):
         super().__init__()
-        self.conv1 = nn.Conv2D(input_channels, 16, (3, 3), padding="SAME")
-        self.relu1 = nn.ReLU(16)
-        self.conv2 = nn.Conv2D(16, 32, (3, 3), padding="SAME")
-        self.relu2 = nn.ReLU(32)
-        self.out = nn.Linear(32 * image_size * image_size, classes)
+        widths = dict(block1=64, block2=256, block3=256)
+        whiten_kernel_size = 2
+        whiten_width = 2 * 3 * whiten_kernel_size**2
+        
+        self.whiten = nn.Conv2D(
+            3, whiten_width, kernel_shape=(whiten_kernel_size, whiten_kernel_size), padding="VALID"
+        )
+        self.group1 = ConvGroup(whiten_width, widths["block1"])
+        self.group2 = ConvGroup(widths["block1"], widths["block2"])
+        self.group3 = ConvGroup(widths["block2"], widths["block3"])
+
+        self.pool = nn.MaxPool2D(pool_size=(3, 3), strides=(3, 3))
+        print(widths["block3"])
+        self.head = nn.Linear(3*3*widths["block3"], classes)
 
     def __call__(self, x):
-        x = self.conv1(x)
-        x = self.relu1(x)
-        x = self.conv2(x)
-        x = self.relu2(x)
+        print("before whiten",x.shape)
+        x = self.whiten(x)
+        print("before group1",x.shape)
+        x = self.group1(x)
+        print("before group2",x.shape)
+        x = self.group2(x)
+        print("before group3",x.shape)
+        x = self.group3(x)
+        print("before pool",x.shape)
+        x = self.pool(x)
+        print("before reshape",x.shape)
         x = pjax.reshape(x, (x.shape[0], -1))
-        return self.out(x)
+        print(x.shape)
+        return self.head(x)
 
 class CNN_PyTorch(tnn.Module):
     """
