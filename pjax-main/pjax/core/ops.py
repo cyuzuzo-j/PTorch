@@ -346,36 +346,38 @@ def dotproduct_op(a, b, /):
 
 
 def bilinear_proj(a, b, z, /):
-    """Project onto bilinear function graph using Newton's method."""
-    # Preserve the original dtype
+    """Project onto bilinear function graph using a bounded Newton's method."""
     original_dtype = a.dtype
     
-    # Convert to float32 for numerically stable computation
     a = a.astype(jnp.float32)
     b = b.astype(jnp.float32)
     z = z.astype(jnp.float32)
-    p = a @ b
-    q = a @ a + b @ b
+    
+    p = jnp.dot(a, b)
+    q = jnp.dot(a, a) + jnp.dot(b, b)
 
+    # CORRECTED: Removed the invalid '+ t' mutation to exactly match 
+    # the quartic root equation for hyperbolas.
     def f(t):
-        return ((1 + t**2) * p + t * q) / (1 - t**2) ** 2 - z + t
+        return ((1.0 + t**2) * p + t * q) / ((1.0 - t**2) ** 2) - z
 
     f_prime = jax.grad(f)
 
-    def newton_step(t):
-        return t - f(t) / f_prime(t)
-
+    def safe_newton_step(t):
+        # Added epsilon to gradient to prevent division-by-zero on flat regions
+        step = f(t) / (f_prime(t) + 1e-8)
+        
+        # CORRECTED: Rigidly bound t within the open interval (-1, 1).
+        # We clip at +/- 0.999 to prevent hitting the asymptotes and causing inversion.
+        return jnp.clip(t - step, -0.999, 0.999)
     
-    t = jax.lax.fori_loop(0, config.bilinear_projection_num_newton_steps, lambda _, t: newton_step(t), 0.0, unroll=True)
+    # CORRECTED: Removed unroll=True to prevent massive XLA graph bloat
+    t = jax.lax.fori_loop(0, config.bilinear_projection_num_newton_steps, lambda _, t: safe_newton_step(t), 0.0)
 
-    a_new = (a + t * b) / (1 - t**2)
-    b_new = (b + t * a) / (1 - t**2)
+    a_new = (a + t * b) / (1.0 - t**2)
+    b_new = (b + t * a) / (1.0 - t**2)
     
-    # Cast back to original dtype
-    a_new = a_new.astype(original_dtype)
-    b_new = b_new.astype(original_dtype)
-    return a_new, b_new
-
+    return a_new.astype(original_dtype), b_new.astype(original_dtype)
 
 dot = make_computation("dot", dotproduct_op, bilinear_proj)
 
