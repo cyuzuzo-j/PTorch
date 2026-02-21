@@ -162,6 +162,8 @@ def max_proj(a, z, /):
 max = make_computation("max", max_op, max_proj)
 
 maxpool = make_computation("maxpool", maxpool_op, maxpool_proj)
+
+
 def _solve_reduced_system(a_val, b_val, y_val):
     """
     Solves the projection using the reduced 2x2 system (Real/Imag of L)

@@ -474,3 +474,33 @@ class MaxPool2D(Module):
             output tensor after max pooling.
         """
         return pjax.maxpool(input, pool_size=self.pool_size, strides=self.strides, padding=self.padding)
+    
+
+class BatchNorm(Module):
+    """Batch normalization layer (parameter-free).
+
+    Normalizes input across all dimensions except the last (features)
+    to stabilize training. Implemented as an invertible shape transform
+    with no learnable parameters::
+
+        output = (input - mean) / sqrt(var + eps)
+
+    Args:
+        eps: small constant for numerical stability.
+    """
+
+    def __init__(self, eps: float = 1e-5):
+        super().__init__()
+        self.eps = eps
+
+    def __call__(self, input):
+        """Apply batch normalization.
+
+        Args:
+            input: tensor of shape ``(N, ..., features)``.
+
+        Returns:
+            Normalized tensor with the same shape as ``input``.
+        """
+        return pjax.batchnorm(input, eps=self.eps)
+

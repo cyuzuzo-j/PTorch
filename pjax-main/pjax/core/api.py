@@ -178,6 +178,27 @@ def maxpool(
     return ops.maxpool(a, pool_size=pool_size, strides=strides, padding=padding)
 
 
+def batchnorm(
+    a: Computation,
+    *,
+    eps: float = 1e-5,
+) -> Computation:
+    """Batch normalization as a parameter-free shape transform.
+
+    Normalizes ``a`` across all dimensions except the last (features)::
+
+        output = (a - mean) / sqrt(var + eps)
+
+    Args:
+        a: input array of shape ``(N, ..., features)``.
+        eps: small constant for numerical stability.
+
+    Returns:
+        Normalized array with the same shape as ``a``.
+    """
+    return no_ops.batchnorm(a, eps=eps)
+
+
 def dot(a: Computation, b: Computation) -> Computation:
     """Dot product of two arrays.
 
