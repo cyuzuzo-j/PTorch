@@ -8,6 +8,7 @@ The operation computes the forward pass, while the projection operator
 computes the orthogonal projection onto the function's graph.
 """
 
+import builtins
 import jax
 from jax import numpy as jnp
 from jax import jacrev
@@ -43,6 +44,83 @@ def sum_proj(a, z, /):
 
 sum_ = make_computation("sum", sum_op, sum_proj)
 
+def _resolve_pool_padding(input_shape, pool_size, strides, padding):
+    if isinstance(padding, str):
+        if padding.upper() == "VALID":
+            return (0, 0), (0, 0)
+        if padding.upper() != "SAME":
+            raise ValueError(f"Unsupported padding: {padding}")
+        in_h, in_w = input_shape
+        ph, pw = pool_size
+        sh, sw = strides
+        out_h = int(jnp.ceil(in_h / sh))
+        out_w = int(jnp.ceil(in_w / sw))
+        pad_h = builtins.max(0, (out_h - 1) * sh + ph - in_h)
+        pad_w = builtins.max(0, (out_w - 1) * sw + pw - in_w)
+        pad_top = pad_h // 2
+        pad_left = pad_w // 2
+        pad_bottom = pad_h - pad_top
+        pad_right = pad_w - pad_left
+        return (pad_top, pad_bottom), (pad_left, pad_right)
+    return padding
+
+
+def maxpool_op(a, /, *, pool_size=(2, 2), strides=(2, 2), padding="VALID"):
+    """MaxPool operation for 4D arrays with shape (batch, height, width, channels)."""
+    assert a.ndim == 4
+    window = (1, pool_size[0], pool_size[1], 1)
+    window_strides = (1, strides[0], strides[1], 1)
+    return jax.lax.reduce_window(a, -jnp.inf, jax.lax.max, window, window_strides, padding)
+
+
+def maxpool_proj(a, z, /, *, pool_size=(2, 2), strides=(2, 2), padding="VALID"):
+    """Project onto max pooling function graph for non-overlapping windows."""
+    assert a.ndim == 4 and z.ndim == 4
+    if tuple(pool_size) != tuple(strides):
+        raise ValueError("maxpool projection requires strides == pool_size")
+    n, h_in, w_in, c = a.shape
+    ph, pw = pool_size
+    sh, sw = strides
+    (pad_top, pad_bottom), (pad_left, pad_right) = _resolve_pool_padding(
+        (h_in, w_in), pool_size, strides, padding
+    )
+    h_pad = h_in + pad_top + pad_bottom
+    w_pad = w_in + pad_left + pad_right
+    patches = jax.lax.conv_general_dilated_patches(
+        a,
+        filter_shape=pool_size,
+        window_strides=strides,
+        padding=padding,
+        dimension_numbers=("NHWC", "HWIO", "NHWC"),
+    )
+    h_out, w_out = patches.shape[1], patches.shape[2]
+    patches = patches.reshape(n, h_out, w_out, c, ph * pw)
+    flat_patches = patches.reshape(-1, ph * pw)
+    flat_z = z.reshape(-1)
+    proj_flat = jax.vmap(lambda a_vec, z_scalar: max_proj(a_vec, z_scalar)[0])(
+        flat_patches, flat_z
+    )
+    proj_patches = proj_flat.reshape(n, h_out, w_out, c, ph, pw)
+    proj_patches = proj_patches.transpose(0, 1, 4, 2, 5, 3)
+    proj_cover = proj_patches.reshape(n, h_out * ph, w_out * pw, c)
+    h_cov = min(proj_cover.shape[1], h_pad)
+    w_cov = min(proj_cover.shape[2], w_pad)
+    proj_cover = proj_cover[:, :h_cov, :w_cov, :]
+    pad_h = h_pad - h_cov
+    pad_w = w_pad - w_cov
+    if pad_h or pad_w:
+        proj_cover = jnp.pad(
+            proj_cover,
+            ((0, 0), (0, pad_h), (0, pad_w), (0, 0)),
+            mode="constant",
+            constant_values=0.0,
+        )
+    proj_input = proj_cover[:, pad_top : pad_top + h_in, pad_left : pad_left + w_in, :]
+    covered_pad = jnp.zeros((1, h_pad, w_pad, 1), dtype=bool)
+    covered_pad = covered_pad.at[:, :h_cov, :w_cov, :].set(True)
+    covered = covered_pad[:, pad_top : pad_top + h_in, pad_left : pad_left + w_in, :]
+    a_proj = jnp.where(covered, proj_input, a)
+    return (a_proj,)
 
 def max_op(a, /):
     """Maximum operation for 1D arrays."""
@@ -78,10 +156,12 @@ def max_proj(a, z, /):
     # select candidate minimizing distance
     k = jnp.argmin(dist_valid)
     
-    return (a_k[k][jnp.argsort(idx)].astype(jnp.complex64),)
+    return (a_k[k][jnp.argsort(idx)].astype(jnp.bfloat16),)
 
 
 max = make_computation("max", max_op, max_proj)
+
+maxpool = make_computation("maxpool", maxpool_op, maxpool_proj)
 def _solve_reduced_system(a_val, b_val, y_val):
     """
     Solves the projection using the reduced 2x2 system (Real/Imag of L)
@@ -265,9 +345,9 @@ def dotproduct_op(a, b, /):
 
 def bilinear_proj(a, b, z, /):
     """Project onto bilinear function graph using Newton's method."""
-    a = a.astype(jnp.float32)
-    b = b.astype(jnp.float32)
-    z = z.astype(jnp.float32)
+    a = a.astype(jnp.bfloat16)
+    b = b.astype(jnp.bfloat16)
+    z = z.astype(jnp.bfloat16)
     p = a @ b
     q = a @ a + b @ b
 
@@ -284,8 +364,8 @@ def bilinear_proj(a, b, z, /):
 
     a_new = (a + t * b) / (1 - t**2)
     b_new = (b + t * a) / (1 - t**2)
-    a_new = a_new.astype(jnp.complex64)
-    b_new = b_new.astype(jnp.complex64)
+    a_new = a_new.astype(jnp.bfloat16)
+    b_new = b_new.astype(jnp.bfloat16)
     return a_new, b_new
 
 

@@ -1,8 +1,10 @@
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from pjax.nn import MaxPool2D
 import pjax
+from pjax.core import ops
 
 def test_maxpool2d_valid():
     print("Testing MaxPool2D with VALID padding...")
@@ -64,6 +66,26 @@ def test_maxpool2d_same():
     np.testing.assert_array_equal(output, expected_output)
     print("MaxPool2D SAME padding test passed!")
 
+def test_maxpool2d_projection_valid():
+    key = jax.random.PRNGKey(0)
+    input_data = jax.random.normal(key, (1, 5, 5, 1))
+    z = ops.maxpool_op(input_data, pool_size=(2, 2), strides=(2, 2), padding="VALID")
+    (a_proj,) = ops.maxpool_proj(input_data, z, pool_size=(2, 2), strides=(2, 2), padding="VALID")
+    z_proj = ops.maxpool_op(a_proj, pool_size=(2, 2), strides=(2, 2), padding="VALID")
+    np.testing.assert_allclose(z_proj, z, atol=1e-2)
+
+
+def test_maxpool2d_projection_same():
+    key = jax.random.PRNGKey(1)
+    input_data = jax.random.normal(key, (1, 3, 3, 1))
+    z = ops.maxpool_op(input_data, pool_size=(2, 2), strides=(2, 2), padding="SAME")
+    (a_proj,) = ops.maxpool_proj(input_data, z, pool_size=(2, 2), strides=(2, 2), padding="SAME")
+    z_proj = ops.maxpool_op(a_proj, pool_size=(2, 2), strides=(2, 2), padding="SAME")
+    np.testing.assert_allclose(z_proj, z, atol=1e-2)
+
+
 if __name__ == "__main__":
     test_maxpool2d_valid()
     test_maxpool2d_same()
+    test_maxpool2d_projection_valid()
+    test_maxpool2d_projection_same()
