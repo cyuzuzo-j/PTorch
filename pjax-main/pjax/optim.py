@@ -28,7 +28,6 @@ def plot_graph(graph: nx.DiGraph):
     nx.draw(graph, pos, with_labels=True, node_color=node_color, node_size=250, font_size=8)
     plt.show()
 
-@cache
 def get_graph(computation: Computation):
     """Get the computation graph of a computation."""
     graph = nx.DiGraph()

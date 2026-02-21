@@ -60,12 +60,12 @@ class MLP_pjax(nn.Module):
         self.skip = skip
         last_f = in_features
         for i, f in enumerate(hidden_features):
-            setattr(self, f"dense_{i}", nn.Linear(last_f, f))
+            setattr(self, f"dense_{i}", nn.LinearOld(last_f, f))
             setattr(self, f"relu_{i}", nn.ReLU(f))
             last_f = f
 
         out_features = sum(hidden_features) if skip else hidden_features[-1]
-        self.out = nn.Linear(out_features, classes)
+        self.out = nn.LinearOld(out_features, classes)
     
     def get_params(self, random_key, init_x=None):
         return self.init(random_key)
