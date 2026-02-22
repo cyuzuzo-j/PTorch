@@ -626,88 +626,64 @@ def corss_entropy_prox(logits, labels, _, /):
 
 cross_entropy = make_computation("cross_entropy", cross_entropy_op, corss_entropy_prox)
 
+
 def matmul_op(a, b, /):
     """Matrix multiplication operation."""
     return jnp.matmul(a, b)
-    
-def bilinear_proj_full(a, b, z, /):
-    """
-    Project onto bilinear function graph using Elser's hybrid Newton-Bisection method.
-    """
+
+def bilinear_proj_fast(a, b, z, /):
+    """Project onto bilinear function graph using a bounded Newton's method."""        
     p = jnp.dot(a, b)
     q = jnp.dot(a, a) + jnp.dot(b, b)
-    
-    # 1. Define the analytical function and its derivative
-    def calc_h0(u):
-        u2 = u**2
-        num0 = p * (1.0 + u2) + q * u
-        return (num0 / ((1.0 - u2)**2)) - z
-        
-    def calc_h1(u):
-        u2 = u**2
-        num1 = q * (1.0 + 3.0 * u2) + 2.0 * p * u * (3.0 + u2)
-        return num1 / ((1.0 - u2)**3)
 
-    # 2. Initialize the Hybrid Solver State
-    # u_a is the 'active bound', u_b is the 'bracketing bound'
-    # Ensure all carry values have consistent dtype
-    dtype = p.dtype
-    u_a_init = jnp.array(0.0, dtype=dtype)
-    h_a_init = (p - z).astype(dtype)  # calc_h0(0.0) simplifies to p - z
-    u_b_init = jnp.where(h_a_init < 0, jnp.array(1.0, dtype=dtype), jnp.array(-1.0, dtype=dtype))
+    def f_and_f_prime(t):
+        t2 = t**2
+        one_minus_t2 = 1.0 - t2
+        
+        N = (1.0 + t2) * p + t * q
+        f_val = (N / (one_minus_t2**2)) - z
+        
+        N_prime = 2.0 * t * p + q
+        f_prime_val = ((N_prime * one_minus_t2) + 4.0 * t * N) / (one_minus_t2**3)
+        
+        return f_val, f_prime_val
     
-    def hybrid_step(i, state):
-        u_a, u_b, h_a = state
-        
-        h1_a = calc_h1(u_a)
-        
-        # Propose the Newton step
-        u_newton = u_a - h_a / (h1_a + 1e-8)
-        
-        # Check if Newton step is strictly inside the safe bracket
-        is_inside = (u_newton > jnp.minimum(u_a, u_b)) & (u_newton < jnp.maximum(u_a, u_b))
-        
-        # Choose next active point: Newton if safe, Bisection if outside
-        u_next_a = jnp.where(is_inside, u_newton, (u_a + u_b) / 2.0)
-        
-        # Evaluate function at the new active point
-        h_next_a = calc_h0(u_next_a)
-        
-        # Update the bracketing bound based on sign changes
-        same_sign = (h_next_a * h_a) > 0
-        u_next_b = jnp.where(same_sign, u_b, u_a)
-        
-        # Ensure consistent dtypes for carry state
-        return (u_next_a.astype(dtype), u_next_b.astype(dtype), h_next_a.astype(dtype))
-
-    # 3. Execute the solver via XLA-optimized loop
-    # 10 to 15 steps is usually more than enough for float32 precision
-    final_state = jax.lax.fori_loop(
+    def safe_newton_step(t):
+        f, fprime = f_and_f_prime(t)
+        step = f / (fprime + 1e-8)
+        return jnp.clip(t - step, -0.999, 0.999)
+    
+    t = jax.lax.fori_loop(
         0, 
-        5, # Replace with config.bilinear_projection_num_newton_steps if preferred
-        hybrid_step, 
-        (u_a_init, u_b_init, h_a_init)
+        config.bilinear_projection_num_newton_steps, 
+        lambda _, t: safe_newton_step(t), 
+        0.0
     )
-    
-    u_final = final_state[0]
-    
-    # 4. Apply the final projection update
-    u2_final = u_final**2
-    one_minus_u2 = 1.0 - u2_final
-    
-    a_new = (a + u_final * b) / one_minus_u2
-    b_new = (b + u_final * a) / one_minus_u2
+
+    a_new = (a + t * b) / (1.0 - t**2)
+    b_new = (b + t * a) / (1.0 - t**2)
     
     return a_new, b_new
 
-def bilinearMatrix_orr(a, B, z):
-    """Project onto bilinear function graph using Newton's method.
-    Uses jax.lax.scan to prevent XLA graph unrolling bloat.
+# --- Config-based dispatch for bilinear ---
+_bilinear_methods = {
+    "original": bilinear_proj,      # float32 cast + jax.grad
+    "fast": bilinear_proj_fast,     # hand-coded f_and_f_prime
+}
+
+def bilinear(a, b, z, /):
+    """Dispatch to the configured bilinear projection method."""
+    return _bilinear_methods[config.bilinear_method](a, b, z)
+
+def bilinearMatrix_seq(a, B, z):
+    """
+    Project onto bilinear function graph using Newton's method.
+    Uses jax.lax.scan to do an cyclic projection style projection to get A
     """
     # scan_body takes (carry, current_element)
     def scan_body(a_curr, x):
         b_col, zi = x
-        a_new, b_proj = bilinear_proj_full(a_curr, b_col, zi)
+        a_new, b_proj = bilinear(a_curr, b_col, zi)
         # return (new_carry, output_to_stack)
         return a_new, b_proj
     
@@ -719,9 +695,35 @@ def bilinearMatrix_orr(a, B, z):
     # We transpose it back to (dim, AA)
     return a_final, b_projections.T
 
-def matmul_proj(a, b, z, /):
-    """Project onto matrix multiplication constraint.
-    Uses jax.lax.scan to process batches efficiently.
+def bilinearMatrix_parr(a, B, z):
+    """Project onto bilinear function graph using Newton's method.
+
+    A is a vector of shape (dim,), B is a matrix of shape (dim, AA),
+    and z is a vector of shape (AA,).
+    """
+    def proj_single(b, zi):
+        return bilinear(a, b, zi)
+
+    a_buffer, projection_B = jax.vmap(
+        proj_single, in_axes=(1, 0), out_axes=(0, 1)
+    )(B, z)
+    proj_a = jnp.mean(a_buffer, axis=0)
+    return proj_a, projection_B
+
+# --- Config-based dispatch for bilinear_matrix ---
+_bilinear_matrix_methods = {
+    "seq": bilinearMatrix_seq,    # jax.lax.scan cyclic projection
+    "parr": bilinearMatrix_parr,  # jax.vmap + mean
+}
+
+def bilinear_matrix(a, B, z):
+    """Dispatch to the configured bilinear matrix projection method."""
+    return _bilinear_matrix_methods[config.bilinear_matrix_method](a, B, z)
+
+def matmul_proj_seq(a, b, z, /):
+    """
+    Project onto matrix multiplication constraint.
+    Uses jax.lax.scan to process batches sequentiely
     """
     # If a is 1D, add a batch dimension for consistent processing
     a_batched = jnp.atleast_2d(a)
@@ -729,7 +731,7 @@ def matmul_proj(a, b, z, /):
 
     def scan_body(b_curr, x):
         a_sample, z_sample = x
-        a_final, b_new = bilinearMatrix_orr(a_sample, b_curr, z_sample)
+        a_final, b_new = bilinear_matrix(a_sample, b_curr, z_sample)
         # return (new_carry, output_to_stack)
         return b_new, a_final
     
@@ -741,5 +743,35 @@ def matmul_proj(a, b, z, /):
         a_result = a_result[0]
         
     return a_result, b_final
-  
-matmul = make_computation("matmul", matmul_op, matmul_proj)
+
+def matmul_proj_parr(a, b, z, /):
+    """Project onto matrix multiplication constraint.
+    
+    For A @ B = Z where A is (M, K), B is (K, N), Z is (M, N),
+    we find the closest A_new, B_new satisfying the constraint.
+    Optimized with vmap for batch processing.
+    """
+    # Vectorized function for processing each sample
+    # Only vmap over a and z (batch samples), not b (shared matrix)
+    def process_sample(a_sample, z_sample):
+        a_new, b_new= bilinear_matrix(a_sample, b, z_sample)
+        return a_new, b_new
+    
+    a_buffer, b_buffer = jax.vmap(process_sample, in_axes=(0, 0))(a, z)
+    
+    # Average b_buffer across batch dimension
+    b_avg = jnp.mean(b_buffer, axis=0)
+    return a_buffer, b_avg
+
+# --- Config-based dispatch for matmul projection ---
+_matmul_proj_methods = {
+    "seq": matmul_proj_seq,    # jax.lax.scan over batch
+    "parr": matmul_proj_parr,  # jax.vmap over batch
+}
+
+def matmul_proj_dispatch(a, b, z, /):
+    """Dispatch to the configured matmul projection method."""
+    return _matmul_proj_methods[config.matmul_proj_method](a, b, z)
+
+
+matmul = make_computation("matmul", matmul_op, matmul_proj_dispatch)

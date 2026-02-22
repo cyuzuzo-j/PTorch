@@ -6,11 +6,12 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 import gc
+import itertools
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pjax
-from pjax import nn, optim, optim_eff
+from pjax import nn, optim, optim_eff, config as pjax_config
 from experiments.shared.data import (
     MNISTDataModule,
     CIFAR10DataModule
@@ -25,11 +26,11 @@ from faker import Faker
 fake = Faker()
 
 
-BATCH_SIZE = 512
+BATCH_SIZE = 32
 RANDOM_SEED = 42
-PROJECTION_STEPS = 1
-MAX_STEPS = 1000
-NUM_RUNS = 1
+PROJECTION_STEPS = 50
+MAX_STEPS = 500
+NUM_RUNS = 3
 jax_random_key = jax.random.key(RANDOM_SEED)
 
 tasks = [
@@ -46,22 +47,35 @@ optimizers = [
         "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS),
     },
     {
-        "name": "DR (cluade)",
-        "optimizer":optim_eff.BackpropDouglasRachford(steps_per_update=PROJECTION_STEPS),
-    },
-    {
-        "name": "AP (cluade)",
-        "optimizer":optim_eff.BackpropProjections(steps_per_update=PROJECTION_STEPS),
-    },
-    {
         "name": "AP (ours)",
         "optimizer":optim.AlternatingProjections(steps_per_update=PROJECTION_STEPS),
     },    
-
-
 ]
 
-def run_task(task, opt_info, jax_random_key, eval_every=100, patience=10, max_steps=None, run_number=1):
+# --- All projection method combinations ---
+_bilinear_methods = ["original", "fast"]
+_bilinear_matrix_methods = ["seq", "parr"]
+_matmul_proj_methods = ["seq", "parr"]
+
+projection_configs = [
+    {
+        "name": f"bi={b}_bm={bm}_mm={mm}",
+        "bilinear_method": b,
+        "bilinear_matrix_method": bm,
+        "matmul_proj_method": mm,
+    }
+    for b, bm, mm in itertools.product(
+        _bilinear_methods, _bilinear_matrix_methods, _matmul_proj_methods
+    )
+]
+
+def run_task(task, opt_info, jax_random_key, config_info=None, eval_every=100, patience=10, max_steps=None, run_number=1):
+    # Apply projection config if provided
+    if config_info is not None:
+        for key in ("bilinear_method", "bilinear_matrix_method", "matmul_proj_method"):
+            if key in config_info:
+                pjax_config.update(key, config_info[key])
+
     # Split key into independent sub-keys for data, model init, and naming
     data_key, model_key, name_key = jax.random.split(jax_random_key, 3)
     
@@ -80,9 +94,10 @@ def run_task(task, opt_info, jax_random_key, eval_every=100, patience=10, max_st
     optimizer = opt_info["optimizer"] 
     
     # Aim Run Init
+    config_label = config_info["name"] if config_info else "default"
     name_int = int(jax.random.randint(name_key, (), 0, 100))
     run = Run(experiment=f"{fake.name()} {name_int}")
-    run["hparams"] = {
+    hparams = {
         "task": task["name"],
         "model": model.__class__.__name__,
         "optimizer": opt_info['name'],
@@ -93,7 +108,14 @@ def run_task(task, opt_info, jax_random_key, eval_every=100, patience=10, max_st
         "max_steps": max_steps,
         "projection_steps": PROJECTION_STEPS,
         "run_number": run_number,
+        "projection_config": config_label,
     }
+    # Track individual projection method choices for easy filtering in Aim
+    if config_info is not None:
+        hparams["bilinear_method"] = config_info.get("bilinear_method", "fast")
+        hparams["bilinear_matrix_method"] = config_info.get("bilinear_matrix_method", "parr")
+        hparams["matmul_proj_method"] = config_info.get("matmul_proj_method", "seq")
+    run["hparams"] = hparams
 
     opt_state = None
 
@@ -179,8 +201,8 @@ def run_task(task, opt_info, jax_random_key, eval_every=100, patience=10, max_st
 
 
 if __name__ == "__main__":
-    # Pre-split independent keys for each (task, optimizer, run) combination
-    num_total_runs = len(tasks) * len(optimizers) * NUM_RUNS
+    # Pre-split independent keys for each (task, optimizer, config, run) combination
+    num_total_runs = len(tasks) * len(optimizers) * len(projection_configs) * NUM_RUNS
     all_keys = jax.random.split(jax_random_key, num_total_runs)
     key_idx = 0
     
@@ -190,14 +212,19 @@ if __name__ == "__main__":
         print(f"{'='*50}")
         
         for opt_info in optimizers:
-            for run_number in range(1, NUM_RUNS + 1):
-                print(f"\n--- Optimizer: {opt_info['name']} | Run {run_number}/{NUM_RUNS} ---")
-                run_key = all_keys[key_idx]
-                key_idx += 1
-                results = run_task(task_info, opt_info, run_key, eval_every=50, max_steps=MAX_STEPS, run_number=run_number)
-                gc.collect()
-                jax.clear_caches()
-                from pjax.core.computation import vmap_ids_order
-                vmap_ids_order.clear()
-                from pjax.optim import prune_shape_transforms
-                prune_shape_transforms.cache_clear()
+            for config_info in projection_configs:
+                for run_number in range(1, NUM_RUNS + 1):
+                    print(f"\n--- Optimizer: {opt_info['name']} | Config: {config_info['name']} | Run {run_number}/{NUM_RUNS} ---")
+                    run_key = all_keys[key_idx]
+                    key_idx += 1
+                    results = run_task(
+                        task_info, opt_info, run_key,
+                        config_info=config_info,
+                        eval_every=50, max_steps=MAX_STEPS, run_number=run_number,
+                    )
+                    gc.collect()
+                    jax.clear_caches()
+                    from pjax.core.computation import vmap_ids_order
+                    vmap_ids_order.clear()
+                    from pjax.optim import prune_shape_transforms
+                    prune_shape_transforms.cache_clear()
