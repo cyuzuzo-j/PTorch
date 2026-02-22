@@ -38,6 +38,6 @@ with jax.profiler.trace(os.path.join(OUT, "linear_trace"), create_perfetto_link=
     jnp.array(0.0).block_until_ready()
 
 jax.profiler.save_device_memory_profile(os.path.join(OUT, "linear_memory.prof"))
-print(f"Linear — final loss: {loss:.6f}")
+print(f"Linear — final loss: {loss:.6}")
 print(f"Trace  → {OUT}/linear_trace")
 print(f"Memory → {OUT}/linear_memory.prof")

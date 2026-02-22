@@ -25,9 +25,9 @@ from faker import Faker
 fake = Faker()
 
 
-BATCH_SIZE = 128
+BATCH_SIZE = 512
 RANDOM_SEED = 42
-PROJECTION_STEPS = 50
+PROJECTION_STEPS = 1
 MAX_STEPS = 1000
 NUM_RUNS = 1
 jax_random_key = jax.random.key(RANDOM_SEED)
@@ -41,14 +41,6 @@ tasks = [
 ]
 
 optimizers = [
-     {
-        "name": "AP (cluade)",
-        "optimizer":optim_eff.BackpropProjections(steps_per_update=PROJECTION_STEPS),
-    },
-    {
-        "name": "AP (ours)",
-        "optimizer":optim.AlternatingProjections(steps_per_update=PROJECTION_STEPS),
-    },    
     {
         "name": "DR (ours)",
         "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS),
@@ -57,6 +49,16 @@ optimizers = [
         "name": "DR (cluade)",
         "optimizer":optim_eff.BackpropDouglasRachford(steps_per_update=PROJECTION_STEPS),
     },
+    {
+        "name": "AP (cluade)",
+        "optimizer":optim_eff.BackpropProjections(steps_per_update=PROJECTION_STEPS),
+    },
+    {
+        "name": "AP (ours)",
+        "optimizer":optim.AlternatingProjections(steps_per_update=PROJECTION_STEPS),
+    },    
+
+
 ]
 
 def run_task(task, opt_info, jax_random_key, eval_every=100, patience=10, max_steps=None, run_number=1):
