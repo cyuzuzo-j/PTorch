@@ -26,9 +26,9 @@ from faker import Faker
 fake = Faker()
 
 
-BATCH_SIZE = 32
+BATCH_SIZE = 1024
 RANDOM_SEED = 42
-PROJECTION_STEPS = 50
+PROJECTION_STEPS = 1
 MAX_STEPS = 500
 NUM_RUNS = 3
 jax_random_key = jax.random.key(RANDOM_SEED)

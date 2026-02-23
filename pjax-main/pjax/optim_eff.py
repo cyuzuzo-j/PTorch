@@ -16,10 +16,8 @@ Key advantages over the ``optim.py`` bipartite approach:
 
 from __future__ import annotations
 
-import warnings
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Sequence
 
 import jax
 from jax import numpy as jnp
@@ -135,89 +133,97 @@ def _bfs_partitions(topo_order, children_of):
 
 
 # ────────────────────────────────────────────────────────
-#  Core helpers (same semantics as optim.py, no networkx)
+#  Core helpers
 # ────────────────────────────────────────────────────────
 
-def _get_value(computation, inputs):
-    """Evaluate a single node given current *inputs*."""
+def _projection_indexed(idx, inputs_list, node_index, children_of_idx, computation):
+    """Project a single node using integer-indexed list instead of Computation-keyed dict."""
     if isinstance(computation, Array):
-        return computation.value
-    if isinstance(computation, Parameter):
-        return inputs[computation][0]
-    if isinstance(computation, Operation):
-        return computation.operation(*inputs[computation])
-    if isinstance(computation, ShapeTransform):
-        return computation.transform(
-            *[_get_value(p, inputs) for p in computation.parents]
-        )
+        return inputs_list
+    # Gather outputs from children
+    kids_idx = children_of_idx.get(idx, [])
+    if not kids_idx:
+        output = None
+    else:
+        vals = []
+        for child_idx, child_node, parent_positions in kids_idx:
+            child_inputs = inputs_list[child_idx]
+            if isinstance(child_node, Operation):
+                for pos in parent_positions:
+                    vals.append(child_inputs[pos])
+            elif isinstance(child_node, ShapeTransform):
+                # Re-evaluate ShapeTransform inverse using current values
+                transform_inputs = [inputs_list[node_index[p]][0] if isinstance(p, Parameter)
+                                    else inputs_list[node_index[p]] for p in child_node.parents]
+                # flatten to single values
+                flat_ti = []
+                for ti in transform_inputs:
+                    flat_ti.append(ti[0] if isinstance(ti, list) else ti)
+                child_out_vals = []
+                for gchild_idx, gchild_node, gparent_positions in children_of_idx.get(child_idx, []):
+                    gchild_inputs = inputs_list[gchild_idx]
+                    if isinstance(gchild_node, Operation):
+                        for pos in gparent_positions:
+                            child_out_vals.append(gchild_inputs[pos])
+                if not child_out_vals:
+                    continue
+                child_output = jnp.sum(jnp.stack(child_out_vals), axis=0) / len(child_out_vals)
+                inv_vals = child_node.inverse(*flat_ti, child_output)
+                if isinstance(inv_vals, jnp.ndarray):
+                    inv_vals = [inv_vals]
+                for pos in parent_positions:
+                    vals.append(inv_vals[pos])
+        if not vals:
+            output = None
+        else:
+            stacked = jnp.stack(vals)
+            output = jnp.sum(stacked, axis=0) / len(vals)
+
+    if output is None:
+        return inputs_list
+
+    projected = computation.projection(*inputs_list[idx], output)
+    return inputs_list[:idx] + [list(projected)] + inputs_list[idx + 1:]
 
 
-def _gather_and_average_outputs(node, inputs, children_of):
-    """Average the feedback from all children of *node*."""
-    kids = children_of[node]
-    if not kids:
-        return None
-    vals = []
-    for child in kids:
-        vals.extend(_get_childs_input(child, node, inputs, children_of))
-    stacked = jnp.stack(vals)
-    return jnp.sum(stacked, axis=0) / len(vals)
+def _scatter_params(inputs_list, params_flat, param_indices):
+    """Write params_flat values back into the inputs_list Parameter slots."""
+    for i, idx in enumerate(param_indices):
+        inputs_list = inputs_list[:idx] + [[params_flat[i]]] + inputs_list[idx + 1:]
+    return inputs_list
 
 
-def _get_childs_input(child, parent, inputs, children_of):
-    """Get the value(s) that *child* receives from *parent*."""
-    idxs = [i for i, p in enumerate(child.parents) if p == parent]
-
-    if isinstance(child, Operation):
-        return [inputs[child][i] for i in idxs]
-
-    if isinstance(child, ShapeTransform):
-        transform_inputs = [_get_value(p, inputs) for p in child.parents]
-        output = _gather_and_average_outputs(child, inputs, children_of)
-        values = child.inverse(*transform_inputs, output)
-        if isinstance(values, jnp.ndarray):
-            return [values]
-        return [values[i] for i in idxs]
-
-    raise ValueError(f"Unexpected child type {type(child)}")
+def _gather_params(inputs_list, param_indices):
+    """Extract Parameter slot values from inputs_list as a flat list."""
+    return [inputs_list[idx][0] for idx in param_indices]
 
 
-def _projection(computation, inputs, children_of):
-    """Project a single node (same as ``optim.projection``)."""
-    if isinstance(computation, Array):
-        return inputs
-    output = _gather_and_average_outputs(computation, inputs, children_of)
-    projected = computation.projection(*inputs[computation], output)
-    return inputs.set(computation, list(projected))
-
-
-def multiple_projection_eff(
-    inputs: FrozenDict,
-    partition: set,
-    children_of: dict,
-    pruned_children: dict,
+def _project_partition(
+    params_flat: list,
+    static_slots: list,              # fixed non-Parameter slots (Array/ShapeTransform placeholders)
+    param_indices: list,             # [int]  positions of Parameter nodes in topo_order
+    partition_indices: list,
+    children_of_idx: dict,
+    update_indices: list,
+    node_index: dict,
 ):
-    """Project every node in *partition*, then refresh children inputs.
+    """Rebuild inputs_list from static skeleton + current params, run projections,
+    return only the updated params_flat.  op_slots are never carried."""
+    inputs_list = _scatter_params(static_slots, params_flat, param_indices)
 
-    Functionally identical to ``optim.multiple_projection`` but uses
-    pre-computed dicts instead of a networkx graph.
-    """
-    for computation in partition:
-        inputs = _projection(computation, inputs, children_of)
+    for idx, node in partition_indices:
+        inputs_list = _projection_indexed(idx, inputs_list, node_index, children_of_idx, node)
 
-    # Refresh children (using the pruned map to skip ShapeTransforms)
-    children_to_update = set(
-        child
-        for comp in partition
-        for child in pruned_children.get(comp, [])
-    )
-    for computation in children_to_update:
-        if isinstance(computation, Operation):
-            inputs = inputs.set(
-                computation,
-                [_get_value(p, inputs).astype(jnp.bfloat16) for p in computation.parents],
-            )
-    return inputs
+    # Refresh Operation children so subsequent partitions see updated inputs
+    for idx, node in update_indices:
+        new_vals = []
+        for p in node.parents:
+            pidx = node_index[p]
+            pval = inputs_list[pidx]
+            new_vals.append((pval[0] if isinstance(pval, list) else pval).astype(jnp.bfloat16))
+        inputs_list = inputs_list[:idx] + [new_vals] + inputs_list[idx + 1:]
+
+    return _gather_params(inputs_list, param_indices)
 
 
 # ────────────────────────────────────────────────────────
@@ -250,100 +256,154 @@ class EfficientOptimizer(ABC):
     def update(self, fun, params: FrozenDict, steps_per_update=None):
         steps_per_update = steps_per_update or self.steps_per_update
 
-        # 1. Build computation graph (plain Python, no networkx)
-        params = {name: Parameter(value, name=name) for name, value in params.items()}
-        computation = fun(params)
+        # 1. Build computation graph
+        param_nodes = {name: Parameter(value, name=name) for name, value in params.items()}
+        computation = fun(param_nodes)
 
-        # 2. Reuse cached graph topology or compute it once
+        # 2. Build graph topology
         topo_order = _topo_sort(computation)
         children_of = _children_map(topo_order)
         pruned_children = _pruned_children_map(topo_order, children_of)
         partitions = _bfs_partitions(topo_order, children_of)
-        self._graph_cache = (topo_order, children_of, pruned_children, partitions)
-        # 3. Initialise inputs dict
-        inputs = {}
+
+        # 3. Stable integer index: Computation → int (pure Python, never traced)
+        node_index = {node: i for i, node in enumerate(topo_order)}
+
+        # 4. Build full inputs_list (stable pytree structure)
+        #    inputs_list[i] = [array, ...]
+        #      - Parameter:      [param_value]
+        #      - Operation:      [parent1_val, parent2_val, ...]
+        #      - Array/Shape:    [node_value]  (placeholder, never projected)
+        inputs_list = []
         for node in topo_order:
             if isinstance(node, Parameter):
-                inputs[node] = [node.value.astype(jnp.bfloat16)]
+                inputs_list.append([node.value.astype(jnp.bfloat16)])
             elif isinstance(node, Operation):
-                inputs[node] = [
-                    p.value.astype(jnp.bfloat16) for p in node.parents
-                ]
-        inputs = freeze(inputs)
+                inputs_list.append([p.value.astype(jnp.bfloat16) for p in node.parents])
+            else:
+                inputs_list.append([node.value.astype(jnp.bfloat16)])
 
-        # 4. Build projection closures (one per BFS layer)
-        projections = [
-            partial(
-                multiple_projection_eff,
-                partition=part,
-                children_of=children_of,
-                pruned_children=pruned_children,
-            )
-            for part in partitions
-        ]
+        # 5. Parameter indices (stable, never changes across steps)
+        param_indices = [node_index[comp] for comp in param_nodes.values()]
+
+        # 6. Build children_of_idx: int → [(child_idx, child_node, [parent_positions])]
+        children_of_idx: dict[int, list] = {i: [] for i in range(len(topo_order))}
+        for node in topo_order:
+            if isinstance(node, (ShapeTransform, Array)):
+                continue
+            idx = node_index[node]
+            for child in children_of[node]:
+                child_idx = node_index[child]
+                parent_positions = [i for i, p in enumerate(child.parents) if p == node]
+                children_of_idx[idx].append((child_idx, child, parent_positions))
+
+        # 7. Build a *static* skeleton: same structure as inputs_list but
+        #    Parameter slots zeroed out (they will be filled from params_flat
+        #    at the start of every _project_partition call).  This skeleton
+        #    never enters the scan carry, so its shape never needs to be stable.
+        static_slots = list(inputs_list)  # shallow copy; Parameter slots will be overwritten
+
+        # 8. Build projection closures.
+        #    Each closure signature: params_flat → new_params_flat
+        #    The static_slots skeleton and all graph metadata are captured by closure.
+        def _make_partition_closures(partitions):
+            result = []
+            for part in partitions:
+                part_indices = sorted(
+                    [(node_index[n], n) for n in part if not isinstance(n, (Array, ShapeTransform))],
+                    key=lambda x: x[0],
+                )
+                update_set: dict[int, Computation] = {}
+                for idx, node in part_indices:
+                    for child in pruned_children.get(node, []):
+                        if isinstance(child, Operation):
+                            cidx = node_index[child]
+                            update_set[cidx] = child
+                update_indices = sorted(update_set.items(), key=lambda x: x[0])
+
+                result.append(
+                    partial(
+                        _project_partition,
+                        static_slots=static_slots,
+                        param_indices=param_indices,
+                        partition_indices=part_indices,
+                        children_of_idx=children_of_idx,
+                        update_indices=update_indices,
+                        node_index=node_index,
+                    )
+                )
+            return result
+
+        projections = _make_partition_closures(partitions)
         if self.change_projection_order:
             projections = projections[::-1]
 
-        # 5. Optional momentum / Dykstra states
-        if self.uses_p:
-            p = jax.tree.map(lambda x: x * 0, inputs)
-        if self.uses_q:
-            q = jax.tree.map(lambda x: x * 0, inputs)
+        # 9. Initial params_flat — the ONLY scan carry (uniform list of arrays)
+        params_flat = _gather_params(inputs_list, param_indices)
 
-        # 6. Convergence metric
-        def loss_fn(old, new):
-            diffs = [
-                jnp.mean(jnp.abs(x - y) ** 2)
-                for x, y in zip(jax.tree.leaves(old), jax.tree.leaves(new))
-            ]
+        # 10. Momentum / Dykstra zero buffers — same structure as params_flat
+        zeros_flat = [jnp.zeros_like(p) for p in params_flat]
+        if self.uses_p:
+            p = list(zeros_flat)
+        if self.uses_q:
+            q = list(zeros_flat)
+
+        # 11. Convergence metric
+        def loss_fn(old_pf, new_pf):
+            diffs = [jnp.mean(jnp.abs(x - y) ** 2) for x, y in zip(old_pf, new_pf)]
             return sum(diffs) / len(diffs)
 
-        # 7. Scan loop
+        # 12. Scan loop — carry is ONLY params_flat (+ optional p, q).
+        #     op_slots are rebuilt from scratch inside each projection closure;
+        #     they never appear in the carry so their shapes can vary freely.
         if self.uses_p and self.uses_q:
             def step(carry, _):
-                vars_, p_, q_ = carry
-                new_vars, new_p, new_q = self._step(vars_, *projections, p_, q_)
-                loss = loss_fn(vars_, new_vars)
-                return (new_vars, new_p, new_q), loss
-            (inputs, p, q), losses = jax.lax.scan(
-                step, (inputs, p, q), None, length=steps_per_update
+                pf, p_, q_ = carry
+                new_pf, new_p, new_q = self._step(pf, projections, p_, q_)
+                loss = loss_fn(pf, new_pf)
+                return (new_pf, new_p, new_q), loss
+            (params_flat, p, q), losses = jax.lax.scan(
+                step, (params_flat, p, q), None, length=steps_per_update
             )
         elif self.uses_p:
             def step(carry, _):
-                vars_, p_ = carry
-                new_vars, new_p = self._step(vars_, *projections, p_)
-                loss = loss_fn(vars_, new_vars)
-                return (new_vars, new_p), loss
-            (inputs, p), losses = jax.lax.scan(
-                step, (inputs, p), None, length=steps_per_update
+                pf, p_ = carry
+                new_pf, new_p = self._step(pf, projections, p_)
+                loss = loss_fn(pf, new_pf)
+                return (new_pf, new_p), loss
+            (params_flat, p), losses = jax.lax.scan(
+                step, (params_flat, p), None, length=steps_per_update
             )
         else:
             def step(carry, _):
-                vars_ = carry
-                new_vars = self._step(vars_, *projections)
-                loss = loss_fn(vars_, new_vars)
-                return new_vars, loss
-            inputs, losses = jax.lax.scan(
-                step, inputs, None, length=steps_per_update
+                pf = carry
+                new_pf = self._step(pf, projections)
+                loss = loss_fn(pf, new_pf)
+                return new_pf, loss
+            params_flat, losses = jax.lax.scan(
+                step, params_flat, None, length=steps_per_update
             )
 
         if self.add_projection_at_end:
-            inputs = projections[0](inputs)
+            params_flat = projections[0](params_flat)
 
-        # 8. Extract updated parameters
+        # 13. Rebuild named params dict
         new_params = {}
-        for name, comp in params.items():
-            if comp in inputs:
-                new_params[name] = inputs[comp][0]
-            else:
-                warnings.warn(f"Unused parameter {name}.")
-                new_params[name] = params[name].value
+        for i, name in enumerate(param_nodes):
+            new_params[name] = params_flat[i]
         return freeze(new_params), losses.mean()
 
     @abstractmethod
-    def _step(self, vars, *projections):
-        """One optimisation step.  Receives the layer projections as
-        positional args (same interface as ``optim.Optimizer._step``)."""
+    def _step(self, params_flat, projections, *aux):
+        """One optimisation step.
+
+        Args:
+            params_flat: list[array] — one array per Parameter.
+            projections: list of callables, each with signature
+                         ``params_flat → new_params_flat``.
+            *aux:        optional momentum / Dykstra buffers
+                         (same list[array] structure as params_flat).
+        """
         ...
 
 
@@ -354,10 +414,10 @@ class EfficientOptimizer(ABC):
 class BackpropProjections(EfficientOptimizer):
     """Cyclic alternating projections, BFS-layer order, no networkx."""
 
-    def _step(self, vars, *projections):
+    def _step(self, params_flat, projections):
         for proj in projections:
-            vars = proj(vars)
-        return vars
+            params_flat = proj(params_flat)
+        return params_flat
 
 
 class BackpropProjectionsMomentum(EfficientOptimizer):
@@ -367,15 +427,13 @@ class BackpropProjectionsMomentum(EfficientOptimizer):
         super().__init__(steps_per_update, change_projection_order)
         self.uses_p = True
 
-    def _step(self, vars, *args):
-        # last arg is p (momentum buffer)
-        *projections, p = args
-        vars_look = jax.tree.map(lambda x, d: x + 0.9 * d, vars, p)
-        new_vars = vars_look
+    def _step(self, params_flat, projections, p):
+        params_look = [x + 0.9 * d for x, d in zip(params_flat, p)]
+        new_pf = params_look
         for proj in projections:
-            new_vars = proj(new_vars)
-        new_p = jax.tree.map(lambda x, y: x - y, new_vars, vars)
-        return new_vars, new_p
+            new_pf = proj(new_pf)
+        new_p = [x - y for x, y in zip(new_pf, params_flat)]
+        return new_pf, new_p
 
 
 class BackpropDouglasRachford(EfficientOptimizer):
@@ -392,27 +450,21 @@ class BackpropDouglasRachford(EfficientOptimizer):
         super().__init__(steps_per_update, change_projection_order)
         self.relaxation = relaxation
 
-    def _step(self, vars, *projections):
-        def reflection(proj, v):
-            return jax.tree.map(lambda x, y: 2.0 * x - y, proj(v), v)
+    def _step(self, params_flat, projections):
+        def reflection(proj, pf):
+            new_pf = proj(pf)
+            return [2.0 * px - x for px, x in zip(new_pf, pf)]
 
-        reflected = vars
+        reflected = params_flat
         for proj in projections:
             reflected = reflection(proj, reflected)
 
-        return jax.tree.map(
-            lambda x, r: (1.0 - self.relaxation) * x + self.relaxation * r,
-            vars, reflected,
-        )
+        lam = self.relaxation
+        return [(1.0 - lam) * x + lam * r for x, r in zip(params_flat, reflected)]
 
 
 class BackpropDouglasRachfordMomentum(EfficientOptimizer):
-    """Douglas-Rachford with Nesterov momentum over BFS layers.
-
-    Args:
-        relaxation: λ parameter.
-        beta: momentum coefficient.
-    """
+    """Douglas-Rachford with Nesterov momentum over BFS layers."""
 
     def __init__(self, steps_per_update=50, change_projection_order=False,
                  relaxation=0.5, beta=0.9):
@@ -421,24 +473,20 @@ class BackpropDouglasRachfordMomentum(EfficientOptimizer):
         self.beta = beta
         self.uses_p = True
 
-    def _step(self, vars, *args):
-        *projections, p = args
+    def _step(self, params_flat, projections, p):
+        def reflection(proj, pf):
+            new_pf = proj(pf)
+            return [2.0 * px - x for px, x in zip(new_pf, pf)]
 
-        def reflection(proj, v):
-            return jax.tree.map(lambda x, y: 2.0 * x - y, proj(v), v)
-
-        vars_look = jax.tree.map(lambda x, d: x + self.beta * d, vars, p)
-
-        reflected = vars_look
+        params_look = [x + self.beta * d for x, d in zip(params_flat, p)]
+        reflected = params_look
         for proj in projections:
             reflected = reflection(proj, reflected)
 
-        new_vars = jax.tree.map(
-            lambda x, r: (1.0 - self.relaxation) * x + self.relaxation * r,
-            vars_look, reflected,
-        )
-        new_p = jax.tree.map(lambda x, y: x - y, new_vars, vars)
-        return new_vars, new_p
+        lam = self.relaxation
+        new_pf = [(1.0 - lam) * x + lam * r for x, r in zip(params_look, reflected)]
+        new_p = [x - y for x, y in zip(new_pf, params_flat)]
+        return new_pf, new_p
 
 
 class BackpropDykstra(EfficientOptimizer):
@@ -449,20 +497,17 @@ class BackpropDykstra(EfficientOptimizer):
         self.uses_p = True
         self.uses_q = True
 
-    def _step(self, vars, *args):
-        # unpack: projections..., p, q
-        *projections, p, q = args
-
+    def _step(self, params_flat, projections, p, q):
         # first half-sweep with p correction
-        y = jax.tree.map(lambda x, pp: x + pp, vars, p)
+        y = [x + pp for x, pp in zip(params_flat, p)]
         for proj in projections:
             y = proj(y)
-        p_new = jax.tree.map(lambda x, pp, yn: x + pp - yn, vars, p, y)
+        p_new = [x + pp - yn for x, pp, yn in zip(params_flat, p, y)]
 
         # second half-sweep with q correction
-        z = jax.tree.map(lambda yn, qq: yn + qq, y, q)
+        z = [yn + qq for yn, qq in zip(y, q)]
         for proj in projections:
             z = proj(z)
-        q_new = jax.tree.map(lambda yn, qq, zn: yn + qq - zn, y, q, z)
+        q_new = [yn + qq - zn for yn, qq, zn in zip(y, q, z)]
 
         return z, p_new, q_new
