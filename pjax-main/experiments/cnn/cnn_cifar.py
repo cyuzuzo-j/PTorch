@@ -69,19 +69,19 @@ class ConvGroup(nn.Module):
         super().__init__()
         self.conv1 = nn.Conv2D(channels_in,  channels_out, kernel_shape=(3, 3), padding="SAME")
         self.pool  = nn.MaxPool2D(pool_size=(2, 2), strides=(2, 2))
-        self.bn1   = nn.BatchNorm()
+        #self.bn1   = nn.BatchNorm()
         self.relu1 = nn.ReLU_NB()
         self.conv2 = nn.Conv2D(channels_out, channels_out, kernel_shape=(3, 3), padding="SAME")
-        self.bn2   = nn.BatchNorm()
+        #self.bn2   = nn.BatchNorm()
         self.relu2 = nn.ReLU_NB()
 
     def __call__(self, x):
         x = self.conv1(x)
         x = self.pool(x)
-        x = self.bn1(x)
+        #x = self.bn1(x)
         x = self.relu1(x)
         x = self.conv2(x)
-        x = self.bn2(x)
+        #x = self.bn2(x)
         x = self.relu2(x)
         return x
 
