@@ -19,12 +19,15 @@ from pjax import nn, optim, optim_eff
 from experiments.shared.data import InfiniteCifarLoader
 from aim import Run
 from tqdm import tqdm
+jax.config.update("jax_compilation_cache_dir", "./jax_cache")
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
 
 def log(msg):
     print(f"[INFO] {msg}")
 
 # --- Constants ---
-BATCH_SIZE = 512
+BATCH_SIZE = 32
 EPOCHS = 3
 
 # Proxy-net widths (matches airbench proxy architecture)
@@ -149,13 +152,13 @@ def train_pjax_model(name, optimizer_cls, epochs=EPOCHS):
     log(f"--- Training (PJAX): {name} ---")
     model = CNN_PJAX(classes=10)
     params = model.init(jax.random.key(0))
-    optimizer = optimizer_cls(steps_per_update=50)
+    optimizer = optimizer_cls(steps_per_update=10)
 
     aim_run = Run(experiment=name)
     aim_run["hparams"] = {
         "dataset": "CIFAR-10", "batch_size": BATCH_SIZE, "epochs": epochs,
         "model": "CNN_PJAX", "framework": "pjax",
-        "optimizer": optimizer_cls.__name__, "steps_per_update": 50,
+        "optimizer": optimizer_cls.__name__, "steps_per_update": 10,
         "widths": PROXY_WIDTHS, "whiten_width": WHITEN_WIDTH, "scaling_factor": SCALING_FACTOR,
         "jax_backend": jax.default_backend(),
     }
@@ -191,22 +194,25 @@ def train_pjax_model(name, optimizer_cls, epochs=EPOCHS):
             epoch_loss += step_loss; count += 1; global_step += 1
             aim_run.track(step_loss, name="loss", step=global_step, context={"subset": "train"})
 
-        avg_loss  = epoch_loss / count
-        train_acc = evaluate(params, train_data)
-        val_acc   = evaluate(params, test_data)
+            if count % 5 == 0:
+                train_acc = evaluate(params, train_data)
+                val_acc   = evaluate(params, test_data)
+                elapsed   = time.time() - start_time
+                train_acc_history.append(train_acc)
+                val_acc_history.append(val_acc)
+                aim_run.track(train_acc, name="accuracy", step=global_step, context={"subset": "train"})
+                aim_run.track(val_acc,   name="accuracy", step=global_step, context={"subset": "val"})
+                aim_run.track(elapsed,   name="elapsed_time_s", step=global_step)
+                log(f"Epoch {epoch+1}/{epochs} - Batch {count} - Loss: {step_loss:.4f} - Train: {train_acc:.4f} - Val: {val_acc:.4f}")
+
+        avg_loss   = epoch_loss / count
         epoch_time = time.time() - epoch_start
-        elapsed    = time.time() - start_time
 
         loss_history.append(avg_loss)
-        train_acc_history.append(train_acc)
-        val_acc_history.append(val_acc)
 
-        aim_run.track(avg_loss,   name="epoch_loss", step=epoch, context={"subset": "train"})
-        aim_run.track(train_acc,  name="accuracy",   step=epoch, context={"subset": "train"})
-        aim_run.track(val_acc,    name="accuracy",   step=epoch, context={"subset": "val"})
-        aim_run.track(epoch_time, name="epoch_time_s",   step=epoch)
-        aim_run.track(elapsed,    name="elapsed_time_s", step=epoch)
-        log(f"Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.4f} - Train: {train_acc:.4f} - Val: {val_acc:.4f}")
+        aim_run.track(avg_loss,   name="epoch_loss",    step=epoch, context={"subset": "train"})
+        aim_run.track(epoch_time, name="epoch_time_s",  step=epoch)
+        log(f"Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
 
     total_time = time.time() - start_time
     aim_run.track(val_acc_history[-1], name="final_val_accuracy",    step=0)
@@ -265,32 +271,34 @@ def train_pytorch_model(name, epochs=EPOCHS, learning_rate=0.001):
             epoch_loss += loss.item(); count += 1; global_step += 1
             aim_run.track(loss.item(), name="loss", step=global_step, context={"subset": "train"})
 
-        avg_loss  = epoch_loss / count
-        train_acc = evaluate(model, train_data)
-        val_acc   = evaluate(model, test_data)
+            if count % 5 == 0:
+                train_acc = evaluate(model, train_data)
+                val_acc   = evaluate(model, test_data)
+                elapsed   = time.time() - start_time
+                train_acc_history.append(train_acc)
+                val_acc_history.append(val_acc)
+                aim_run.track(train_acc, name="accuracy", step=global_step, context={"subset": "train"})
+                aim_run.track(val_acc,   name="accuracy", step=global_step, context={"subset": "val"})
+                aim_run.track(elapsed,   name="elapsed_time_s", step=global_step)
+                log(f"Epoch {epoch+1}/{epochs} - Batch {count} - Loss: {loss.item():.4f} - Train: {train_acc:.4f} - Val: {val_acc:.4f}")
+                model.train()
+
+        avg_loss   = epoch_loss / count
         epoch_time = time.time() - epoch_start
-        elapsed    = time.time() - start_time
 
         loss_history.append(avg_loss)
-        train_acc_history.append(train_acc)
-        val_acc_history.append(val_acc)
 
-        aim_run.track(avg_loss,   name="epoch_loss", step=epoch, context={"subset": "train"})
-        aim_run.track(train_acc,  name="accuracy",   step=epoch, context={"subset": "train"})
-        aim_run.track(val_acc,    name="accuracy",   step=epoch, context={"subset": "val"})
-        aim_run.track(epoch_time, name="epoch_time_s",   step=epoch)
-        aim_run.track(elapsed,    name="elapsed_time_s", step=epoch)
-        log(f"Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.4f} - Train: {train_acc:.4f} - Val: {val_acc:.4f}")
+        aim_run.track(avg_loss,   name="epoch_loss",   step=epoch, context={"subset": "train"})
+        aim_run.track(epoch_time, name="epoch_time_s", step=epoch)
+        log(f"Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
 
     total_time = time.time() - start_time
-    peak_gpu_mb = torch.cuda.max_memory_allocated() / (1024**2) if torch.cuda.is_available() else 0
     aim_run.track(val_acc_history[-1], name="final_val_accuracy",    step=0)
     aim_run.track(total_time,          name="total_training_time_s", step=0)
-    aim_run.track(peak_gpu_mb,         name="peak_gpu_memory_mb",    step=0)
     aim_run.close()
     return {"name": name, "loss_history": loss_history,
             "train_accuracy_history": train_acc_history, "val_accuracy_history": val_acc_history,
-            "final_accuracy": val_acc_history[-1], "time": total_time, "peak_gpu_memory_mb": peak_gpu_mb}
+            "final_accuracy": val_acc_history[-1], "time": total_time}
 
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
@@ -303,7 +311,7 @@ if __name__ == "__main__":
 
     df = pd.DataFrame(results)
     print("\n--- Final Results ---")
-    print(df[["name", "final_accuracy", "time", "peak_gpu_memory_mb"]])
+    print(df[["name", "final_accuracy", "time"]])
 
     sns.set_theme(style="whitegrid")
     plt.figure(figsize=(10, 5))
