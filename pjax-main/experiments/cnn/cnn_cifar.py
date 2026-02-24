@@ -27,11 +27,11 @@ def log(msg):
     print(f"[INFO] {msg}")
 
 # --- Constants ---
-BATCH_SIZE = 32
+BATCH_SIZE = 8
 EPOCHS = 3
 
 # Proxy-net widths (matches airbench proxy architecture)
-PROXY_WIDTHS = {'block1': 32, 'block2': 64, 'block3': 64}
+PROXY_WIDTHS = {'block1': 4, 'block2': 8, 'block3': 8}
 WHITEN_KERNEL_SIZE = 2
 WHITEN_WIDTH = 2 * 3 * WHITEN_KERNEL_SIZE**2  # 24
 SCALING_FACTOR = 1 / 9
@@ -57,8 +57,6 @@ class EpochWrapper:
             # loader yields (N, C, H, W) float16 on CUDA → convert to (N, H, W, C) float32 numpy
             yield images.float().permute(0, 2, 3, 1).cpu().numpy(), labels.cpu().numpy()
 
-train_data = EpochWrapper(base_train_loader, 50_000)
-test_data  = EpochWrapper(base_test_loader,  10_000)
 gc.collect()
 
 # ─── PJAX Model (proxy-net architecture, ReLU, no GELU) ──────────────────────
@@ -152,7 +150,7 @@ def train_pjax_model(name, optimizer_cls, epochs=EPOCHS):
     log(f"--- Training (PJAX): {name} ---")
     model = CNN_PJAX(classes=10)
     params = model.init(jax.random.key(0))
-    optimizer = optimizer_cls(steps_per_update=10)
+    optimizer = optimizer_cls(steps_per_update=100)
 
     aim_run = Run(experiment=name)
     aim_run["hparams"] = {
@@ -167,14 +165,14 @@ def train_pjax_model(name, optimizer_cls, epochs=EPOCHS):
     def train_step(params, x, y):
         def apply_fn(params):
             logits = model.apply(params, x)
-            y_one_hot = jax.nn.one_hot(y, num_classes=10).astype(jax.numpy.complex64)
+            y_one_hot = jax.nn.one_hot(y, num_classes=10)  # keep float32 — complex64 broke cross-entropy projection
             return pjax.cross_entropy(logits, y_one_hot)
         return optimizer.update(apply_fn, params)
 
     @jax.jit
     def eval_step(params, x, y):
         logits = model.apply(params, x)
-        preds = jnp.argmax(logits.real if jnp.iscomplexobj(logits) else logits, axis=-1)
+        preds = jnp.argmax(logits, axis=-1)
         return jnp.mean(preds == y)
 
     def evaluate(params, loader):
@@ -186,6 +184,8 @@ def train_pjax_model(name, optimizer_cls, epochs=EPOCHS):
     global_step = 0
 
     for epoch in range(epochs):
+        train_data = EpochWrapper(base_train_loader, 50_000)
+        test_data  = EpochWrapper(base_test_loader,  10_000)
         epoch_loss, count = 0.0, 0
         epoch_start = time.time()
         for x, y in tqdm(train_data, desc=f"Epoch {epoch+1}/{epochs}", unit="batch"):
@@ -260,6 +260,8 @@ def train_pytorch_model(name, epochs=EPOCHS, learning_rate=0.001):
 
     model.train()
     for epoch in range(epochs):
+        train_data = EpochWrapper(base_train_loader, 50_000)
+        test_data  = EpochWrapper(base_test_loader,  10_000)
         epoch_loss, count = 0.0, 0
         epoch_start = time.time()
         for x, y in tqdm(train_data, desc=f"Epoch {epoch+1}/{epochs}", unit="batch"):
