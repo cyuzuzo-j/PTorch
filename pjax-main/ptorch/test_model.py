@@ -12,12 +12,16 @@ class MLP(nn.Module):
         super().__init__()
         self.l1 = Linear(in_features, hidden)
         self.r1 = ReLU(hidden)
-        self.l2 = Linear(hidden, out_features)
+        self.l2 = Linear(hidden, hidden)
+        self.r2 = ReLU(hidden)
+        self.l3 = Linear(hidden, out_features)
         
     def forward(self, x):
         x = self.l1(x)
         x = self.r1(x)
         x = self.l2(x)
+        x = self.r2(x)
+        x = self.l3(x)
         return x
 
 def main():

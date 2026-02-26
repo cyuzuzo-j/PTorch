@@ -13,7 +13,10 @@ import numpy as np
 from ptorch.nn.modules import LinearBias, ReLU
 from ptorch.core.ops import CrossEntropyProjection
 from ptorch.optim_static import AlternatingProjections
-from experiments.shared.data import MNISTDataModule
+from experiments.shared.data import (
+    MNISTDataModule,
+    CIFAR10DataModule
+)
 import tqdm
 import time
 
@@ -25,9 +28,9 @@ fake = Faker()
 
 
 # ─── Configuration ────────────────────────────────────────────────────────────
-BATCH_SIZES = [32, 128, 512, 2048]
+BATCH_SIZES = [32, 128,256, 512]
 RANDOM_SEED = 42
-MAX_STEPS = 500
+MAX_STEPS = 5000
 NUM_RUNS = 2
 
 
@@ -38,7 +41,7 @@ class MLP_ptorch(tnn.Module):
     Mirrors the pjax MLP_pjax architecture for fair comparison.
     """
 
-    def __init__(self, hidden_features, in_features, classes, skip=True):
+    def __init__(self, hidden_features, in_features, classes, skip=False):
         super().__init__()
         self.hidden_features = hidden_features
         self.skip = skip
@@ -62,18 +65,21 @@ class MLP_ptorch(tnn.Module):
             x = self.layers[i + 1](x)  # ReLU
             xs.append(x)
 
-        if self.skip:
-            x = torch.cat(xs, dim=-1)
-
         return self.out(x)
 
 
 # ─── Task definitions ────────────────────────────────────────────────────────
 tasks = [
+
+    {
+        "name": "CIFAR10",
+        "dataset": CIFAR10DataModule,
+        "model_fn": lambda: MLP_ptorch([512], 3 * 32 * 32, 10),
+    },
     {
         "name": "MNIST",
         "dataset": MNISTDataModule,
-        "model_fn": lambda: MLP_ptorch([256], 28 * 28, 10),
+        "model_fn": lambda: MLP_ptorch([10, 10], 28 * 28, 10),
     },
 ]
 

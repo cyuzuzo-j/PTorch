@@ -1,12 +1,16 @@
 import torch
 import torch.nn.functional as F
+import warnings
 from .. import config
 
+# Suppress pin_memory warning when no accelerator is available
+warnings.filterwarnings("ignore", message=".*pin_memory.*")
 
-def bilinear_proj_fast_pt(a, b, z, num_steps=10):
+
+def _bilinear_proj_core(a, b, z, num_steps=10):
     """
     Batched projection onto bilinear function graph using Newton's method.
-    Supports arbitrary leading batch dimensions.
+    Pure tensor computation — no dynamic control flow, no Python-side allocations.
 
     a: (*, K)  -- vectors
     b: (*, K)  -- vectors
@@ -14,13 +18,12 @@ def bilinear_proj_fast_pt(a, b, z, num_steps=10):
 
     Returns a_new (*, K), b_new (*, K)
     """
-    # p = <a, b>, q = ||a||^2 + ||b||^2   — sum over last axis keeps batch dims
     p = (a * b).sum(dim=-1)                         # (*,)
     q = (a * a).sum(dim=-1) + (b * b).sum(dim=-1)   # (*,)
 
     t = torch.zeros_like(p)                          # (*,)
 
-    for _ in range(num_steps):
+    for _ in range(5):
         t2 = t * t
         one_minus_t2 = 1.0 - t2
 
@@ -36,7 +39,6 @@ def bilinear_proj_fast_pt(a, b, z, num_steps=10):
     t2 = t * t
     denom = 1.0 - t2
 
-    # Unsqueeze for broadcasting with (*, K) tensors
     t_k = t.unsqueeze(-1)          # (*, 1)
     denom_k = denom.unsqueeze(-1)  # (*, 1)
 
@@ -46,31 +48,30 @@ def bilinear_proj_fast_pt(a, b, z, num_steps=10):
     return a_new, b_new
 
 
-def bilinearMatrix_seq(a, B, z, num_steps=10):
+def bilinearMatrix_seq(a, B, z):
     """
     Inner scan: project vector a against matrix B with target z.
     a: (K,), B: (K, N), z: (N,)
     Sequentially iterates over columns of B (cyclic projection — a_curr carries).
     Returns a_final (K,), B_proj (K, N)
-
-    Pre-allocates output tensor instead of Python list + torch.stack.
     """
     K, N = B.shape
-    B_proj = torch.empty_like(B)   # (K, N) pre-allocated
-    a_curr = a                     # (K,)
+    b_cols = []
+    a_curr = a
 
     for i in range(N):
-        # Use unsqueeze(0) → (1, K) to match batched API, squeeze back
-        a_new, b_new = bilinear_proj_fast_pt(
-            a_curr.unsqueeze(0), B[:, i].unsqueeze(0), z[i].unsqueeze(0), num_steps
+        a_new, b_new = _bilinear_proj_core(
+            a_curr.unsqueeze(0), B[:, i].unsqueeze(0), z[i].unsqueeze(0)
         )
         a_curr = a_new.squeeze(0)
-        B_proj[:, i] = b_new.squeeze(0)
+        b_cols.append(b_new.squeeze(0))
 
+    B_proj = torch.stack(b_cols, dim=1)  # (K, N)
     return a_curr, B_proj
 
 
-def bilinearMatrix_parr(a, B, z, num_steps=10):
+@torch.compile
+def bilinearMatrix_parr(a, B, z):
     """
     Fully vectorized parallel projection — NO Python loop.
     a: (K,), B: (K, N), z: (N,)
@@ -79,39 +80,34 @@ def bilinearMatrix_parr(a, B, z, num_steps=10):
     """
     N = B.shape[1]
 
-    # Broadcast a → (N, K),  transpose B → (N, K),  z is already (N,)
-    a_batch = a.unsqueeze(0).expand(N, -1)   # (N, K)
-    b_batch = B.T                             # (N, K)
+    a_batch = a.unsqueeze(0).expand(N, -1)          # (N, K)
+    b_batch = B.t().contiguous()                     # (N, K)
 
-    a_projs, b_projs = bilinear_proj_fast_pt(a_batch, b_batch, z, num_steps)
-    # a_projs: (N, K), b_projs: (N, K)
+    a_projs, b_projs = _bilinear_proj_core(a_batch, b_batch, z)
 
-    a_proj = a_projs.mean(dim=0)   # (K,)
-    B_proj = b_projs.T             # (K, N)
+    a_proj = a_projs.mean(dim=0)                     # (K,)
+    B_proj = b_projs.t().contiguous()                # (K, N)
 
     return a_proj, B_proj
 
-@torch.compile(mode="reduce-overhead")
-def matmul_proj_seq_pt(A, B, Z, num_steps=10):
+def matmul_proj_seq_pt(A, B, Z):
     """
     Project onto matrix multiplication constraint A @ B = Z.
     A: (M, K), B: (K, N), Z: (M, N).
 
     Outer scan over rows of A (sequential — B_curr is carried).
     Inner projection uses bilinearMatrix_parr (vectorized over columns).
-
-    Pre-allocates output tensor instead of Python list + torch.stack.
     """
     M = A.shape[0]
     B_curr = B.clone()
-    A_proj = torch.empty_like(A)   # (M, K) pre-allocated
+    a_rows = []
 
     for i in range(M):
-        a_proj, B_curr = bilinearMatrix_parr(A[i], B_curr, Z[i], num_steps)
-        A_proj[i] = a_proj
+        a_proj, B_curr = bilinearMatrix_parr(A[i], B_curr, Z[i])
+        a_rows.append(a_proj)
 
+    A_proj = torch.stack(a_rows, dim=0)  # (M, K)
     return A_proj, B_curr
-
 
 # ─── autograd.Function wrappers ───────────────────────────────────────────────
 

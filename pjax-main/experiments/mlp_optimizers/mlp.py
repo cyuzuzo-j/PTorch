@@ -54,14 +54,14 @@ class MLP_pjax(nn.Module):
     """
 
 
-    def __init__(self, hidden_features, in_features, classes, skip=True):
+    def __init__(self, hidden_features, in_features, classes, skip=False):
         super().__init__()
         self.hidden_features = hidden_features
         self.skip = skip
         last_f = in_features
         for i, f in enumerate(hidden_features):
             setattr(self, f"dense_{i}", nn.LinearBias(last_f, f))
-            setattr(self, f"relu_{i}", nn.ReLU(f))
+            setattr(self, f"relu_{i}", nn.ReLU_NB())
             last_f = f
     
         out_features = sum(hidden_features) if skip else hidden_features[-1]

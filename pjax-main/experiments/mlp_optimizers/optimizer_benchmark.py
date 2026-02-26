@@ -37,7 +37,12 @@ tasks = [
     {
         "name":"MNIST",
         "dataset":MNISTDataModule,
-        "model":MLP_pjax([256],28*28,10),
+        "model":MLP_pjax([128,128],28*28,10),
+    },
+    {
+        "name":"CIFAR10",
+        "dataset":CIFAR10DataModule,
+        "model":MLP_pjax([512],3*32*32,10),
     },
 ]
 

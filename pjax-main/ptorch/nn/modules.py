@@ -1,4 +1,4 @@
-from typing import Sequence
+from typing import Sequence, Tuple, Union
 import torch
 import torch.nn as nn
 from ..core.ops import (
@@ -34,6 +34,82 @@ class LinearBias(nn.Module):
         ones = torch.ones((*input.shape[:-1], 1), dtype=input.dtype, device=input.device)
         augmented_input = torch.cat([input, ones], dim=-1)
         return MatMulProjection.apply(augmented_input, self.weight)
+
+
+class Conv2D(nn.Module):
+    """2D convolutional layer via patch extraction and linear projection.
+
+    Mirrors the pjax Conv2D architecture:
+      1. Extract patches using ConvPatchProjection → (N, H_out, W_out, C_in*kH*kW)
+      2. Apply LinearBias to project patches     → (N, H_out, W_out, out_channels)
+
+    Input:  (N, C_in, H, W)   — standard PyTorch NCHW
+    Output: (N, out_channels, H_out, W_out)
+
+    Args:
+        in_channels: number of input channels.
+        out_channels: number of output channels.
+        kernel_size: size of the convolution kernel (int or (h, w)).
+        stride: stride of the convolution (int or (h, w)).
+        padding: padding added to input (int, (h, w), or 'same').
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: Union[int, Tuple[int, int]] = 3,
+        stride: Union[int, Tuple[int, int]] = 1,
+        padding: Union[int, Tuple[int, int], str] = 0,
+    ):
+        super().__init__()
+        # Normalize to tuples
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size, kernel_size)
+        if isinstance(stride, int):
+            stride = (stride, stride)
+
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding_mode = padding
+
+        # LinearBias projects from patch features to output channels
+        # Matches pjax: LinearBias(in_channels * kH * kW, out_channels)
+        kH, kW = kernel_size
+        self.linear = LinearBias(in_channels * kH * kW, out_channels)
+
+    def _resolve_padding(self, H: int, W: int) -> Tuple[int, int]:
+        """Resolve padding to explicit (pad_h, pad_w) values."""
+        if isinstance(self.padding_mode, str):
+            if self.padding_mode.lower() == 'same':
+                kH, kW = self.kernel_size
+                sH, sW = self.stride
+                pad_h = max(0, (H - 1) * sH + kH - H) // 2
+                pad_w = max(0, (W - 1) * sW + kW - W) // 2
+                return (pad_h, pad_w)
+            elif self.padding_mode.lower() == 'valid':
+                return (0, 0)
+            else:
+                raise ValueError(f"Unknown padding mode: {self.padding_mode}")
+        elif isinstance(self.padding_mode, int):
+            return (self.padding_mode, self.padding_mode)
+        else:
+            return tuple(self.padding_mode)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        N, C, H, W = input.shape
+        padding = self._resolve_padding(H, W)
+
+        # Step 1: patch extraction → (N, H_out, W_out, C*kH*kW)
+        patches = ConvPatchProjection.apply(input, self.kernel_size, self.stride, padding)
+
+        # Step 2: linear projection → (N, H_out, W_out, out_channels)
+        out = self.linear(patches)
+
+        # Step 3: permute to NCHW → (N, out_channels, H_out, W_out)
+        out = out.permute(0, 3, 1, 2)
+        return out
+
 
 class ReLU(nn.Module):
     """Rectified Linear Unit with bias."""
