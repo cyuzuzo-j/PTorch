@@ -29,8 +29,8 @@ def projection(computation: Operation | Parameter | Array, output: jnp.ndarray):
 
 def inverse(computation: Operation | Parameter | Array, output: jnp.ndarray):
     inputs = [parent.value.astype(jnp.bfloat16) for parent in computation.parents]
-
     return  computation.inverse(*inputs, output)
+    
 
 class AlternatingProjections:
     """
@@ -50,6 +50,7 @@ class AlternatingProjections:
         # calculate the loss (diff root computation)
         nodes = [root_computation]
         outputs = [None]
+
         while nodes:
             node = nodes.pop(0)
             output = outputs.pop(0)

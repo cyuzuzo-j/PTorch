@@ -122,6 +122,7 @@ def repeat_transform(a, /, *, repeats, axis):
 
 def repeat_inverse(a, z, /, *, repeats, axis):
     """Inverse of repeat transform: averages the repeated values."""
+    print(a.shape,z.shape)
     axis = axis if axis >= 0 else a.ndim + axis
     assert a.shape[axis] * repeats == z.shape[axis]
     reshaped = z.reshape(z.shape[:axis] + (repeats, -1) + z.shape[axis + 1 :])

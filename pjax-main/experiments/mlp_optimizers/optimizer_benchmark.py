@@ -105,6 +105,7 @@ def run_task(task, opt_info, jax_random_key, config_info=None, eval_every=100, p
         "task": task["name"],
         "model": model.__class__.__name__,
         "optimizer": opt_info['name'],
+        "framework": "pjax",
         "batch_size": batch_size,
         "seed": RANDOM_SEED,
         "eval_every": eval_every,

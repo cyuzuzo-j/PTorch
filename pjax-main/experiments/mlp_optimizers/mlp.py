@@ -61,7 +61,7 @@ class MLP_pjax(nn.Module):
         last_f = in_features
         for i, f in enumerate(hidden_features):
             setattr(self, f"dense_{i}", nn.LinearBias(last_f, f))
-            setattr(self, f"relu_{i}", nn.ReLU_NB())
+            setattr(self, f"relu_{i}", nn.ReLU(f))
             last_f = f
     
         out_features = sum(hidden_features) if skip else hidden_features[-1]
