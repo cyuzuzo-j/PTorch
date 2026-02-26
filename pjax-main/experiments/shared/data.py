@@ -635,3 +635,36 @@ class InfiniteCifarLoader:
                 batch_images = torch.empty(0, 3, 32, 32, dtype=images0.dtype, device=images0.device)
                 batch_labels = torch.empty(0, dtype=labels0.dtype, device=labels0.device)
                 batch_indices = torch.empty(0, dtype=labels0.dtype, device=labels0.device)
+
+class FiniteCifarLoader:
+    def __init__(self, loader, num_samples):
+        self.loader = loader
+        self.num_samples = num_samples
+
+    def __iter__(self):
+        iterator = iter(self.loader)
+        steps = self.num_samples // self.loader.batch_size
+        for _ in range(steps):
+            _, x, y = next(iterator)
+            yield x.float().permute(0, 2, 3, 1).cpu().numpy(), y.cpu().numpy()
+
+class InfiniteCifarDataModule:
+    def __init__(self, batch_size=64, seed=42, data_dir="./dataset", **kwargs):
+        self.batch_size = batch_size
+        self.seed = seed
+        self.data_dir = data_dir
+
+    def train_iterator(self):
+        loader = InfiniteCifarLoader(self.data_dir, train=True, batch_size=self.batch_size, aug_seed=self.seed, order_seed=self.seed)
+        def _iter():
+            for _, x, y in loader:
+                yield x.float().permute(0, 2, 3, 1).cpu().numpy(), y.cpu().numpy()
+        return _iter()
+
+    def val_dataloader(self):
+        loader = InfiniteCifarLoader(self.data_dir, train=False, batch_size=self.batch_size)
+        return FiniteCifarLoader(loader, 10000)
+
+    def test_dataloader(self):
+        return self.val_dataloader()
+

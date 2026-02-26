@@ -206,3 +206,31 @@ class SumReluProjection(torch.autograd.Function):
         result = tuple(torch.where(dist_1 < dist_2, x_1, x_2)
                        for x_1, x_2 in zip(new_inputs_1, new_inputs_2))
         return result
+
+class StepProjection(torch.autograd.Function):
+    """
+    PyTorch equivalent of PJAX step activation projection.
+    Forward: step(sum of inputs) -> 1 if sum >= 0 else -1
+    Backward: projects inputs onto the step constraint graph.
+    """
+    @staticmethod
+    def forward(ctx, *inputs):
+        ctx.save_for_backward(*inputs)
+        s = sum(inputs)
+        return torch.where(s >= 0, torch.tensor(1.0, dtype=s.dtype, device=s.device), 
+                           torch.tensor(-1.0, dtype=s.dtype, device=s.device))
+
+    @staticmethod
+    def backward(ctx, z_target):
+        inputs = ctx.saved_tensors
+        n = len(inputs)
+        
+        s = sum(inputs)
+        
+        # Midpoint adjustment: move inputs toward the target output
+        # (s - output) / (len(inputs) + 1)
+        mid = (s - z_target) / (n + 1)
+        
+        projected_inputs = tuple(x - mid for x in inputs)
+        
+        return projected_inputs

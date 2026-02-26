@@ -1,6 +1,5 @@
 ################################################
-###   Optimizer benchmark for ptorch         ###
-###   (PyTorch alternating projections)      ###
+###   CIFAR10 Architecture Sweep             ###
 ################################################
 import sys
 import os
@@ -11,44 +10,33 @@ import torch
 import torch.nn as tnn
 import numpy as np
 from ptorch.nn.modules import LinearBias, ReLU
-from ptorch.core.ops import CrossEntropyProjection, MarginLossProjection
-from ptorch.optim_static import (
-    ProjectionMuon,
-    AlternatingProjections,
-    AlternatingProjectionsMomentum,
-    ProjectionSGD,
-    ProjectionAdam,
-    ProjectionAdagrad,
-    ProjectionAdadelta
-)
-from experiments.shared.data import (
-    MNISTDataModule,
-    InfiniteCifarDataModule
-)
+from ptorch.core.ops import CrossEntropyProjection
+from ptorch.optim_static import AlternatingProjections
+from experiments.shared.data import InfiniteCifarDataModule
 import tqdm
 import time
 
 from aim import Run
-
-## generate experiment names
 from faker import Faker
 fake = Faker()
 
-
 # ─── Configuration ────────────────────────────────────────────────────────────
-BATCH_SIZES = [32, 128,256, 512]
+BATCH_SIZE = 512
 RANDOM_SEED = 42
 MAX_STEPS = 5000
-NUM_RUNS = 2
+NUM_RUNS = 1
 
+ARCHITECTURES = [
+    [4096], 
+    [2048, 2048],
+    [1024, 1024, 1024],
+    [512, 512, 512, 512],
+    [256, 256, 256, 256, 256, 256],
+    [128, 128, 128, 128, 128, 128, 128, 128],
+    [64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64]
+]
 
-# ─── PyTorch MLP using ptorch projection layers ──────────────────────────────
 class MLP_ptorch(tnn.Module):
-    """MLP using ptorch projection layers (LinearBias + ReLU).
-
-    Mirrors the pjax MLP_pjax architecture for fair comparison.
-    """
-
     def __init__(self, hidden_features, in_features, classes, skip=False):
         super().__init__()
         self.hidden_features = hidden_features
@@ -65,69 +53,56 @@ class MLP_ptorch(tnn.Module):
         self.out = LinearBias(out_features, classes)
 
     def forward(self, x):
-        # Flatten input for MLP
         x = x.reshape(x.shape[0], -1)
-        xs = []
         for i in range(0, len(self.layers), 2):
             x = self.layers[i](x)      # LinearBias
             x = self.layers[i + 1](x)  # ReLU
-            xs.append(x)
-
         return self.out(x)
 
 
-# ─── Task definitions ────────────────────────────────────────────────────────
-tasks = [
-    {
-        "name": "MNIST",
-        "dataset": MNISTDataModule,
-        "model_fn": lambda: MLP_ptorch([512], 28 * 28, 10),
-    },
-]
-
-
-def run_task(task, device, optimizer_class, optimizer_kwargs={}, eval_every=100, patience=10, max_steps=None,
-             run_number=1, batch_size=2048):
-    """Run a single training experiment with Aim tracking."""
-
+def run_architecture(hidden_features, device, eval_every=100, patience=10, max_steps=None, run_number=1, batch_size=512):
     torch.manual_seed(RANDOM_SEED + run_number)
 
     # Setup Data
-    dataset = task["dataset"](batch_size=batch_size, seed=RANDOM_SEED)
+    dataset = InfiniteCifarDataModule(batch_size=batch_size, seed=RANDOM_SEED)
     train_iter = dataset.train_iterator()
     val_loader = dataset.val_dataloader()
     test_loader = dataset.test_dataloader()
 
     # Setup Model & Optimizer
-    model = task["model_fn"]().to(device)
-    optimizer = optimizer_class(model.parameters(), **optimizer_kwargs)
+    model = MLP_ptorch(hidden_features, 3 * 32 * 32, 10).to(device)
+    optimizer = AlternatingProjections(model.parameters())
 
-    # Aim Run Init — batch_size visible in experiment name for quick comparison
+    # Aim Run Init
     name_int = np.random.randint(0, 100)
-    run = Run(experiment=f"{fake.name()} {name_int}")
+    num_layers = len(hidden_features)
+    arch_str = "-".join(map(str, hidden_features))
+    run_name = f"CIFAR10 {num_layers}L_{arch_str} {name_int}"
+    run = Run(experiment="CIFAR10 Arch Sweep")
+    run.name = run_name
+    
     hparams = {
-        "task": task["name"],
-        "model": model.__class__.__name__,
-        "hidden_layers": getattr(model, "hidden_features", None),
-        "optimizer": optimizer_class.__name__,
-        "learning_rate": optimizer_kwargs.get("lr", 1.0),
-        "framework": "ptorch",            # ← key for comparing pjax vs ptorch
+        "task": "CIFAR10",
+        "model": "MLP_ptorch",
+        "optimizer": "AlternatingProjections",
+        "framework": "ptorch",
         "batch_size": batch_size,
         "seed": RANDOM_SEED,
         "eval_every": eval_every,
         "patience": patience,
         "max_steps": max_steps,
         "run_number": run_number,
+        "hidden_features": hidden_features,
+        "num_layers": num_layers,
+        "architecture": arch_str,
     }
     run["hparams"] = hparams
 
     def step_fn(model, optimizer, x, y):
-        """One training step using cross-entropy projection."""
         logits = model(x)
         y_one_hot = torch.nn.functional.one_hot(y.long(), num_classes=logits.shape[-1]).float()
 
-        # CrossEntropyProjection: forward returns logits, backward projects
-        projected = MarginLossProjection.apply(logits, y_one_hot)
+        projected = CrossEntropyProjection.apply(logits, y_one_hot)
 
         optimizer.zero_grad()
         projected.sum().backward()
@@ -141,17 +116,15 @@ def run_task(task, device, optimizer_class, optimizer_kwargs={}, eval_every=100,
             pred = model(x)
             return (pred.argmax(dim=-1) == y).float().mean()
 
-    # Training Loop
     best_val_acc, best_step = 0.0, 0
     no_improve_cycles = 0
     history = []
 
-    print(f"Starting training... Eval every {eval_every}, Patience {patience}")
+    print(f"Starting training... Layers: {num_layers}, Width: {hidden_features[0]}")
     step = 0
     train_start_time = time.time()
     with tqdm.tqdm(unit="step") as pbar:
         while True:
-            # Eval
             if step % eval_every == 0:
                 model.eval()
                 accs = [eval_fn(model, torch.tensor(x, dtype=torch.float32, device=device),
@@ -161,16 +134,12 @@ def run_task(task, device, optimizer_class, optimizer_kwargs={}, eval_every=100,
                 history.append((step, val_acc))
                 model.train()
 
-                # Aim tracking
                 elapsed_time = time.time() - train_start_time
-                run.track(val_acc, name="val_acc", step=step,
-                          context={"subset": "val"})
-                run.track(best_val_acc, name="best_val_acc", step=step,
-                          context={"subset": "val"})
+                run.track(val_acc, name="val_acc", step=step, context={"subset": "val"})
+                run.track(best_val_acc, name="best_val_acc", step=step, context={"subset": "val"})
                 run.track(elapsed_time, name="training_time_s", step=step)
 
-                pbar.set_postfix(val_acc=f"{val_acc:.4f}",
-                                 best=f"{best_val_acc:.4f}")
+                pbar.set_postfix(val_acc=f"{val_acc:.4f}", best=f"{best_val_acc:.4f}")
 
                 if val_acc > best_val_acc:
                     best_val_acc, best_step = val_acc, step
@@ -183,24 +152,20 @@ def run_task(task, device, optimizer_class, optimizer_kwargs={}, eval_every=100,
                     print(f"Early stopping at step {step}")
                     break
 
-            # Train
             x, y = next(train_iter)
             x = torch.tensor(x, dtype=torch.float32, device=device)
             y = torch.tensor(y, dtype=torch.long, device=device)
             loss = step_fn(model, optimizer, x, y)
 
-            # Track training loss
-            run.track(float(loss), name="loss", step=step,
-                      context={"subset": "train"})
+            run.track(float(loss), name="loss", step=step, context={"subset": "train"})
 
             step += 1
             pbar.update(1)
             if max_steps and step >= max_steps:
                 break
 
-    # Final Test — use best model
     total_train_time = time.time() - train_start_time
-    if 'best_state' in dir():
+    if 'best_state' in locals():
         model.load_state_dict(best_state)
     model.eval()
     test_accs = [eval_fn(model, torch.tensor(x, dtype=torch.float32, device=device),
@@ -213,37 +178,24 @@ def run_task(task, device, optimizer_class, optimizer_kwargs={}, eval_every=100,
     run.track(total_train_time, name="total_training_time_s", step=step)
     run.close()
 
-    return (final_acc, best_val_acc, best_step, total_train_time, history, step)
+    return final_acc
 
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    optimizers_to_test = [
-        (ProjectionMuon, {'lr': 0.01}),
-        (ProjectionAdadelta, {'lr': 10_000.0}),
-        (AlternatingProjections, {}),
-        (AlternatingProjectionsMomentum, {}),
-        (ProjectionSGD, {'lr': 1.0, 'momentum': 0.9, 'nesterov': True}),
-        (ProjectionAdagrad, {'lr': 5.0}),
-    ]
+    for hidden_features in ARCHITECTURES:
+        print(f"\n\n{'='*50}")
+        print(f"Architecture: {hidden_features}")
+        print(f"{'='*50}")
 
-    for batch_size in BATCH_SIZES:
-        for task_info in tasks:
-            for opt_class, opt_kwargs in optimizers_to_test:
-                print(f"\n\n{'='*50}")
-                print(f"Task: {task_info['name']} | Batch: {batch_size} | Opt: {opt_class.__name__}")
-                print(f"{'='*50}")
-
-                for run_number in range(1, NUM_RUNS + 1):
-                    print(f"\n--- Run {run_number}/{NUM_RUNS} ---")
-                    results = run_task(
-                        task_info, device, 
-                        optimizer_class=opt_class, optimizer_kwargs=opt_kwargs,
-                        eval_every=50, max_steps=MAX_STEPS,
-                        run_number=run_number, batch_size=batch_size,
-                    )
-                    gc.collect()
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
+        for run_number in range(1, NUM_RUNS + 1):
+            run_architecture(
+                hidden_features, device,
+                eval_every=100, max_steps=MAX_STEPS,
+                run_number=run_number, batch_size=BATCH_SIZE,
+            )
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()

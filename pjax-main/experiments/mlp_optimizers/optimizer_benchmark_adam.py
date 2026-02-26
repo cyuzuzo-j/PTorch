@@ -13,7 +13,7 @@ import torch.nn.functional as F
 import numpy as np
 from experiments.shared.data import (
     MNISTDataModule,
-    CIFAR10DataModule
+    InfiniteCifarDataModule
 )
 import tqdm
 import time
@@ -78,8 +78,8 @@ tasks = [
     },
     {
         "name": "CIFAR10",
-        "dataset": CIFAR10DataModule,
-        "model_fn": lambda: MLP_torch([512], 3 * 32 * 32, 10),
+        "dataset": InfiniteCifarDataModule,
+        "model_fn": lambda: MLP_torch([1024], 3 * 32 * 32, 10),
     },
 ]
 

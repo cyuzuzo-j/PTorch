@@ -119,3 +119,21 @@ class ReLU(nn.Module):
     def forward(self, *inputs):
         return SumReluProjection.apply(*inputs)
 
+class Step(nn.Module):
+    """Step activation function with bias."""
+    def __init__(self, features: int):
+        super().__init__()
+        
+    def forward(self, *inputs):
+        from ..core.ops import StepProjection # Avoid circular import if needed or just use it here
+        return StepProjection.apply(*inputs)
+
+class Step_NB(nn.Module):
+    """Step activation function without bias."""
+    def __init__(self):
+        super().__init__()
+        
+    def forward(self, *inputs):
+        from ..core.ops import StepProjection
+        return StepProjection.apply(*inputs)
+

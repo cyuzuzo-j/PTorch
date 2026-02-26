@@ -14,7 +14,7 @@ import pjax
 from pjax import nn, optim, optim_eff,optim_static, config as pjax_config
 from experiments.shared.data import (
     MNISTDataModule,
-    CIFAR10DataModule
+    InfiniteCifarDataModule
 ) 
 import tqdm
 import time
@@ -41,7 +41,7 @@ tasks = [
     },
     {
         "name":"CIFAR10",
-        "dataset":CIFAR10DataModule,
+        "dataset":InfiniteCifarDataModule,
         "model":MLP_pjax([512],3*32*32,10),
     },
 ]
