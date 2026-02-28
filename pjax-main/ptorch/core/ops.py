@@ -216,12 +216,15 @@ class MatMulProjection(torch.autograd.Function):
     @staticmethod
     def backward(ctx, Z_target):
         A, B = ctx.saved_tensors
+        A_det = A.detach()
+        B_det = B.detach()
+        Z_det = Z_target.detach()
         if ctx.num_iters <= 1:
             A_proj, B_proj, _Z_proj = matmul_proj_seq_pt(
-                A, B, Z_target, alpha=ctx.alpha, g=ctx.g)
+                A_det, B_det, Z_det, alpha=ctx.alpha, g=ctx.g)
         else:
             A_proj, B_proj, _Z_proj = matmul_proj_iterative_pt(
-                A, B, Z_target, alpha=ctx.alpha, g=ctx.g, num_iters=ctx.num_iters)
+                A_det, B_det, Z_det, alpha=ctx.alpha, g=ctx.g, num_iters=ctx.num_iters)
         return A_proj, B_proj, None, None, None
 
 class MSEProjection(torch.autograd.Function):
