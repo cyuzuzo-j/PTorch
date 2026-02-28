@@ -156,7 +156,7 @@ def max_proj(a, z, /):
     # select candidate minimizing distance
     k = jnp.argmin(dist_valid)
     
-    return (a_k[k][jnp.argsort(idx)].astype(jnp.bfloat16),)
+    return (a_k[k][jnp.argsort(idx)],)
 
 
 max = make_computation("max", max_op, max_proj)
@@ -347,12 +347,7 @@ def dotproduct_op(a, b, /):
 
 def bilinear_proj(a, b, z, /):
     """Project onto bilinear function graph using a bounded Newton's method."""
-    original_dtype = a.dtype
-    
-    a = a.astype(jnp.float32)
-    b = b.astype(jnp.float32)
-    z = z.astype(jnp.float32)
-    
+
     p = jnp.dot(a, b)
     q = jnp.dot(a, a) + jnp.dot(b, b)
 
@@ -378,7 +373,7 @@ def bilinear_proj(a, b, z, /):
     b_new = (b + t * a) / (1.0 - t**2)
     
     
-    return a_new.astype(original_dtype), b_new.astype(original_dtype)
+    return a_new, b_new
 
 dot = make_computation("dot", dotproduct_op, bilinear_proj)
 

@@ -38,7 +38,7 @@ class Parameter:
 class Weight(Parameter):
     """Learnable weight parameter with He normal initialization."""
 
-    def __init__(self, shape: Sequence[int], dtype: jnp.dtype = jnp.bfloat16, init_fn: Callable | None = None):
+    def __init__(self, shape: Sequence[int], dtype: jnp.dtype = jnp.float32, init_fn: Callable | None = None):
         def default_init_fn(key, shape, dtype):
             return jax.nn.initializers.he_normal()(key, shape, dtype)
 
@@ -48,7 +48,7 @@ class Weight(Parameter):
 class Bias(Parameter):
     """Learnable bias parameter initialized to zeros."""
 
-    def __init__(self, shape: Sequence[int], dtype: jnp.dtype = jnp.bfloat16):
+    def __init__(self, shape: Sequence[int], dtype: jnp.dtype = jnp.float32):
         super().__init__(shape, dtype)
 
 

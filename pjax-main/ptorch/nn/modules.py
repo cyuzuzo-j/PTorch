@@ -10,22 +10,28 @@ class Linear(nn.Module):
     """Linear (fully connected) layer without bias.
     Applies a linear transformation to input data.
     """
-    def __init__(self, in_features: int, out_features: int):
+    def __init__(self, in_features: int, out_features: int, alpha: float = 1.0, g: float = 1.0, num_iters: int = 5):
         super().__init__()
+        self.alpha = alpha
+        self.g = g
+        self.num_iters = num_iters
         # In pjax: Weight((in_features, out_features))
         self.weight = nn.Parameter(torch.empty(in_features, out_features))
         nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
 
     def forward(self, input):
         # Apply custom matmul projection
-        return MatMulProjection.apply(input, self.weight)
+        return MatMulProjection.apply(input, self.weight, self.alpha, self.g, self.num_iters)
 
 class LinearBias(nn.Module):
     """Linear (fully connected) layer with bias.
     The bias is implemented by expanding the weight matrix.
     """
-    def __init__(self, in_features: int, out_features: int):
+    def __init__(self, in_features: int, out_features: int, alpha: float = 1.0, g: float = 1.0, num_iters: int = 1):
         super().__init__()
+        self.alpha = alpha
+        self.g = g
+        self.num_iters = num_iters
         self.weight = nn.Parameter(torch.empty(in_features + 1, out_features))
         nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
 
@@ -33,7 +39,7 @@ class LinearBias(nn.Module):
         # Append ones to input for bias computation
         ones = torch.ones((*input.shape[:-1], 1), dtype=input.dtype, device=input.device)
         augmented_input = torch.cat([input, ones], dim=-1)
-        return MatMulProjection.apply(augmented_input, self.weight)
+        return MatMulProjection.apply(augmented_input, self.weight, self.alpha, self.g, self.num_iters)
 
 
 class Conv2D(nn.Module):
@@ -61,6 +67,9 @@ class Conv2D(nn.Module):
         kernel_size: Union[int, Tuple[int, int]] = 3,
         stride: Union[int, Tuple[int, int]] = 1,
         padding: Union[int, Tuple[int, int], str] = 0,
+        alpha: float = 1.0,
+        g: float = 1.0,
+        num_iters: int = 1,
     ):
         super().__init__()
         # Normalize to tuples
@@ -76,7 +85,7 @@ class Conv2D(nn.Module):
         # LinearBias projects from patch features to output channels
         # Matches pjax: LinearBias(in_channels * kH * kW, out_channels)
         kH, kW = kernel_size
-        self.linear = LinearBias(in_channels * kH * kW, out_channels)
+        self.linear = LinearBias(in_channels * kH * kW, out_channels, alpha=alpha, g=g, num_iters=num_iters)
 
     def _resolve_padding(self, H: int, W: int) -> Tuple[int, int]:
         """Resolve padding to explicit (pad_h, pad_w) values."""

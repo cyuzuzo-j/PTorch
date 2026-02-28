@@ -74,7 +74,7 @@ tasks = [
     {
         "name": "MNIST",
         "dataset": MNISTDataModule,
-        "model_fn": lambda: MLP_torch([256], 28 * 28, 10),
+        "model_fn": lambda: MLP_torch([512], 28 * 28, 10),
     },
     {
         "name": "CIFAR10",

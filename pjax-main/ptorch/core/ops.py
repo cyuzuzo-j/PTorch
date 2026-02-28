@@ -6,47 +6,66 @@ from .. import config
 # Suppress pin_memory warning when no accelerator is available
 warnings.filterwarnings("ignore", message=".*pin_memory.*")
 
-
-def _bilinear_proj_core(a, b, z, num_steps=10):
+def _bilinear_proj_core(a, b, z, alpha=1.0, g=1.0, omega=1.0, num_steps=10):
     """
     Batched projection onto bilinear function graph using Newton's method.
-    Pure tensor computation — no dynamic control flow, no Python-side allocations.
+    Pure tensor computation — no dynamic control flow.
 
-    a: (*, K)  -- vectors
-    b: (*, K)  -- vectors
-    z: (*,)    -- scalar targets
+    a: (*, K)      -- vectors (inputs)
+    b: (*, K)      -- vectors (weights)
+    z: (*,)        -- scalar targets (Omega * y)
+    alpha: float   -- stiffness for weights  (penalty on ||w' - w||^2)
+    g: float       -- stiffness for targets  (penalty on (y' - y)^2)
+    omega: float   -- constraint multiplier for the target
+    num_steps: int -- number of Newton iterations
 
-    Returns a_new (*, K), b_new (*, K)
+    Returns a_new (*, K), b_new (*, K), z_new (*,)
     """
-    p = (a * b).sum(dim=-1)                         # (*,)
-    q = (a * a).sum(dim=-1) + (b * b).sum(dim=-1)   # (*,)
+    p = (a * b).sum(dim=-1)            # (*,)
+    qa = (a * a).sum(dim=-1)           # (*,)
+    qb = (b * b).sum(dim=-1)           # (*,)
+    
+    # Effective q incorporating alpha
+    q_eff = qa + alpha * qb            # (*,)
+    
+    t = torch.zeros_like(p)            # (*,)
+    max_t = 0.999 * (alpha ** 0.5)
+    
+    # The penalty scaling term for the target z
+    # Derived from Omega^2 / g^2  (g is independent of alpha)
+    target_penalty = (omega ** 2) / (g ** 2)
 
-    t = torch.zeros_like(p)                          # (*,)
-
-    for _ in range(5):
+    for _ in range(num_steps):
         t2 = t * t
-        one_minus_t2 = 1.0 - t2
+        alpha_minus_t2 = alpha - t2
 
-        N = (1.0 + t2) * p + t * q
-        f_val = (N / (one_minus_t2 * one_minus_t2)) - z
+        N = alpha * (p * (alpha + t2) + t * q_eff)
+        
+        # Added the linear target_penalty term to f_val
+        f_val = (N / (alpha_minus_t2 * alpha_minus_t2)) - z + t * target_penalty
 
-        N_prime = 2.0 * t * p + q
-        f_prime_val = ((N_prime * one_minus_t2) + 4.0 * t * N) / (one_minus_t2 ** 3)
+        N_prime = alpha * (2.0 * t * p + q_eff)
+        
+        # Added the derivative of the linear term to f_prime_val
+        f_prime_val = ((N_prime * alpha_minus_t2) + 4.0 * t * N) / (alpha_minus_t2 ** 3) + target_penalty
 
         step = f_val / (f_prime_val + 1e-8)
-        t = torch.clamp(t - step, -0.999, 0.999)
+        t = torch.clamp(t - step, -max_t, max_t)
 
     t2 = t * t
-    denom = 1.0 - t2
+    denom = alpha - t2
 
     t_k = t.unsqueeze(-1)          # (*, 1)
     denom_k = denom.unsqueeze(-1)  # (*, 1)
 
-    a_new = (a + t_k * b) / denom_k
-    b_new = (b + t_k * a) / denom_k
-
-    return a_new, b_new
-
+    # Reconstruct updated tensors
+    a_new = alpha * (a + t_k * b) / denom_k
+    b_new = (alpha * b + t_k * a) / denom_k
+    
+    # Projected target: z' = z - t * (omega^2 / g^2)
+    z_new = z - t * target_penalty
+    
+    return a_new, b_new, z_new
 
 def bilinearMatrix_seq(a, B, z):
     """
@@ -60,7 +79,7 @@ def bilinearMatrix_seq(a, B, z):
     a_curr = a
 
     for i in range(N):
-        a_new, b_new = _bilinear_proj_core(
+        a_new, b_new, _z_new = _bilinear_proj_core(
             a_curr.unsqueeze(0), B[:, i].unsqueeze(0), z[i].unsqueeze(0)
         )
         a_curr = a_new.squeeze(0)
@@ -70,58 +89,140 @@ def bilinearMatrix_seq(a, B, z):
     return a_curr, B_proj
 
 
-@torch.compile
-def bilinearMatrix_parr(a, B, z):
+def bilinearMatrix_parr(a, B, z, alpha=1.0, g=1.0):
     """
     Fully vectorized parallel projection — NO Python loop.
     a: (K,), B: (K, N), z: (N,)
+    alpha: float -- weight stiffness passed to _bilinear_proj_core
+    g: float     -- target stiffness passed to _bilinear_proj_core
     Projects each column of B independently against the SAME a.
-    Returns a_proj (K,), B_proj (K, N)
+    Returns a_proj (K,), B_proj (K, N), z_proj (N,)
     """
     N = B.shape[1]
 
     a_batch = a.unsqueeze(0).expand(N, -1)          # (N, K)
     b_batch = B.t().contiguous()                     # (N, K)
 
-    a_projs, b_projs = _bilinear_proj_core(a_batch, b_batch, z)
+    a_projs, b_projs, z_projs = _bilinear_proj_core(a_batch, b_batch, z, alpha=alpha, g=g)
 
     a_proj = a_projs.mean(dim=0)                     # (K,)
     B_proj = b_projs.t().contiguous()                # (K, N)
 
-    return a_proj, B_proj
+    return a_proj, B_proj, z_projs
 
-def matmul_proj_seq_pt(A, B, Z):
+@torch.compile(dynamic=True)
+def matmul_proj_seq_pt(A, B, Z, alpha=1.0, g=1.0):
     """
     Project onto matrix multiplication constraint A @ B = Z.
     A: (M, K), B: (K, N), Z: (M, N).
+    alpha: float -- weight stiffness forwarded to _bilinear_proj_core
+    g: float     -- target stiffness forwarded to _bilinear_proj_core
 
     Outer scan over rows of A (sequential — B_curr is carried).
     Inner projection uses bilinearMatrix_parr (vectorized over columns).
+    Returns A_proj (M, K), B_proj (K, N), Z_proj (M, N)
     """
     M = A.shape[0]
     B_curr = B.clone()
     a_rows = []
+    z_rows = []
 
     for i in range(M):
-        a_proj, B_curr = bilinearMatrix_parr(A[i], B_curr, Z[i])
+        a_proj, B_curr, z_proj = bilinearMatrix_parr(A[i], B_curr, Z[i], alpha=alpha, g=g)
         a_rows.append(a_proj)
+        z_rows.append(z_proj)
 
     A_proj = torch.stack(a_rows, dim=0)  # (M, K)
-    return A_proj, B_curr
+    Z_proj = torch.stack(z_rows, dim=0)  # (M, N)
+    return A_proj, B_curr, Z_proj
+
+def matmul_proj_parr_pt(A, B, Z, alpha=1.0, g=1.0):
+    """
+    Fully parallel projection onto matrix multiplication constraint A @ B = Z.
+    A: (M, K), B: (K, N), Z: (M, N).
+    alpha: float -- weight stiffness
+    g: float     -- target stiffness
+
+    Unlike matmul_proj_seq_pt, B is NOT carried between rows — each row
+    projects independently against the SAME original B.  The M projected
+    copies of B are averaged at the end.
+    Returns A_proj (M, K), B_proj (K, N), Z_proj (M, N)
+    """
+    M = A.shape[0]
+    a_rows = []
+    B_projs = []
+    z_rows = []
+
+    for i in range(M):
+        a_proj, B_proj_i, z_proj = bilinearMatrix_parr(A[i], B.clone(), Z[i], alpha=alpha, g=g)
+        a_rows.append(a_proj)
+        B_projs.append(B_proj_i)
+        z_rows.append(z_proj)
+
+    A_proj = torch.stack(a_rows, dim=0)                # (M, K)
+    B_proj = torch.stack(B_projs, dim=0).mean(dim=0)   # (K, N) — average over rows
+    Z_proj = torch.stack(z_rows, dim=0)                # (M, N)
+    return A_proj, B_proj, Z_proj
+
+@torch.compile(dynamic=True)
+def matmul_proj_iterative_pt(A, B, Z, alpha=1.0, g=1.0, num_iters=5):
+    """
+    Iterated projection onto matrix multiplication constraint A @ B = Z.
+    A: (M, K), B: (K, N), Z: (M, N).
+    alpha: float    -- weight stiffness
+    g: float        -- target stiffness
+    num_iters: int  -- number of full sequential passes
+
+    Each iteration runs a full sequential scan (matmul_proj_seq_pt) using
+    the ORIGINAL (A, B, Z) as the reference but the CURRENT projected
+    (A_curr, B_curr) as starting point.  The target Z remains fixed.
+
+    This is cyclic projection / Gauss-Seidel with multiple sweeps,
+    converging toward the true joint projection.
+    Returns A_proj (M, K), B_proj (K, N), Z_proj (M, N)
+    """
+    A_curr = A.clone()
+    B_curr = B.clone()
+    Z_proj = Z.clone()
+
+    for iteration in range(num_iters):
+        M = A_curr.shape[0]
+        a_rows = []
+        z_rows = []
+
+        for i in range(M):
+            a_proj, B_curr, z_proj = bilinearMatrix_parr(
+                A_curr[i], B_curr, Z[i], alpha=alpha, g=g
+            )
+            a_rows.append(a_proj)
+            z_rows.append(z_proj)
+
+        A_curr = torch.stack(a_rows, dim=0)
+        Z_proj = torch.stack(z_rows, dim=0)
+
+    return A_curr, B_curr, Z_proj
 
 # ─── autograd.Function wrappers ───────────────────────────────────────────────
 
 class MatMulProjection(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, A, B):
+    def forward(ctx, A, B, alpha=1.0, g=1.0, num_iters=1):
         ctx.save_for_backward(A, B)
+        ctx.alpha = alpha
+        ctx.g = g
+        ctx.num_iters = num_iters
         return A @ B
 
     @staticmethod
     def backward(ctx, Z_target):
         A, B = ctx.saved_tensors
-        A_proj, B_proj = matmul_proj_seq_pt(A, B, Z_target)
-        return A_proj, B_proj
+        if ctx.num_iters <= 1:
+            A_proj, B_proj, _Z_proj = matmul_proj_seq_pt(
+                A, B, Z_target, alpha=ctx.alpha, g=ctx.g)
+        else:
+            A_proj, B_proj, _Z_proj = matmul_proj_iterative_pt(
+                A, B, Z_target, alpha=ctx.alpha, g=ctx.g, num_iters=ctx.num_iters)
+        return A_proj, B_proj, None, None, None
 
 class MSEProjection(torch.autograd.Function):
     @staticmethod

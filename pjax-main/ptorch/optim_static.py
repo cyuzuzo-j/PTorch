@@ -1,5 +1,5 @@
-import torch
-
+import torch                    
+                
 class AlternatingProjections(torch.optim.Optimizer):
     """
     Minimal projection-based optimizer using alternating projections.
