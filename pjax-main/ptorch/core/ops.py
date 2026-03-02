@@ -335,6 +335,108 @@ class StepProjection(torch.autograd.Function):
         # (s - output) / (len(inputs) + 1)
         mid = (s - z_target) / (n + 1)
         
-        projected_inputs = tuple(x - mid for x in inputs)
-        
         return projected_inputs
+
+def simplex_op_pt(a):
+    """Project onto probability simplex (forward operation). Batched version."""
+    n = a.size(-1)
+    
+    # Sort array descending
+    u, _ = torch.sort(a, dim=-1, descending=True)
+    
+    # Compute cumulative sums to calculate candidates for the shift tau
+    cssv = torch.cumsum(u, dim=-1)
+    k_range = torch.arange(1, n + 1, device=a.device, dtype=a.dtype)
+    tau_candidates = (cssv - 1.0) / k_range
+    
+    # Valid active sets are those where the element is greater than the shift.
+    valid_mask = u > tau_candidates
+    rho = torch.sum(valid_mask, dim=-1, keepdim=True)
+    rho = torch.clamp(rho, min=1)
+    
+    # Extract the correct tau
+    tau = torch.gather(tau_candidates, -1, rho - 1)
+    
+    return torch.maximum(a - tau, torch.tensor(0.0, device=a.device, dtype=a.dtype))
+
+def simplex_proj_pt(a, z):
+    """Project onto the probability simplex function graph. Batched version."""
+    n = a.size(-1)
+
+    # Combine inputs to find the optimal active sets based on the "pull"
+    w = a + z
+    
+    # Get indices to sort ascending, keeping track to restore order later
+    idx = torch.argsort(w, dim=-1)
+    a_s = torch.gather(a, -1, idx)
+    z_s = torch.gather(z, -1, idx)
+    w_s = torch.gather(w, -1, idx)
+    
+    # Work in descending order (index 0 is the largest combined pull)
+    a_d = torch.flip(a_s, dims=[-1])
+    z_d = torch.flip(z_s, dims=[-1])
+    w_d = torch.flip(w_s, dims=[-1])
+    
+    # Precompute tau for all candidates k=1..n
+    k_range = torch.arange(1, n + 1, device=a.device, dtype=a.dtype)
+    tau = (torch.cumsum(w_d, dim=-1) - 2.0) / k_range
+    tau_matrix = tau.unsqueeze(-1)
+    
+    # Mask for active set: lower triangular matrix of True
+    # Row k (0-indexed) corresponds to candidate k+1, having k+1 active elements
+    active_mask = torch.tril(torch.ones((n, n), dtype=torch.bool, device=a.device))
+    
+    # Calculate candidate arrays
+    # 1. Active elements
+    w_d_row = w_d.unsqueeze(-2)
+    a_active = (w_d_row + tau_matrix) / 2.0
+    z_active = (w_d_row - tau_matrix) / 2.0
+    
+    # 2. Clamped elements
+    a_d_row = a_d.unsqueeze(-2)
+    a_clamped = torch.minimum(a_d_row, tau_matrix)
+    z_clamped = torch.zeros_like(z_active)
+    
+    # Combine based on the active mask
+    a_cand = torch.where(active_mask, a_active, a_clamped)
+    z_cand = torch.where(active_mask, z_active, z_clamped)
+    
+    z_d_row = z_d.unsqueeze(-2)
+    
+    # Calculate squared euclidean distances
+    dist = torch.sum((a_cand - a_d_row)**2 + (z_cand - z_d_row)**2, dim=-1)
+    
+    # Select valid candidates
+    # A candidate is valid if its smallest active w element (which is exactly w_d[k]) is >= tau[k]
+    dist_valid = torch.where(w_d >= tau, dist, torch.tensor(float('inf'), device=a.device, dtype=a.dtype))
+    
+    # Select the candidate minimizing the distance
+    best_k = torch.argmin(dist_valid, dim=-1, keepdim=True)
+    
+    # We must extract the single best candidate array out of 'n' potential candidates along dim=-2
+    best_k_expanded = best_k.unsqueeze(-1).expand(*best_k.shape[:-1], 1, n)
+    best_a_d = torch.gather(a_cand, -2, best_k_expanded).squeeze(-2)
+    
+    # Restore the original order: flip back to ascending, then apply inverse argsort
+    best_a_s = torch.flip(best_a_d, dims=[-1])
+    
+    inverse_idx = torch.argsort(idx, dim=-1)
+    best_a_orig = torch.gather(best_a_s, -1, inverse_idx)
+    return (best_a_orig,)
+
+class SimplexProjection(torch.autograd.Function):
+    """
+    PyTorch equivalent of PJAX simplex projection.
+    Forward: projects a onto the probability simplex.
+    Backward: projects inputs onto the simplex constraint graph.
+    """
+    @staticmethod
+    def forward(ctx, a):
+        ctx.save_for_backward(a)
+        return simplex_op_pt(a)
+
+    @staticmethod
+    def backward(ctx, z_target):
+        (a,) = ctx.saved_tensors
+        res = simplex_proj_pt(a, z_target)
+        return res[0]

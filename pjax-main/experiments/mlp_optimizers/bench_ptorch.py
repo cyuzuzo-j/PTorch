@@ -15,7 +15,7 @@ from ptorch.core.ops import MarginLossProjection
 import ptorch.optim_static as ptorch_optim_static
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 import tqdm, time
-from aim import Run
+import wandb
 
 FRAMEWORK = "ptorch_compiled_itterative"
 
@@ -62,8 +62,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     opt_kwargs = cfg.get("ptorch_optimizer_kwargs", {})
     optimizer  = OPTIM_MODULES[opt_name](model.parameters(), **opt_kwargs)
 
-    run = Run(experiment=cfg["experiment_name"])
-    run["hparams"] = {
+    run = wandb.init(project="pjax", name=cfg["experiment_name"])
+    wandb.config.update({
         "framework": FRAMEWORK,
         "task": task_cfg["name"],
         "hidden": task_cfg["hidden"],
@@ -75,7 +75,7 @@ def run(cfg, task_cfg, batch_size, run_number, device):
         "max_steps": cfg["max_steps"],
         "eval_every": cfg["eval_every"],
         "patience": cfg["patience"],
-    }
+    })
 
     def step_fn(x, y):
         logits  = model(x)
@@ -106,8 +106,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
                     for x, y in val_loader]
                 val_acc = float(torch.stack(accs).mean())
                 model.train()
-                run.track(val_acc, name="val_acc", step=step, context={"subset": "val"})
-                run.track(time.time() - t0, name="training_time_s", step=step)
+                wandb.log({"val/val_acc": val_acc}, step=step)
+                wandb.log({"training_time_s": time.time() - t0}, step=step)
                 pbar.set_postfix(val_acc=f"{val_acc:.4f}", best=f"{best_val_acc:.4f}")
                 if val_acc > best_val_acc:
                     best_val_acc, best_step = val_acc, step
@@ -123,7 +123,7 @@ def run(cfg, task_cfg, batch_size, run_number, device):
             loss = step_fn(
                 torch.tensor(x, dtype=torch.float32, device=device),
                 torch.tensor(y, dtype=torch.long,  device=device))
-            run.track(float(loss), name="loss", step=step, context={"subset": "train"})
+            wandb.log({"train/loss": float(loss)}, step=step)
             step += 1
             pbar.update(1)
             if cfg["max_steps"] and step >= cfg["max_steps"]:
@@ -139,9 +139,9 @@ def run(cfg, task_cfg, batch_size, run_number, device):
         for x, y in test_loader]
     final_acc = float(torch.stack(test_accs).mean())
     print(f"Test Acc: {final_acc:.4f}  Time: {total_time:.1f}s")
-    run.track(final_acc, name="test_acc", step=step, context={"subset": "test"})
-    run.track(total_time, name="total_training_time_s", step=step)
-    run.close()
+    wandb.log({"test/test_acc": final_acc}, step=step)
+    wandb.log({"total_training_time_s": total_time}, step=step)
+    wandb.finish()
     return final_acc, best_val_acc, best_step, total_time
 
 

@@ -126,17 +126,24 @@ class Linear(Module):
     Args:
         in_features: number of input features.
         out_features: number of output features.
+        norm: `"L1"`, `"L2"`, or `"Linf"` string selecting the projection norm. Defaults to `"L2"`.
 
     Attributes:
         weight: learnable weight matrix of shape ``(in_features, out_features)``.
     """
 
-    def __init__(self, in_features: int, out_features: int):
+    def __init__(self, in_features: int, out_features: int, norm: str = "L2"):
         super().__init__()
         self.weight = Weight((in_features, out_features))
+        self.norm = norm.upper()
 
     def __call__(self, input):
-        return pjax.matmul(input, self.weight)
+        if self.norm == "L1":
+            return pjax.matmul_l1(input, self.weight)
+        elif self.norm == "LINF":
+            return pjax.matmul_linf(input, self.weight)
+        else:
+            return pjax.matmul(input, self.weight)
 
 
 class LinearBias(Module):
@@ -150,22 +157,29 @@ class LinearBias(Module):
     Args:
         in_features: number of input features.
         out_features: number of output features.
+        norm: `"L1"`, `"L2"`, or `"Linf"` string selecting the projection norm. Defaults to `"L2"`.
 
     Attributes:
         weight: learnable weight matrix of shape ``(in_features + 1, out_features)``,
                 where the last row contains the bias values.
     """
 
-    def __init__(self, in_features: int, out_features: int):
+    def __init__(self, in_features: int, out_features: int, norm: str = "L2"):
         super().__init__()
         # Weight includes extra row for bias
         self.weight = Weight((in_features + 1, out_features))
+        self.norm = norm.upper()
 
     def __call__(self, input):
         # Append ones to input for bias computation
         ones = jnp.ones((*input.shape[:-1], 1))
         augmented_input = pjax.concatenate([input, ones], axis=-1)
-        return pjax.matmul(augmented_input, self.weight)
+        if self.norm == "L1":
+            return pjax.matmul_l1(augmented_input, self.weight)
+        elif self.norm == "LINF":
+            return pjax.matmul_linf(augmented_input, self.weight)
+        else:
+            return pjax.matmul(augmented_input, self.weight)
 
 
 class LinearOld(Module):

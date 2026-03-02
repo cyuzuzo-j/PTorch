@@ -17,7 +17,7 @@ import pandas as pd
 import pjax
 from pjax import nn, optim, optim_eff
 from experiments.shared.data import InfiniteCifarLoader
-from aim import Run
+import wandb
 from tqdm import tqdm
 jax.config.update("jax_compilation_cache_dir", "./jax_cache")
 jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
@@ -152,14 +152,14 @@ def train_pjax_model(name, optimizer_cls, epochs=EPOCHS):
     params = model.init(jax.random.key(0))
     optimizer = optimizer_cls(steps_per_update=100)
 
-    aim_run = Run(experiment=name)
-    aim_run["hparams"] = {
+    aim_run = wandb.init(project="pjax", name=name)
+    wandb.config.update({
         "dataset": "CIFAR-10", "batch_size": BATCH_SIZE, "epochs": epochs,
         "model": "CNN_PJAX", "framework": "pjax",
         "optimizer": optimizer_cls.__name__, "steps_per_update": 10,
         "widths": PROXY_WIDTHS, "whiten_width": WHITEN_WIDTH, "scaling_factor": SCALING_FACTOR,
         "jax_backend": jax.default_backend(),
-    }
+    })
 
     @jax.jit
     def train_step(params, x, y):
@@ -192,7 +192,7 @@ def train_pjax_model(name, optimizer_cls, epochs=EPOCHS):
             params, loss = train_step(params, jnp.array(x), jnp.array(y))
             step_loss = float(jnp.abs(loss))
             epoch_loss += step_loss; count += 1; global_step += 1
-            aim_run.track(step_loss, name="loss", step=global_step, context={"subset": "train"})
+            wandb.log({"train/loss": step_loss}, step=global_step)
 
             if count % 5 == 0:
                 train_acc = evaluate(params, train_data)
@@ -200,9 +200,9 @@ def train_pjax_model(name, optimizer_cls, epochs=EPOCHS):
                 elapsed   = time.time() - start_time
                 train_acc_history.append(train_acc)
                 val_acc_history.append(val_acc)
-                aim_run.track(train_acc, name="accuracy", step=global_step, context={"subset": "train"})
-                aim_run.track(val_acc,   name="accuracy", step=global_step, context={"subset": "val"})
-                aim_run.track(elapsed,   name="elapsed_time_s", step=global_step)
+                wandb.log({"train/accuracy": train_acc}, step=global_step)
+                wandb.log({"val/accuracy": val_acc}, step=global_step)
+                wandb.log({"elapsed_time_s": elapsed}, step=global_step)
                 log(f"Epoch {epoch+1}/{epochs} - Batch {count} - Loss: {step_loss:.4f} - Train: {train_acc:.4f} - Val: {val_acc:.4f}")
 
         avg_loss   = epoch_loss / count
@@ -210,14 +210,14 @@ def train_pjax_model(name, optimizer_cls, epochs=EPOCHS):
 
         loss_history.append(avg_loss)
 
-        aim_run.track(avg_loss,   name="epoch_loss",    step=epoch, context={"subset": "train"})
-        aim_run.track(epoch_time, name="epoch_time_s",  step=epoch)
+        wandb.log({"train/epoch_loss": avg_loss}, step=epoch)
+        wandb.log({"epoch_time_s": epoch_time}, step=epoch)
         log(f"Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
 
     total_time = time.time() - start_time
-    aim_run.track(val_acc_history[-1], name="final_val_accuracy",    step=0)
-    aim_run.track(total_time,          name="total_training_time_s", step=0)
-    aim_run.close()
+    wandb.log({"final_val_accuracy": val_acc_history[-1]}, step=0)
+    wandb.log({"total_training_time_s": total_time}, step=0)
+    wandb.finish()
     return {"name": name, "loss_history": loss_history,
             "train_accuracy_history": train_acc_history, "val_accuracy_history": val_acc_history,
             "final_accuracy": val_acc_history[-1], "time": total_time, "peak_gpu_memory_mb": 0}
@@ -233,14 +233,14 @@ def train_pytorch_model(name, epochs=EPOCHS, learning_rate=0.001):
     optimizer = toptim.Adam(model.parameters(), lr=learning_rate)
     criterion = tnn.CrossEntropyLoss()
 
-    aim_run = Run(experiment=name)
-    aim_run["hparams"] = {
+    aim_run = wandb.init(project="pjax", name=name)
+    wandb.config.update({
         "dataset": "CIFAR-10", "batch_size": BATCH_SIZE, "epochs": epochs,
         "model": "CNN_PyTorch", "framework": "pytorch",
         "optimizer": "Adam", "learning_rate": learning_rate,
         "widths": PROXY_WIDTHS, "whiten_width": WHITEN_WIDTH, "scaling_factor": SCALING_FACTOR,
         "device": str(device),
-    }
+    })
 
     def evaluate(model, loader):
         model.eval()
@@ -271,7 +271,7 @@ def train_pytorch_model(name, epochs=EPOCHS, learning_rate=0.001):
             loss = criterion(model(x), y)
             loss.backward(); optimizer.step()
             epoch_loss += loss.item(); count += 1; global_step += 1
-            aim_run.track(loss.item(), name="loss", step=global_step, context={"subset": "train"})
+            wandb.log({"train/loss": loss.item()}, step=global_step)
 
             if count % 5 == 0:
                 train_acc = evaluate(model, train_data)
@@ -279,9 +279,9 @@ def train_pytorch_model(name, epochs=EPOCHS, learning_rate=0.001):
                 elapsed   = time.time() - start_time
                 train_acc_history.append(train_acc)
                 val_acc_history.append(val_acc)
-                aim_run.track(train_acc, name="accuracy", step=global_step, context={"subset": "train"})
-                aim_run.track(val_acc,   name="accuracy", step=global_step, context={"subset": "val"})
-                aim_run.track(elapsed,   name="elapsed_time_s", step=global_step)
+                wandb.log({"train/accuracy": train_acc}, step=global_step)
+                wandb.log({"val/accuracy": val_acc}, step=global_step)
+                wandb.log({"elapsed_time_s": elapsed}, step=global_step)
                 log(f"Epoch {epoch+1}/{epochs} - Batch {count} - Loss: {loss.item():.4f} - Train: {train_acc:.4f} - Val: {val_acc:.4f}")
                 model.train()
 
@@ -290,14 +290,14 @@ def train_pytorch_model(name, epochs=EPOCHS, learning_rate=0.001):
 
         loss_history.append(avg_loss)
 
-        aim_run.track(avg_loss,   name="epoch_loss",   step=epoch, context={"subset": "train"})
-        aim_run.track(epoch_time, name="epoch_time_s", step=epoch)
+        wandb.log({"train/epoch_loss": avg_loss}, step=epoch)
+        wandb.log({"epoch_time_s": epoch_time}, step=epoch)
         log(f"Epoch {epoch+1}/{epochs} - Avg Loss: {avg_loss:.4f}")
 
     total_time = time.time() - start_time
-    aim_run.track(val_acc_history[-1], name="final_val_accuracy",    step=0)
-    aim_run.track(total_time,          name="total_training_time_s", step=0)
-    aim_run.close()
+    wandb.log({"final_val_accuracy": val_acc_history[-1]}, step=0)
+    wandb.log({"total_training_time_s": total_time}, step=0)
+    wandb.finish()
     return {"name": name, "loss_history": loss_history,
             "train_accuracy_history": train_acc_history, "val_accuracy_history": val_acc_history,
             "final_accuracy": val_acc_history[-1], "time": total_time}

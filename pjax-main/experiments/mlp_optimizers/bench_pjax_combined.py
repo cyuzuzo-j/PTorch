@@ -12,7 +12,7 @@ import jax.numpy as jnp
 import importlib
 import argparse
 import tqdm, time
-from aim import Run
+import wandb
 
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 DATASETS = {"MNIST": None, "CIFAR10": None}
@@ -119,8 +119,8 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
     opt_kwargs = cfg.get(f"{impl_name}_optimizer_kwargs") or cfg.get("pjax_optimizer_kwargs") or cfg.get("pjax_orr_optimizer_kwargs") or {}
     optimizer = OPTIM_MODULES[opt_name](**opt_kwargs)
 
-    run = Run(experiment=cfg["experiment_name"])
-    run["hparams"] = {
+    run = wandb.init(project="pjax", name=cfg["experiment_name"])
+    wandb.config.update({
         "framework": FRAMEWORK,
         "task": task_cfg["name"],
         "hidden": task_cfg["hidden"],
@@ -132,7 +132,7 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
         "max_steps": cfg["max_steps"],
         "eval_every": cfg["eval_every"],
         "patience": cfg["patience"],
-    }
+    })
 
     # fall back cross_entropy implementation if missing
     if cross_entropy is None:
@@ -170,8 +170,8 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
             if step % cfg["eval_every"] == 0:
                 accs = [eval_fn(params, jnp.array(x), jnp.array(y)) for x, y in val_loader]
                 val_acc = float(jnp.mean(jnp.array(accs)))
-                run.track(val_acc, name="val_acc", step=step, context={"subset": "val"})
-                run.track(time.time() - t0, name="training_time_s", step=step)
+                wandb.log({"val/val_acc": val_acc}, step=step)
+                wandb.log({"training_time_s": time.time() - t0}, step=step)
                 pbar.set_postfix(val_acc=f"{val_acc:.4f}", best=f"{best_val_acc:.4f}")
                 if val_acc > best_val_acc:
                     best_val_acc, best_params, best_step = val_acc, params, step
@@ -184,7 +184,7 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
 
             x, y   = next(train_iter)
             params, loss = step_fn(params, jnp.array(x), jnp.array(y))
-            run.track(float(loss), name="loss", step=step, context={"subset": "train"})
+            wandb.log({"train/loss": float(loss)}, step=step)
             step += 1
             pbar.update(1)
             if cfg["max_steps"] and step >= cfg["max_steps"]:
@@ -194,9 +194,9 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
     test_accs  = [eval_fn(best_params, jnp.array(x), jnp.array(y)) for x, y in test_loader]
     final_acc  = float(jnp.mean(jnp.array(test_accs)))
     print(f"Test Acc: {final_acc:.4f}  Time: {total_time:.1f}s")
-    run.track(final_acc, name="test_acc", step=step, context={"subset": "test"})
-    run.track(total_time, name="total_training_time_s", step=step)
-    run.close()
+    wandb.log({"test/test_acc": final_acc}, step=step)
+    wandb.log({"total_training_time_s": total_time}, step=step)
+    wandb.finish()
     return final_acc, best_val_acc, best_step, total_time
 
 

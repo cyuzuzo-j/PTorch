@@ -4,6 +4,7 @@ import torch.nn as nn
 from ..core.ops import (
     MatMulProjection,
     SumReluProjection,
+    SimplexProjection
 )
 
 class Linear(nn.Module):
@@ -146,3 +147,10 @@ class Step_NB(nn.Module):
         from ..core.ops import StepProjection
         return StepProjection.apply(*inputs)
 
+class Simplex(nn.Module):
+    """Simplex activation function."""
+    def __init__(self, features: int = 0):
+        super().__init__()
+        
+    def forward(self, input):
+        return SimplexProjection.apply(input)
