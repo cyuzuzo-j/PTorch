@@ -589,6 +589,7 @@ class InfiniteCifarLoader:
                 epoch += 1
 
                 set_random_state(self.aug_seed, epoch)
+                images1 = images0
                 if pad > 0:
                     images1 = batch_crop(images0, 32)
                 if self.aug.get('flip', False):

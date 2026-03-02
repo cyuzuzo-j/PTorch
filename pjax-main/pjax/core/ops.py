@@ -53,8 +53,8 @@ def _resolve_pool_padding(input_shape, pool_size, strides, padding):
         in_h, in_w = input_shape
         ph, pw = pool_size
         sh, sw = strides
-        out_h = int(jnp.ceil(in_h / sh))
-        out_w = int(jnp.ceil(in_w / sw))
+        out_h = (in_h + sh - 1) // sh
+        out_w = (in_w + sw - 1) // sw
         pad_h = builtins.max(0, (out_h - 1) * sh + ph - in_h)
         pad_w = builtins.max(0, (out_w - 1) * sw + pw - in_w)
         pad_top = pad_h // 2
@@ -723,25 +723,38 @@ def bilinear_matrix(a, B, z):
 def matmul_proj_seq(a, b, z, /):
     """
     Project onto matrix multiplication constraint.
-    Uses jax.lax.scan to process batches sequentiely
+    Uses jax.lax.scan to process batches sequentiely.
     """
-    # If a is 1D, add a batch dimension for consistent processing
-    a_batched = jnp.atleast_2d(a)
-    z_batched = jnp.atleast_2d(z)
+    def _project_single(a_matrix, b_matrix, z_matrix):
+        a_batched = jnp.atleast_2d(a_matrix)
+        z_batched = jnp.atleast_2d(z_matrix)
 
-    def scan_body(b_curr, x):
+        def scan_body(b_curr, x):
+            a_sample, z_sample = x
+            a_final, b_new = bilinear_matrix(a_sample, b_curr, z_sample)
+            return b_new, a_final
+
+        b_final, a_result = jax.lax.scan(scan_body, b_matrix, (a_batched, z_batched))
+
+        if a_matrix.ndim == 1:
+            a_result = a_result[0]
+
+        return a_result, b_final
+
+    if a.ndim <= 2:
+        return _project_single(a, b, z)
+
+    batch_shape = a.shape[:-2]
+    a_batch = a.reshape((-1,) + a.shape[-2:])
+    z_batch = z.reshape((-1,) + z.shape[-2:])
+
+    def batch_scan_body(b_curr, x):
         a_sample, z_sample = x
-        a_final, b_new = bilinear_matrix(a_sample, b_curr, z_sample)
-        # return (new_carry, output_to_stack)
+        a_final, b_new = _project_single(a_sample, b_curr, z_sample)
         return b_new, a_final
-    
-    # Iterates over the batch dimension (axis 0) of a_batched and z_batched
-    b_final, a_result = jax.lax.scan(scan_body, b, (a_batched, z_batched))
-    
-    # If original 'a' was 1D, remove the artificially added batch dimension from result
-    if a.ndim == 1:
-        a_result = a_result[0]
-        
+
+    b_final, a_result = jax.lax.scan(batch_scan_body, b, (a_batch, z_batch))
+    a_result = a_result.reshape(batch_shape + a_result.shape[1:])
     return a_result, b_final
 
 def matmul_proj_parr(a, b, z, /):
