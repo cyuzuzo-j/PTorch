@@ -23,18 +23,18 @@ from .core.frozen_dict import FrozenDict, freeze
 
 def projection(computation: Operation | Parameter | Array, output: jnp.ndarray):
     """Compute the projection for a computation."""
-    inputs = [parent.value.astype(jnp.bfloat16) for parent in computation.parents]
+    inputs = [parent.value for parent in computation.parents]
 
     return  computation.projection(*inputs, output)
 
 def inverse(computation: Operation | Parameter | Array, output: jnp.ndarray):
-    inputs = [parent.value.astype(jnp.bfloat16) for parent in computation.parents]
-
+    inputs = [parent.value for parent in computation.parents]
     return  computation.inverse(*inputs, output)
+    
 
-class AlternatingProjections:
+class CyclicProjections:
     """
-        implementation of alternating projections
+        implementation of cyclic projections
     """
 
     def __init__(self, steps_per_update: int = 50, change_projection_order: bool = False):
@@ -50,6 +50,7 @@ class AlternatingProjections:
         # calculate the loss (diff root computation)
         nodes = [root_computation]
         outputs = [None]
+
         while nodes:
             node = nodes.pop(0)
             output = outputs.pop(0)

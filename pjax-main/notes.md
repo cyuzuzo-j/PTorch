@@ -13,3 +13,11 @@ karpathy micro gpt
 cifar airbench
 unrolled networks
 lopend gemiddelde ipv 
+
+## Sesie 23/02/26
+Imbalanced dataset
+-> bv stel je wil 7 herkennen.gewogen gemmidelde
+-> gebruik gewogen gemiddeled ipv effectief gemiddelde
+
+EERST BENCHMARKS UITBREIDEN
+

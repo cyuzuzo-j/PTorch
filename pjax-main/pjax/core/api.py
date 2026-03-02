@@ -272,6 +272,46 @@ def matmul(a: Computation, b: Computation) -> Computation:
         out = squeeze(out, axis=-1)
     return out
 
+def matmul_l1(a: Computation, b: Computation) -> Computation:
+    """Matrix product of two arrays with element-wise scaling of the result using L1 norm projection."""
+    a_, b_ = a, b
+
+    # expand dimensions if necessary
+    if a.ndim == 1:
+        a_ = expand_dims(a, 0)
+    if b.ndim == 1:
+        b_ = expand_dims(b, 1)
+
+    # call efficient op
+    out = ops.matmul_l1(a_, b_)
+
+    # squeeze dimensions if necessary
+    if a.ndim == 1:
+        out = squeeze(out, axis=-2)
+    if b.ndim == 1:
+        out = squeeze(out, axis=-1)
+    return out
+
+def matmul_linf(a: Computation, b: Computation) -> Computation:
+    """Matrix product of two arrays with element-wise scaling of the result using Linf norm projection."""
+    a_, b_ = a, b
+
+    # expand dimensions if necessary
+    if a.ndim == 1:
+        a_ = expand_dims(a, 0)
+    if b.ndim == 1:
+        b_ = expand_dims(b, 1)
+
+    # call efficient op
+    out = ops.matmul_linf(a_, b_)
+
+    # squeeze dimensions if necessary
+    if a.ndim == 1:
+        out = squeeze(out, axis=-2)
+    if b.ndim == 1:
+        out = squeeze(out, axis=-1)
+    return out
+
 
 def matmul_slower(a: Computation, b: Computation) -> Computation:
     """Matrix product of two arrays with element-wise scaling of the result.

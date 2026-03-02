@@ -55,13 +55,16 @@ class Computation:
     def tree_flatten(self) -> tuple[tuple[Any], FrozenDict]:
         """Flattens the computation node for JAX pytree compatibility."""
         init_args = inspect.signature(self.__init__).parameters
-        aux_data = {attr: getattr(self, attr) for attr in init_args if attr != "value"}
-        return (self.value,), freeze(aux_data)
+        aux_data = {attr: getattr(self, attr) for attr in init_args if attr not in ("parents")}
+        return (self.parents), freeze(aux_data)
 
     @classmethod
     def tree_unflatten(cls, aux_data: FrozenDict, children: tuple[Any]) -> Computation:
         """Reconstructs a computation node from pytree aux_data and children."""
-        return cls(value=children[0], **aux_data)
+        kwargs = dict(aux_data)
+        if "parents" in inspect.signature(cls.__init__).parameters:
+            kwargs["parents"] = children
+        return cls(**kwargs)
 
     def _set_vmap_ids(self, vmap_ids: Sequence[int | None]):
         """Returns a copy of this computation with updated vmap (vectorization) ids."""

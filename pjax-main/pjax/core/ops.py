@@ -156,7 +156,7 @@ def max_proj(a, z, /):
     # select candidate minimizing distance
     k = jnp.argmin(dist_valid)
     
-    return (a_k[k][jnp.argsort(idx)].astype(jnp.bfloat16),)
+    return (a_k[k][jnp.argsort(idx)],)
 
 
 max = make_computation("max", max_op, max_proj)
@@ -347,40 +347,29 @@ def dotproduct_op(a, b, /):
 
 def bilinear_proj(a, b, z, /):
     """Project onto bilinear function graph using a bounded Newton's method."""
-    original_dtype = a.dtype
-    
-    a = a.astype(jnp.float32)
-    b = b.astype(jnp.float32)
-    z = z.astype(jnp.float32)
-    
+
     p = jnp.dot(a, b)
     q = jnp.dot(a, a) + jnp.dot(b, b)
 
-    # CORRECTED: Removed the invalid '+ t' mutation to exactly match 
-    # the quartic root equation for hyperbolas.
     def f(t):
         return ((1.0 + t**2) * p + t * q) / ((1.0 - t**2) ** 2) - z
 
     f_prime = jax.grad(f)
 
     def safe_newton_step(t):
-        # Added epsilon to gradient to prevent division-by-zero on flat regions
         step = f(t) / (f_prime(t) + 1e-8)
         
-        # CORRECTED: Rigidly bound t within the open interval (-1, 1).
-        # We clip at +/- 0.999 to prevent hitting the asymptotes and causing inversion.
         return jnp.clip(t - step, -0.999, 0.999)
     
-    # CORRECTED: Removed unroll=True to prevent massive XLA graph bloat
     t = jax.lax.fori_loop(0, config.bilinear_projection_num_newton_steps, lambda _, t: safe_newton_step(t), 0.0)
 
     a_new = (a + t * b) / (1.0 - t**2)
     b_new = (b + t * a) / (1.0 - t**2)
     
     
-    return a_new.astype(original_dtype), b_new.astype(original_dtype)
+    return a_new, b_new
 
-dot = make_computation("dot", dotproduct_op, bilinear_proj)
+dot = make_computation("dot", dotproduct_op, hyperbola_proj_l1)
 
 def sum_step_activation_op(*args):
     """Sum inputs and apply step activation."""
@@ -665,10 +654,124 @@ def bilinear_proj_fast(a, b, z, /):
     
     return a_new, b_new
 
+def hyperbola_proj_l1(x0, y0, gamma):
+    eps = 1e-8
+    
+    c1 = x0
+    b_safe = jnp.where(jnp.abs(y0) > eps, y0, 1.0)
+    c2 = jnp.where(jnp.abs(y0) > eps, gamma / b_safe, 0.0)
+    c3 = jnp.sqrt(jnp.abs(gamma)) * jnp.ones_like(x0)
+    c4 = -c3
+    
+    candidates = jnp.stack([c1, c2, c3, c4], axis=-1)
+    
+    x_safe = jnp.where(jnp.abs(candidates) > eps, candidates, 1.0)
+    y_cand = jnp.expand_dims(gamma, -1) / x_safe
+    y_cand = jnp.where(jnp.abs(candidates) > eps, y_cand, 0.0)
+    
+    dx = jnp.abs(candidates - jnp.expand_dims(x0, -1))
+    dy = jnp.abs(y_cand - jnp.expand_dims(y0, -1))
+    
+    dists = dx + dy + jnp.where(jnp.abs(candidates) > eps, 0.0, 1e9)
+    
+    best_idx = jnp.argmin(dists, axis=-1, keepdims=True)
+    x_proj = jnp.take_along_axis(candidates, best_idx, axis=-1).squeeze(-1)
+    
+    x_proj_safe = jnp.where(jnp.abs(x_proj) > eps, x_proj, 1.0)
+    y_proj = jnp.where(jnp.abs(x_proj) > eps, gamma / x_proj_safe, 0.0)
+    
+    is_zero = (gamma == 0)
+    dist_to_x = jnp.abs(y0)
+    dist_to_y = jnp.abs(x0)
+    proj_zero_x = jnp.where(dist_to_x < dist_to_y, x0, 0.0)
+    proj_zero_y = jnp.where(dist_to_x < dist_to_y, 0.0, y0)
+    
+    x_final = jnp.where(is_zero, proj_zero_x, x_proj)
+    y_final = jnp.where(is_zero, proj_zero_y, y_proj)
+    
+    return x_final, y_final
+
+def hyperbola_proj_linf(x0, y0, gamma):
+    eps = 1e-8
+    
+    c1 = x0
+    b_safe = jnp.where(jnp.abs(y0) > eps, y0, 1.0)
+    c2 = jnp.where(jnp.abs(y0) > eps, gamma / b_safe, 0.0)
+    
+    b1 = y0 - x0
+    det1 = b1**2 + 4 * gamma
+    valid1 = det1 >= 0
+    sqrt_det1 = jnp.sqrt(jnp.maximum(det1, 0.0))
+    c3 = jnp.where(valid1, (-b1 + sqrt_det1) / 2.0, 1.0)
+    c4 = jnp.where(valid1, (-b1 - sqrt_det1) / 2.0, 1.0)
+    
+    b2 = -(y0 + x0)
+    det2 = b2**2 - 4 * gamma
+    valid2 = det2 >= 0
+    sqrt_det2 = jnp.sqrt(jnp.maximum(det2, 0.0))
+    c5 = jnp.where(valid2, (-b2 + sqrt_det2) / 2.0, 1.0)
+    c6 = jnp.where(valid2, (-b2 - sqrt_det2) / 2.0, 1.0)
+    
+    candidates = jnp.stack([c1, c2, c3, c4, c5, c6], axis=-1)
+    
+    valid_mask = jnp.stack([
+        jnp.ones_like(x0, dtype=bool),
+        jnp.abs(y0) > eps,
+        valid1, valid1, valid2, valid2
+    ], axis=-1)
+    
+    x_safe = jnp.where(jnp.abs(candidates) > eps, candidates, 1.0)
+    y_cand = jnp.expand_dims(gamma, -1) / x_safe
+    y_cand = jnp.where(jnp.abs(candidates) > eps, y_cand, 0.0)
+    valid_mask = valid_mask & (jnp.abs(candidates) > eps)
+    
+    dx = jnp.abs(candidates - jnp.expand_dims(x0, -1))
+    dy = jnp.abs(y_cand - jnp.expand_dims(y0, -1))
+    dists = jnp.maximum(dx, dy) + jnp.where(valid_mask, 0.0, 1e9)
+    
+    best_idx = jnp.argmin(dists, axis=-1, keepdims=True)
+    x_proj = jnp.take_along_axis(candidates, best_idx, axis=-1).squeeze(-1)
+    
+    x_proj_safe = jnp.where(jnp.abs(x_proj) > eps, x_proj, 1.0)
+    y_proj = jnp.where(jnp.abs(x_proj) > eps, gamma / x_proj_safe, 0.0)
+    
+    is_zero = (gamma == 0)
+    dist_to_x = jnp.abs(y0)
+    dist_to_y = jnp.abs(x0)
+    proj_zero_x = jnp.where(dist_to_x < dist_to_y, x0, 0.0)
+    proj_zero_y = jnp.where(dist_to_x < dist_to_y, 0.0, y0)
+    
+    x_final = jnp.where(is_zero, proj_zero_x, x_proj)
+    y_final = jnp.where(is_zero, proj_zero_y, y_proj)
+    
+    return x_final, y_final
+
+def bilinear_proj_l1(a, b, z, /):
+    def body_fn(i, val):
+        a_curr, b_curr = val
+        p = a_curr * b_curr
+        err = (z - jnp.sum(p)) / a_curr.size
+        target = p + err
+        return hyperbola_proj_l1(a_curr, b_curr, target)
+    
+    return jax.lax.fori_loop(0, config.bilinear_projection_num_newton_steps, body_fn, (a, b))
+
+def bilinear_proj_linf(a, b, z, /):
+    def body_fn(i, val):
+        a_curr, b_curr = val
+        p = a_curr * b_curr
+        err = (z - jnp.sum(p)) / a_curr.size
+        target = p + err
+        return hyperbola_proj_linf(a_curr, b_curr, target)
+    
+    return jax.lax.fori_loop(0, config.bilinear_projection_num_newton_steps, body_fn, (a, b))
+
 # --- Config-based dispatch for bilinear ---
 _bilinear_methods = {
     "original": bilinear_proj,      # float32 cast + jax.grad
     "fast": bilinear_proj_fast,     # hand-coded f_and_f_prime
+    "l1": bilinear_proj_l1,
+    "linf": bilinear_proj_linf,
 }
 
 def bilinear(a, b, z, /):
@@ -716,9 +819,23 @@ _bilinear_matrix_methods = {
     "parr": bilinearMatrix_parr,  # jax.vmap + mean
 }
 
-def bilinear_matrix(a, B, z):
+def bilinear_matrix(a, B, z, method_override_key=None):
     """Dispatch to the configured bilinear matrix projection method."""
-    return _bilinear_matrix_methods[config.bilinear_matrix_method](a, B, z)
+    method_func = _bilinear_matrix_methods[config.bilinear_matrix_method]
+    if method_override_key is not None:
+        if method_func is bilinearMatrix_seq:
+            def scan_body_override(a_curr, x):
+                b_col, zi = x
+                a_new, b_proj = _bilinear_methods[method_override_key](a_curr, b_col, zi)
+                return a_new, b_proj
+            a_final, b_projections = jax.lax.scan(scan_body_override, a, (B.T, z))
+            return a_final, b_projections.T
+        elif method_func is bilinearMatrix_parr:
+            def proj_single_override(b, zi):
+                return _bilinear_methods[method_override_key](a, b, zi)
+            a_buffer, projection_B = jax.vmap(proj_single_override, in_axes=(1, 0), out_axes=(0, 1))(B, z)
+            return jnp.mean(a_buffer, axis=0), projection_B
+    return method_func(a, B, z)
 
 def matmul_proj_seq(a, b, z, /):
     """
@@ -781,6 +898,93 @@ _matmul_proj_methods = {
     "seq": matmul_proj_seq,    # jax.lax.scan over batch
     "parr": matmul_proj_parr,  # jax.vmap over batch
 }
+
+def matmul_proj_dispatch(a, b, z, /):
+    """Dispatch to the configured matmul projection method."""
+    return _matmul_proj_methods[config.matmul_proj_method](a, b, z)
+
+
+def matmul_proj_seq_l1(a, b, z, /):
+    def _project_single(a_matrix, b_matrix, z_matrix):
+        a_batched = jnp.atleast_2d(a_matrix)
+        z_batched = jnp.atleast_2d(z_matrix)
+        def scan_body(b_curr, x):
+            a_sample, z_sample = x
+            a_final, b_new = _bilinear_matrix_methods[config.bilinear_matrix_method](a_sample, b_curr, z_sample, "l1")
+            return b_new, a_final
+        b_final, a_result = jax.lax.scan(scan_body, b_matrix, (a_batched, z_batched))
+        if a_matrix.ndim == 1:
+            a_result = a_result[0]
+        return a_result, b_final
+
+    if a.ndim <= 2:
+        return _project_single(a, b, z)
+
+    batch_shape = a.shape[:-2]
+    a_batch = a.reshape((-1,) + a.shape[-2:])
+    z_batch = z.reshape((-1,) + z.shape[-2:])
+
+    def batch_scan_body(b_curr, x):
+        a_sample, z_sample = x
+        a_final, b_new = _project_single(a_sample, b_curr, z_sample)
+        return b_new, a_final
+
+    b_final, a_result = jax.lax.scan(batch_scan_body, b, (a_batch, z_batch))
+    a_result = a_result.reshape(batch_shape + a_result.shape[1:])
+    return a_result, b_final
+
+def matmul_proj_parr_l1(a, b, z, /):
+    def process_sample(a_sample, z_sample):
+        return _bilinear_matrix_methods[config.bilinear_matrix_method](a_sample, b, z_sample, "l1")
+    a_buffer, b_buffer = jax.vmap(process_sample, in_axes=(0, 0))(a, z)
+    return a_buffer, jnp.mean(b_buffer, axis=0)
+
+def matmul_proj_dispatch_l1(a, b, z, /):
+    methods = {"seq": matmul_proj_seq_l1, "parr": matmul_proj_parr_l1}
+    return methods[config.matmul_proj_method](a, b, z)
+
+matmul_l1 = make_computation("matmul_l1", matmul_op, matmul_proj_dispatch_l1)
+
+def matmul_proj_seq_linf(a, b, z, /):
+    def _project_single(a_matrix, b_matrix, z_matrix):
+        a_batched = jnp.atleast_2d(a_matrix)
+        z_batched = jnp.atleast_2d(z_matrix)
+        def scan_body(b_curr, x):
+            a_sample, z_sample = x
+            a_final, b_new = _bilinear_matrix_methods[config.bilinear_matrix_method](a_sample, b_curr, z_sample, "linf")
+            return b_new, a_final
+        b_final, a_result = jax.lax.scan(scan_body, b_matrix, (a_batched, z_batched))
+        if a_matrix.ndim == 1:
+            a_result = a_result[0]
+        return a_result, b_final
+
+    if a.ndim <= 2:
+        return _project_single(a, b, z)
+
+    batch_shape = a.shape[:-2]
+    a_batch = a.reshape((-1,) + a.shape[-2:])
+    z_batch = z.reshape((-1,) + z.shape[-2:])
+
+    def batch_scan_body(b_curr, x):
+        a_sample, z_sample = x
+        a_final, b_new = _project_single(a_sample, b_curr, z_sample)
+        return b_new, a_final
+
+    b_final, a_result = jax.lax.scan(batch_scan_body, b, (a_batch, z_batch))
+    a_result = a_result.reshape(batch_shape + a_result.shape[1:])
+    return a_result, b_final
+
+def matmul_proj_parr_linf(a, b, z, /):
+    def process_sample(a_sample, z_sample):
+        return _bilinear_matrix_methods[config.bilinear_matrix_method](a_sample, b, z_sample, "linf")
+    a_buffer, b_buffer = jax.vmap(process_sample, in_axes=(0, 0))(a, z)
+    return a_buffer, jnp.mean(b_buffer, axis=0)
+
+def matmul_proj_dispatch_linf(a, b, z, /):
+    methods = {"seq": matmul_proj_seq_linf, "parr": matmul_proj_parr_linf}
+    return methods[config.matmul_proj_method](a, b, z)
+
+matmul_linf = make_computation("matmul_linf", matmul_op, matmul_proj_dispatch_linf)
 
 def matmul_proj_dispatch(a, b, z, /):
     """Dispatch to the configured matmul projection method."""

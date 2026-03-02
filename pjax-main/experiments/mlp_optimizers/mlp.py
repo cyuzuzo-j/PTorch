@@ -54,7 +54,7 @@ class MLP_pjax(nn.Module):
     """
 
 
-    def __init__(self, hidden_features, in_features, classes, skip=True):
+    def __init__(self, hidden_features, in_features, classes, skip=False):
         super().__init__()
         self.hidden_features = hidden_features
         self.skip = skip
