@@ -24,8 +24,8 @@ fake = Faker()
 
 BATCH_SIZE = 128
 RANDOM_SEED = 42
-PROJECTION_STEPS = 10
-MAX_STEPS = 1000
+PROJECTION_STEPS = 50
+MAX_STEPS = 10_000
 NUM_RUNS = 3
 jax_random_key = jax.random.key(RANDOM_SEED)
 
@@ -39,62 +39,6 @@ tasks = [
 ]
 
 optimizers = [
-    {
-        "name": "AP",
-        "optimizer":optim.AlternatingProjections(steps_per_update=PROJECTION_STEPS),
-    },
-    {
-        "name": "AP++",
-        "optimizer":optim.AlternatingProjectionsMonumentum(steps_per_update=PROJECTION_STEPS),
-    },
-    {
-        "name": "DR (0.5)",
-        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=0.5),
-    },
-    {
-        "name": "DR (0.75)",
-        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=0.75),
-    },
-    {
-        "name": "DR (1)",
-        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=1),
-    },
-    {
-        "name": "DR (1.5)",
-        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=1.5),
-    },
-    {
-        "name": "DR (2)",
-        "optimizer":optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=2),
-    },
-    {
-        "name": "DR (0.1)",
-        "optimizer": optim.DouglasRachford(steps_per_update=PROJECTION_STEPS, relaxation=0.1),
-    },
-    {
-        "name": "DR++ (0.1)",
-        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=0.1),
-    },
-    {
-        "name": "DR++ (0.5)",
-        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=0.5),
-    },
-    {
-        "name": "DR++ (0.75)",
-        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=0.75),
-    },
-    {
-        "name": "DR++ (1)",
-        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=1),
-    },
-    {
-        "name": "DR++ (1.5)",
-        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=1.5),
-    },
-    {
-        "name": "DR++ (2)",
-        "optimizer": optim.DouglasRachfordMonumentum(steps_per_update=PROJECTION_STEPS, relaxation=2),
-    } ,
     {
         "name": "Dykstra",
         "optimizer": optim.Dykstra(steps_per_update=PROJECTION_STEPS),
