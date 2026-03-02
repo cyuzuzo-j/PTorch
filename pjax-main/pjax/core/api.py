@@ -65,25 +65,44 @@ def _unary_op(op, a: Computation, axis: Axis = None, keepdims: bool = False) -> 
         axis = tuple(range(a.ndim))
     if isinstance(axis, int):
         axis = (axis,)
+    axis = tuple(ax if ax >= 0 else a.ndim + ax for ax in axis)
+    axis = tuple(sorted(set(axis)))
 
-    def fn(a):
-        out = op(reshape(a, -1))
+    keep_axes = [ax for ax in range(a.ndim) if ax not in axis]
+    reduce_axes = list(axis)
+
+    def reduce_flat(x):
+        return op(reshape(x, -1))
+
+    if not keep_axes:
+        out = reduce_flat(a)
         if keepdims:
             out = reshape(out, [1] * a.ndim)
         return out
 
-    for ax in range(a.ndim):
-        if ax not in axis:
-            if keepdims:
-                fn = vmap(fn, in_axes=ax, out_axes=ax)
-            else:
-                fn = vmap(fn, in_axes=ax, out_axes=-1)
+    perm = tuple(keep_axes + reduce_axes)
+    a_perm = transpose(a, perm)
 
-    return fn(a)
+    keep_shape = [a.shape[ax] for ax in keep_axes]
+    reduce_shape = [a.shape[ax] for ax in reduce_axes]
+    keep_size = math.prod(keep_shape)
+    reduce_size = math.prod(reduce_shape)
+
+    a_2d = reshape(a_perm, (keep_size, reduce_size))
+    out = vmap(reduce_flat, in_axes=0, out_axes=0)(a_2d)
+    out = reshape(out, keep_shape)
+
+    if keepdims:
+        full_shape = [a.shape[ax] if ax in keep_axes else 1 for ax in range(a.ndim)]
+        out = reshape(out, full_shape)
+
+    return out
 
 
 def identity(a: Computation) -> Computation:
-    """Identity function that returns the input unchanged.
+    """Identity function that returns the input unpjax.max altogether and implement max pooling using operations that preserve dimension order:
+    
+    changed.
 
     Args:
         a: input array.
@@ -146,6 +165,38 @@ def maximum(a: Computation, b: Computation) -> Computation:
         array containing the element-wise maximum of the two arrays.
     """
     return max_(stack(broadcast_arrays(a, b)), axis=0)
+
+
+def maxpool(
+    a: Computation,
+    *,
+    pool_size: Sequence[int] = (2, 2),
+    strides: Sequence[int] = (2, 2),
+    padding: str = "VALID",
+) -> Computation:
+    """Max pool over spatial dimensions for 4D inputs (NHWC)."""
+    return ops.maxpool(a, pool_size=pool_size, strides=strides, padding=padding)
+
+
+def batchnorm(
+    a: Computation,
+    *,
+    eps: float = 1e-5,
+) -> Computation:
+    """Batch normalization as a parameter-free shape transform.
+
+    Normalizes ``a`` across all dimensions except the last (features)::
+
+        output = (a - mean) / sqrt(var + eps)
+
+    Args:
+        a: input array of shape ``(N, ..., features)``.
+        eps: small constant for numerical stability.
+
+    Returns:
+        Normalized array with the same shape as ``a``.
+    """
+    return no_ops.batchnorm(a, eps=eps)
 
 
 def dot(a: Computation, b: Computation) -> Computation:
@@ -283,12 +334,6 @@ def relu(a: Computation) -> Computation:
 
     Returns:
         array with ReLU activation applied element-wise.
-    """
-    return ops.sum_relu(a)
-def generalized_relu(a: Computation) -> Computation:
-    """
-    Generalized Rectified Linear Unit activation function.
-    Handles complex inputs
     """
     return ops.sum_relu(a)
 

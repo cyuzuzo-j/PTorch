@@ -38,7 +38,7 @@ class Parameter:
 class Weight(Parameter):
     """Learnable weight parameter with He normal initialization."""
 
-    def __init__(self, shape: Sequence[int], dtype: jnp.dtype = jnp.complex64, init_fn: Callable | None = None):
+    def __init__(self, shape: Sequence[int], dtype: jnp.dtype = jnp.bfloat16, init_fn: Callable | None = None):
         def default_init_fn(key, shape, dtype):
             return jax.nn.initializers.he_normal()(key, shape, dtype)
 
@@ -48,7 +48,7 @@ class Weight(Parameter):
 class Bias(Parameter):
     """Learnable bias parameter initialized to zeros."""
 
-    def __init__(self, shape: Sequence[int], dtype: jnp.dtype = jnp.float32):
+    def __init__(self, shape: Sequence[int], dtype: jnp.dtype = jnp.bfloat16):
         super().__init__(shape, dtype)
 
 
@@ -138,6 +138,36 @@ class Linear(Module):
     def __call__(self, input):
         return pjax.matmul(input, self.weight)
 
+
+class LinearBias(Module):
+    """Linear (fully connected) layer with bias.
+
+    Applies a linear transformation with bias: :math:`\\text{output} = \\text{input} \\times \\text{weight} + \\text{bias}`.
+    
+    The bias is implemented by expanding the weight matrix to include an additional column,
+    and augmenting the input with ones at call time.
+
+    Args:
+        in_features: number of input features.
+        out_features: number of output features.
+
+    Attributes:
+        weight: learnable weight matrix of shape ``(in_features + 1, out_features)``,
+                where the last row contains the bias values.
+    """
+
+    def __init__(self, in_features: int, out_features: int):
+        super().__init__()
+        # Weight includes extra row for bias
+        self.weight = Weight((in_features + 1, out_features))
+
+    def __call__(self, input):
+        # Append ones to input for bias computation
+        ones = jnp.ones((*input.shape[:-1], 1))
+        augmented_input = pjax.concatenate([input, ones], axis=-1)
+        return pjax.matmul(augmented_input, self.weight)
+
+
 class LinearOld(Module):
     """Linear (fully connected) layer without bias.
 
@@ -178,12 +208,33 @@ class ReLU(Module):
     def __call__(self, *inputs):
         return pjax.sum_relu(self.bias, *inputs)
 
+
+class ReLU_NB(Module):
+    """Rectified Linear Unit with bias.
+
+    Applies ReLU activation function with a learnable bias parameter.
+    Supports multiple inputs for element-wise activation.
+
+    Args:
+        features: number of features/neurons in the layer.
+
+    Attributes:
+        bias: learnable bias vector of shape ``(features,)``.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def __call__(self, *inputs):
+        return pjax.sum_relu(*inputs)
+
 class Step(Module):
     def __init__(self, features):
         super().__init__()
         self.bias = Bias((features,))
     def __call__(self, *inputs):
         return pjax.step(self.bias, *inputs)
+    
 class MultiHeadAttention(Module):
     """Multi-head attention mechanism for transformer architectures.
 
@@ -278,7 +329,7 @@ class Conv2D(Module):
         super().__init__()
 
         self.conv_patch = partial(pjax.conv_patch, kernel_shape=kernel_shape, strides=strides, padding=padding)
-        self.linear = Linear(int(in_channels * np.prod(kernel_shape)), out_channels)
+        self.linear = LinearBias(int(in_channels * np.prod(kernel_shape)), out_channels)
 
     def __call__(self, input):
         """Apply convolution to input tensor.
@@ -412,7 +463,6 @@ class MaxPool2D(Module):
         self.pool_size = pool_size
         self.strides = strides
         self.padding = padding
-        self.conv_patch = partial(pjax.conv_patch, kernel_shape=pool_size, strides=strides, padding=padding)
 
     def __call__(self, input):
         """Apply max pooling to input tensor.
@@ -423,14 +473,34 @@ class MaxPool2D(Module):
         Returns:
             output tensor after max pooling.
         """
-        patches = self.conv_patch(input)
-        
-        hk, wk = self.pool_size
-        kernel_size = hk * wk
-        
-        # Reshape to separate channels and pooling window
-        # patches shape: (N, H_out, W_out, C * Hk * Wk) -> (N, H_out, W_out, C, Hk * Wk)
-        patches = pjax.reshape(patches, (*patches.shape[:-1], -1, kernel_size))
-        
-        out = pjax.max(patches, axis=-1)
-        return out
+        return pjax.maxpool(input, pool_size=self.pool_size, strides=self.strides, padding=self.padding)
+    
+
+class BatchNorm(Module):
+    """Batch normalization layer (parameter-free).
+
+    Normalizes input across all dimensions except the last (features)
+    to stabilize training. Implemented as an invertible shape transform
+    with no learnable parameters::
+
+        output = (input - mean) / sqrt(var + eps)
+
+    Args:
+        eps: small constant for numerical stability.
+    """
+
+    def __init__(self, eps: float = 1e-5):
+        super().__init__()
+        self.eps = eps
+
+    def __call__(self, input):
+        """Apply batch normalization.
+
+        Args:
+            input: tensor of shape ``(N, ..., features)``.
+
+        Returns:
+            Normalized tensor with the same shape as ``input``.
+        """
+        return pjax.batchnorm(input, eps=self.eps)
+

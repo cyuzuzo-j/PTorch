@@ -30,6 +30,7 @@ patch2 = jax.lax.conv_general_dilated_patches(
     padding="VALID",
     dimension_numbers=("NHWC", "HWIO", "NHWC"),
 )
+
 print("\nFirst patch with C=2:")
 print(patch2[0, 0, 0, :])
 

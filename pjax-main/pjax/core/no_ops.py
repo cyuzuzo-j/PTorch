@@ -15,6 +15,43 @@ from jax import numpy as jnp
 from .computation import make_shape_transform
 
 
+def batchnorm_transform(a, /, *, eps=1e-5):
+    """Batch normalization as a parameter-free shape transform.
+
+    Normalizes ``a`` across all dimensions except the last (features)::
+
+        output = (a - mean) / sqrt(var + eps)
+
+    Args:
+        a: input array of shape ``(N, ..., features)``.
+        eps: small constant for numerical stability.
+
+    Returns:
+        Normalized array with the same shape as ``a``.
+    """
+    reduce_axes = tuple(range(a.ndim - 1))
+    mean = jnp.mean(a, axis=reduce_axes, keepdims=True)
+    var = jnp.var(a, axis=reduce_axes, keepdims=True)
+    return (a - mean) / jnp.sqrt(var + eps)
+
+
+def batchnorm_inverse(a, z, /, *, eps=1e-5):
+    """Inverse of batch normalization: denormalize using original statistics.
+
+    Restores from normalized space back to input space using the mean and
+    variance computed from the original input ``a``.
+    """
+    reduce_axes = tuple(range(a.ndim - 1))
+    mean = jnp.mean(a, axis=reduce_axes, keepdims=True)
+    var = jnp.var(a, axis=reduce_axes, keepdims=True)
+    return z * jnp.sqrt(var + eps) + mean
+
+
+batchnorm = make_shape_transform(
+    "batchnorm", transform=batchnorm_transform, inverse=batchnorm_inverse
+)
+
+
 def index_transform(a, idx, /):
     """Index a tensor."""
     assert isinstance(a, jnp.ndarray)

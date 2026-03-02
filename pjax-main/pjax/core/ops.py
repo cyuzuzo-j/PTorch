@@ -8,6 +8,7 @@ The operation computes the forward pass, while the projection operator
 computes the orthogonal projection onto the function's graph.
 """
 
+import builtins
 import jax
 from jax import numpy as jnp
 from jax import jacrev
@@ -43,6 +44,83 @@ def sum_proj(a, z, /):
 
 sum_ = make_computation("sum", sum_op, sum_proj)
 
+def _resolve_pool_padding(input_shape, pool_size, strides, padding):
+    if isinstance(padding, str):
+        if padding.upper() == "VALID":
+            return (0, 0), (0, 0)
+        if padding.upper() != "SAME":
+            raise ValueError(f"Unsupported padding: {padding}")
+        in_h, in_w = input_shape
+        ph, pw = pool_size
+        sh, sw = strides
+        out_h = (in_h + sh - 1) // sh
+        out_w = (in_w + sw - 1) // sw
+        pad_h = builtins.max(0, (out_h - 1) * sh + ph - in_h)
+        pad_w = builtins.max(0, (out_w - 1) * sw + pw - in_w)
+        pad_top = pad_h // 2
+        pad_left = pad_w // 2
+        pad_bottom = pad_h - pad_top
+        pad_right = pad_w - pad_left
+        return (pad_top, pad_bottom), (pad_left, pad_right)
+    return padding
+
+
+def maxpool_op(a, /, *, pool_size=(2, 2), strides=(2, 2), padding="VALID"):
+    """MaxPool operation for 4D arrays with shape (batch, height, width, channels)."""
+    assert a.ndim == 4
+    window = (1, pool_size[0], pool_size[1], 1)
+    window_strides = (1, strides[0], strides[1], 1)
+    return jax.lax.reduce_window(a, -jnp.inf, jax.lax.max, window, window_strides, padding)
+
+
+def maxpool_proj(a, z, /, *, pool_size=(2, 2), strides=(2, 2), padding="VALID"):
+    """Project onto max pooling function graph for non-overlapping windows."""
+    assert a.ndim == 4 and z.ndim == 4
+    if tuple(pool_size) != tuple(strides):
+        raise ValueError("maxpool projection requires strides == pool_size")
+    n, h_in, w_in, c = a.shape
+    ph, pw = pool_size
+    sh, sw = strides
+    (pad_top, pad_bottom), (pad_left, pad_right) = _resolve_pool_padding(
+        (h_in, w_in), pool_size, strides, padding
+    )
+    h_pad = h_in + pad_top + pad_bottom
+    w_pad = w_in + pad_left + pad_right
+    patches = jax.lax.conv_general_dilated_patches(
+        a,
+        filter_shape=pool_size,
+        window_strides=strides,
+        padding=padding,
+        dimension_numbers=("NHWC", "HWIO", "NHWC"),
+    )
+    h_out, w_out = patches.shape[1], patches.shape[2]
+    patches = patches.reshape(n, h_out, w_out, c, ph * pw)
+    flat_patches = patches.reshape(-1, ph * pw)
+    flat_z = z.reshape(-1)
+    proj_flat = jax.vmap(lambda a_vec, z_scalar: max_proj(a_vec, z_scalar)[0])(
+        flat_patches, flat_z
+    )
+    proj_patches = proj_flat.reshape(n, h_out, w_out, c, ph, pw)
+    proj_patches = proj_patches.transpose(0, 1, 4, 2, 5, 3)
+    proj_cover = proj_patches.reshape(n, h_out * ph, w_out * pw, c)
+    h_cov = min(proj_cover.shape[1], h_pad)
+    w_cov = min(proj_cover.shape[2], w_pad)
+    proj_cover = proj_cover[:, :h_cov, :w_cov, :]
+    pad_h = h_pad - h_cov
+    pad_w = w_pad - w_cov
+    if pad_h or pad_w:
+        proj_cover = jnp.pad(
+            proj_cover,
+            ((0, 0), (0, pad_h), (0, pad_w), (0, 0)),
+            mode="constant",
+            constant_values=0.0,
+        )
+    proj_input = proj_cover[:, pad_top : pad_top + h_in, pad_left : pad_left + w_in, :]
+    covered_pad = jnp.zeros((1, h_pad, w_pad, 1), dtype=bool)
+    covered_pad = covered_pad.at[:, :h_cov, :w_cov, :].set(True)
+    covered = covered_pad[:, pad_top : pad_top + h_in, pad_left : pad_left + w_in, :]
+    a_proj = jnp.where(covered, proj_input, a)
+    return (a_proj,)
 
 def max_op(a, /):
     """Maximum operation for 1D arrays."""
@@ -78,10 +156,14 @@ def max_proj(a, z, /):
     # select candidate minimizing distance
     k = jnp.argmin(dist_valid)
     
-    return (a_k[k][jnp.argsort(idx)].astype(jnp.complex64),)
+    return (a_k[k][jnp.argsort(idx)].astype(jnp.bfloat16),)
 
 
 max = make_computation("max", max_op, max_proj)
+
+maxpool = make_computation("maxpool", maxpool_op, maxpool_proj)
+
+
 def _solve_reduced_system(a_val, b_val, y_val):
     """
     Solves the projection using the reduced 2x2 system (Real/Imag of L)
@@ -264,30 +346,39 @@ def dotproduct_op(a, b, /):
 
 
 def bilinear_proj(a, b, z, /):
-    """Project onto bilinear function graph using Newton's method."""
+    """Project onto bilinear function graph using a bounded Newton's method."""
+    original_dtype = a.dtype
+    
     a = a.astype(jnp.float32)
     b = b.astype(jnp.float32)
     z = z.astype(jnp.float32)
-    p = a @ b
-    q = a @ a + b @ b
+    
+    p = jnp.dot(a, b)
+    q = jnp.dot(a, a) + jnp.dot(b, b)
 
+    # CORRECTED: Removed the invalid '+ t' mutation to exactly match 
+    # the quartic root equation for hyperbolas.
     def f(t):
-        return ((1 + t**2) * p + t * q) / (1 - t**2) ** 2 - z + t
+        return ((1.0 + t**2) * p + t * q) / ((1.0 - t**2) ** 2) - z
 
     f_prime = jax.grad(f)
 
-    def newton_step(t):
-        return t - f(t) / f_prime(t)
-
+    def safe_newton_step(t):
+        # Added epsilon to gradient to prevent division-by-zero on flat regions
+        step = f(t) / (f_prime(t) + 1e-8)
+        
+        # CORRECTED: Rigidly bound t within the open interval (-1, 1).
+        # We clip at +/- 0.999 to prevent hitting the asymptotes and causing inversion.
+        return jnp.clip(t - step, -0.999, 0.999)
     
-    t = jax.lax.fori_loop(0, config.bilinear_projection_num_newton_steps, lambda _, t: newton_step(t), 0.0, unroll=True)
+    # CORRECTED: Removed unroll=True to prevent massive XLA graph bloat
+    t = jax.lax.fori_loop(0, config.bilinear_projection_num_newton_steps, lambda _, t: safe_newton_step(t), 0.0)
 
-    a_new = (a + t * b) / (1 - t**2)
-    b_new = (b + t * a) / (1 - t**2)
-    a_new = a_new.astype(jnp.complex64)
-    b_new = b_new.astype(jnp.complex64)
-    return a_new, b_new
-
+    a_new = (a + t * b) / (1.0 - t**2)
+    b_new = (b + t * a) / (1.0 - t**2)
+    
+    
+    return a_new.astype(original_dtype), b_new.astype(original_dtype)
 
 dot = make_computation("dot", dotproduct_op, bilinear_proj)
 
@@ -535,192 +626,165 @@ def corss_entropy_prox(logits, labels, _, /):
 
 cross_entropy = make_computation("cross_entropy", cross_entropy_op, corss_entropy_prox)
 
+
 def matmul_op(a, b, /):
     """Matrix multiplication operation."""
     return jnp.matmul(a, b)
+
+def bilinear_proj_fast(a, b, z, /):
+    """Project onto bilinear function graph using a bounded Newton's method."""        
+    p = jnp.dot(a, b)
+    q = jnp.dot(a, a) + jnp.dot(b, b)
+
+    def f_and_f_prime(t):
+        t2 = t**2
+        one_minus_t2 = 1.0 - t2
+        
+        N = (1.0 + t2) * p + t * q
+        f_val = (N / (one_minus_t2**2)) - z
+        
+        N_prime = 2.0 * t * p + q
+        f_prime_val = ((N_prime * one_minus_t2) + 4.0 * t * N) / (one_minus_t2**3)
+        
+        return f_val, f_prime_val
     
-def matmul_proj(a, b, z, /):
-    """Project onto matrix multiplication constraint."""
-    # helper to compute projection for a single matrix multiplication
-    # (M, K) @ (K, N) = (M, N)
-    def project_2d(a, b, z):
-        # We handle this by vmapping the bilinear projection logic over the M and N dimensions
-        # a: (M, K), b: (K, N), z: (M, N)
-        
-        # Expand dims to broadcast against each other
-        # a_exp: (M, 1, K)
-        # b_exp: (1, N, K) (transpose b for easier dot product alignment if using bilinear_proj logic)
-        # But wait, bilinear_proj assumes dot product a.b = z.
-        # matmul element z_ij = row_i(a) . col_j(b)
-        
-        M, K = a.shape
-        N = b.shape[1]
-        
-        # Prepare inputs for M*N dot product projections
-        # We want to project (row_i, col_j, z_ij) -> (row_i_new, col_j_new) for all i, j
-        
-        a_rows = a[:, None, :]  # (M, 1, K)
-        b_cols = b.T[None, :, :] # (1, N, K). Note b is (K, N), so b.T is (N, K).
-        z_vals = z[:, :, None] # (M, N, 1) to match dimensionality if needed, or just (M, N)
-        
-        # we can use vectorized bilinear_proj
-        # bilinear_proj takes (K,), (K,), () -> (K,), (K,)
-        # We map over M and N.
-        
-        # vmap over N (cols of b)
-        # vmap over M (rows of a)
-        # vmap over K is inside bilinear_proj (dot product)
-        
-        # bilinear_proj_vmapped = jax.vmap(jax.vmap(bilinear_proj, in_axes=(None, 0, 0)), in_axes=(0, None, 0))
-        # Wait, if we use in_axes=(None, 0, 0) for the inner vmap (over N):
-        #   a (one row) is shared (None).
-        #   b (all cols) are mapped (0).
-        #   z (row of scalars) is mapped (0).
-        # Output: (N, K), (N, K) -> updates for the row of A, updates for all cols of B.
-        
-        # Outer vmap (over M):
-        #   a (all rows) are mapped (0).
-        #   b (cols) are shared (None) -> actually passed as full array
-        #   z (matrix) is mapped (0).
-        
-        project_single = bilinear_proj
-        
-        # Map over cols of B (and elements of Z row)
-        # input: a_row (K,), b_cols (N, K), z_row (N,)
-        # output: a_row_updates (N, K), b_cols_updates (N, K)
-        project_row = jax.vmap(project_single, in_axes=(None, 1, 0)) 
-        
-        # Map over rows of A (and rows of Z)
-        # input: a (M, K), b (K, N), z (M, N)
-        # output: a_updates (M, N, K), b_updates (M, N, K)
-        project_matrix = jax.vmap(project_row, in_axes=(0, None, 0))
-        
-        a_updates, b_updates = project_matrix(a, b, z)
-        
-        # a is updated N times (once for each col of b). Average these.
-        a_new = jnp.mean(a_updates, axis=1) # (M, K)
-        
-        # b is updated M times (once for each row of a). Average these.
-        # b_updates is (M, N, K). The output from project_row for 'b' was (N, K) which corresponds to b.T.
-        # Wait, project_single returns (K,), (K,).
-        # project_row returns (N, K), (N, K).
-        # project_matrix returns (M, N, K), (M, N, K).
-        # The second output corresponds to 'b'. In project_row, we passed b as (K, N) but used in_axes=1.
-        # So b_updates[i, j, :] is the update for col j of b, from row i of a.
-        # We need to average over i (rows of a) to get the update for col j.
-        # AND we need to transpose it back to (K, N) because b_updates stored it as (K,) vectors.
-        # b_updates shape is (M, N, K).
-        # Average over M: (N, K).
-        # Transpose to (K, N).
-        
-        b_new = jnp.mean(b_updates, axis=0).T
-        
+    def safe_newton_step(t):
+        f, fprime = f_and_f_prime(t)
+        step = f / (fprime + 1e-8)
+        return jnp.clip(t - step, -0.999, 0.999)
+    
+    t = jax.lax.fori_loop(
+        0, 
+        config.bilinear_projection_num_newton_steps, 
+        lambda _, t: safe_newton_step(t), 
+        0.0
+    )
+
+    a_new = (a + t * b) / (1.0 - t**2)
+    b_new = (b + t * a) / (1.0 - t**2)
+    
+    return a_new, b_new
+
+# --- Config-based dispatch for bilinear ---
+_bilinear_methods = {
+    "original": bilinear_proj,      # float32 cast + jax.grad
+    "fast": bilinear_proj_fast,     # hand-coded f_and_f_prime
+}
+
+def bilinear(a, b, z, /):
+    """Dispatch to the configured bilinear projection method."""
+    return _bilinear_methods[config.bilinear_method](a, b, z)
+
+def bilinearMatrix_seq(a, B, z):
+    """
+    Project onto bilinear function graph using Newton's method.
+    Uses jax.lax.scan to do an cyclic projection style projection to get A
+    """
+    # scan_body takes (carry, current_element)
+    def scan_body(a_curr, x):
+        b_col, zi = x
+        a_new, b_proj = bilinear(a_curr, b_col, zi)
+        # return (new_carry, output_to_stack)
+        return a_new, b_proj
+    
+    # We transpose B (B.T) so jax.lax.scan iterates over its columns.
+    # scan automatically iterates over the leading dimension of the tuple (B.T, z).
+    a_final, b_projections = jax.lax.scan(scan_body, a, (B.T, z))
+    
+    # b_projections is stacked along axis 0, so it's shape (AA, dim). 
+    # We transpose it back to (dim, AA)
+    return a_final, b_projections.T
+
+def bilinearMatrix_parr(a, B, z):
+    """Project onto bilinear function graph using Newton's method.
+
+    A is a vector of shape (dim,), B is a matrix of shape (dim, AA),
+    and z is a vector of shape (AA,).
+    """
+    def proj_single(b, zi):
+        return bilinear(a, b, zi)
+
+    a_buffer, projection_B = jax.vmap(
+        proj_single, in_axes=(1, 0), out_axes=(0, 1)
+    )(B, z)
+    proj_a = jnp.mean(a_buffer, axis=0)
+    return proj_a, projection_B
+
+# --- Config-based dispatch for bilinear_matrix ---
+_bilinear_matrix_methods = {
+    "seq": bilinearMatrix_seq,    # jax.lax.scan cyclic projection
+    "parr": bilinearMatrix_parr,  # jax.vmap + mean
+}
+
+def bilinear_matrix(a, B, z):
+    """Dispatch to the configured bilinear matrix projection method."""
+    return _bilinear_matrix_methods[config.bilinear_matrix_method](a, B, z)
+
+def matmul_proj_seq(a, b, z, /):
+    """
+    Project onto matrix multiplication constraint.
+    Uses jax.lax.scan to process batches sequentiely.
+    """
+    def _project_single(a_matrix, b_matrix, z_matrix):
+        a_batched = jnp.atleast_2d(a_matrix)
+        z_batched = jnp.atleast_2d(z_matrix)
+
+        def scan_body(b_curr, x):
+            a_sample, z_sample = x
+            a_final, b_new = bilinear_matrix(a_sample, b_curr, z_sample)
+            return b_new, a_final
+
+        b_final, a_result = jax.lax.scan(scan_body, b_matrix, (a_batched, z_batched))
+
+        if a_matrix.ndim == 1:
+            a_result = a_result[0]
+
+        return a_result, b_final
+
+    if a.ndim <= 2:
+        return _project_single(a, b, z)
+
+    batch_shape = a.shape[:-2]
+    a_batch = a.reshape((-1,) + a.shape[-2:])
+    z_batch = z.reshape((-1,) + z.shape[-2:])
+
+    def batch_scan_body(b_curr, x):
+        a_sample, z_sample = x
+        a_final, b_new = _project_single(a_sample, b_curr, z_sample)
+        return b_new, a_final
+
+    b_final, a_result = jax.lax.scan(batch_scan_body, b, (a_batch, z_batch))
+    a_result = a_result.reshape(batch_shape + a_result.shape[1:])
+    return a_result, b_final
+
+def matmul_proj_parr(a, b, z, /):
+    """Project onto matrix multiplication constraint.
+    
+    For A @ B = Z where A is (M, K), B is (K, N), Z is (M, N),
+    we find the closest A_new, B_new satisfying the constraint.
+    Optimized with vmap for batch processing.
+    """
+    # Vectorized function for processing each sample
+    # Only vmap over a and z (batch samples), not b (shared matrix)
+    def process_sample(a_sample, z_sample):
+        a_new, b_new= bilinear_matrix(a_sample, b, z_sample)
         return a_new, b_new
-    # Detect batch dimensions
-    # Current limitation: supports simple broadcasting where 'a' has batch dims and 'b' does not, or vice versa?
-    # Or strict 'a' is broadcasted?
-    # User's efficient matmul request implied broadcasting.
-    # Typically: a is (B, M, K), b is (K, N). z is (B, M, N).
     
-    a_ndim = a.ndim
-    b_ndim = b.ndim
-    z_ndim = z.ndim
+    a_buffer, b_buffer = jax.vmap(process_sample, in_axes=(0, 0))(a, z)
     
-    # Assume standard matmul broadcasting rules: 
-    # Last 2 dims are matrix dims. Leading dims are batch.
-    # We only handle the case where one is broadcasted against the other for now, or simple repeats.
-    
-    if a_ndim > b_ndim:
-        # Case: A has batch dims, B does not.
-        # Flatten batch dims of A and Z for scanning.
-        batch_shape = a.shape[:-2]
-        M, K = a.shape[-2:]
-        N = b.shape[-1]
-        
-        # Check shapes match expectation
-        assert b.shape == (K, N)
-        assert z.shape == batch_shape + (M, N)
-        
-        # Flatten batch dims
-        a_flat = a.reshape(-1, M, K)
-        z_flat = z.reshape(-1, M, N)
-        num_batches = a_flat.shape[0]
-        
-        # Scan over batches to compute average update for b and individual updates for a
-        # We use a recursive mean formula for b.
-        # mean_n = mean_{n-1} + (x_n - mean_{n-1}) / n
-        
-        def scan_fn(carry, inputs):
-            b_mean, n = carry
-            a_i, z_i = inputs
-            
-            # Project current batch
-            a_new_i, b_new_i = project_2d(a_i, b_mean, z_i) 
-            # Note: technically we should project against the *original* b? 
-            # Or the running mean b? 
-            # In alternating projections, we project the *current estimate*.
-            # But here 'b' is a shared parameter. 
-            # The 'repeat_inverse' logic averages the projections of the SAME input 'b'.
-            # So we should use 'b' (the input to this function) for all projections?
-            # Yes, standard repeat_inverse takes 'z' (the outputs of the branches) and averages them.
-            # Here, the 'branches' are the projections of (a_i, b, z_i).
-            # So we should pass 'b' (the constant input from outside) to project_2d.
-            # BUT, we want to return the average of the *outputs* (b_new_i).
-            
-            # Wait, the scan carry should be the running mean of the *updates*.
-            # The input 'b' to project_2d should be the *original input b*.
-            
-            # We can't use 'b_mean' as input to project_2d because that would imply sequential updates (like SGD).
-            # This is a projection operator, it's stateless within the step.
-            # So we use 'b' from the outer scope.
-            
-            a_new_i, b_new_i = project_2d(a_i, b, z_i)
-            
-            # Update running mean of b_new
-            # n is 1-based index (current count)
-            n += 1
-            b_mean_new = b_mean + (b_new_i - b_mean) / n
-            
-            return (b_mean_new, n), a_new_i
-        # Initialize running mean with zeros or first element logic?
-        # A simple trick is to start with 0 and count. 
-        # But we need shape of b_new_i. It's same as b.
-        
-        init_carry = (jnp.zeros_like(b), 0)
-        
-        # Run scan
-        (b_new, _), a_new_flat = jax.lax.scan(scan_fn, init_carry, (a_flat, z_flat))
-        
-        # Reshape a_new back
-        a_new = a_new_flat.reshape(a.shape)
-        
-        return a_new, b_new
-    elif b_ndim > a_ndim:
-        # Symmetric case: B has batch dims, A does not.
-        raise NotImplementedError("Broadcasting A (batch dims in B) not yet implemented in efficient matmul.")
-    else:
-        # Standard matrix mult (no broadcasting or same batch dims)
-        # If same batch dims, we just vmap over them (no averaging needed).
-        # If no batch dims, just project_2d.
-        if a_ndim == 2:
-             return project_2d(a, b, z)
-        else:
-             # Same batch dims: vmap project_2d over the batch dims
-             # Treat all leading dims as batch
-             # We need to flatten them typically or use vmap recursively/repeatedly?
-             # jax.vmap handles arbitrary leading dims if mapped.
-             # But inputs are a, b, z.
-             # project_2d handles (M,K), (K,N), (M,N).
-             # We can just vmap project_2d appropriate number of times or flatten.
-             
-             # Flatten
-             batch_shape = a.shape[:-2]
-             a_flat = a.reshape(-1, a.shape[-2], a.shape[-1])
-             b_flat = b.reshape(-1, b.shape[-2], b.shape[-1])
-             z_flat = z.reshape(-1, z.shape[-2], z.shape[-1])
-             
-             project_2d_vmapped = jax.vmap(project_2d)
-             a_new_flat, b_new_flat = project_2d_vmapped(a_flat, b_flat, z_flat)
-             
-             return a_new_flat.reshape(a.shape), b_new_flat.reshape(b.shape)
-matmul = make_computation("matmul", matmul_op, matmul_proj)
+    # Average b_buffer across batch dimension
+    b_avg = jnp.mean(b_buffer, axis=0)
+    return a_buffer, b_avg
+
+# --- Config-based dispatch for matmul projection ---
+_matmul_proj_methods = {
+    "seq": matmul_proj_seq,    # jax.lax.scan over batch
+    "parr": matmul_proj_parr,  # jax.vmap over batch
+}
+
+def matmul_proj_dispatch(a, b, z, /):
+    """Dispatch to the configured matmul projection method."""
+    return _matmul_proj_methods[config.matmul_proj_method](a, b, z)
+
+
+matmul = make_computation("matmul", matmul_op, matmul_proj_dispatch)

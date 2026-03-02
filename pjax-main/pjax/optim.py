@@ -28,7 +28,6 @@ def plot_graph(graph: nx.DiGraph):
     nx.draw(graph, pos, with_labels=True, node_color=node_color, node_size=250, font_size=8)
     plt.show()
 
-
 def get_graph(computation: Computation):
     """Get the computation graph of a computation."""
     graph = nx.DiGraph()
@@ -127,7 +126,7 @@ def multiple_projection(inputs: FrozenDict, partition: set[Operation | Parameter
     pruned_graph = prune_shape_transforms(graph)
     for computation in set([child for computation in partition for child in pruned_graph.successors(computation)]):
         if isinstance(computation, Operation):
-            inputs = inputs.set(computation, [get_value(parent, inputs).astype(jnp.complex64) for parent in computation.parents])
+            inputs = inputs.set(computation, [get_value(parent, inputs).astype(jnp.bfloat16) for parent in computation.parents])
 
     return inputs
 
@@ -166,9 +165,9 @@ class Optimizer(ABC):
         inputs = {}
         for node in graph.nodes:
             if isinstance(node, Parameter):
-                inputs[node] = [node.value.astype(jnp.complex64)]
+                inputs[node] = [node.value.astype(jnp.bfloat16)]
             if isinstance(node, Operation):
-                inputs[node] = [parent.value.astype(jnp.complex64) for parent in node.parents]
+                inputs[node] = [parent.value.astype(jnp.bfloat16) for parent in node.parents]
         inputs = freeze(inputs)
 
         # get bipartition
