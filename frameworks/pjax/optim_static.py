@@ -1,12 +1,3 @@
-"""Minimal projection-based optimizer using alternating projections.
-
-Partitions the computation graph into BFS layers using a lightweight
-topological sort and projects them output → inputs (like back-prop).
-
-No networkx dependency — graph construction and partitioning use plain
-Python dicts/sets built from an iterative DFS topological sort.
-"""
-
 from __future__ import annotations
 
 from functools import partial

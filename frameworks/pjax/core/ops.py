@@ -369,41 +369,12 @@ def bilinear_proj(a, b, z, /):
     
     return a_new, b_new
 
-dot = make_computation("dot", dotproduct_op, hyperbola_proj_l1)
+dot = make_computation("dot", dotproduct_op, bilinear_proj)
 
 def sum_step_activation_op(*args):
     """Sum inputs and apply step activation."""
     sum_args = sum(args)
     return jnp.where(sum_args >= 0, 1, -1)
-
-def hermitian_symetry(a, /):
-    """Enforce Hermitian symmetry on a 2D complex array."""
-    a_conj_flip = jnp.conj(jnp.flip(jnp.flip(a, axis=0), axis=1))
-    a_sym = (a + a_conj_flip) / 2
-    return a_sym
-
-def hermitian_symetry_proj(X):
-    """
-    Project a 2D complex array X onto the Hermitian-symmetric set
-    that ensures a real 2D IFFT.
-    """
-    M, N = X.shape
-    # conjugate + 180-degree rotation (flip both axes)
-    X_flip_conj = jnp.conj(jnp.flip(jnp.flip(X, axis=0), axis=1))
-    X_sym = 0.5 * (X + X_flip_conj)
-
-    # find indices that are their own partner: 2u % M == 0 and 2v % N == 0
-    u_idxs = jnp.arange(M)
-    v_idxs = jnp.arange(N)
-    u_self = (2 * u_idxs) % M == 0
-    v_self = (2 * v_idxs) % N == 0
-
-    # set imaginary part to zero at the "self-symmetric" grid points
-    for u in jnp.where(u_self)[0]:
-        for v in jnp.where(v_self)[0]:
-            X_sym[u, v] = jnp.real(X_sym[u, v])  # force real
-
-    return X_sym
 
 def step_activation_proj(*args):
     """Project onto step activation function constraint: y = step(x) where step(x) = 1 if x >= 0, -1 otherwise."""
@@ -510,72 +481,10 @@ def mean_squared_op(predictions, targets, /):
 def mse_prox(predictions, targets, idk, /):
     """Project onto mean squared error constraint. """
     out = (predictions+ targets) /2
-    #jax.debug.print("preds {} , targets,{}, idk {}", predictions, targets, idk )
     return out, out
 
 mse = make_computation("mse_loss", mean_squared_op, mse_prox)
 
-def reparameterize_op(*args):
-    mu = args[0]
-    sigma = args[1]
-    #jax.debug.print("Reparameterize mu shape:{}, sigma shape:{}, arglen {}", mu.shape, sigma.shape, args)
-    """Reparameterization operation."""
-    eps = jax.random.normal(jax.random.PRNGKey(0), shape=mu.shape, ).astype(mu.dtype)
-    #jax.debug.print("eps shape: {}", eps.shape)
-    out = mu + sigma * eps
-    #jax.debug.print("reparameterize output shape: {}", out.shape)
-    return out
-
-def project_to_normal_vec(mu0, sigma0, z0, lam=1.0, tol=1e-8, maxiter=200):
-    """
-    Minimize for each dimension i:
-        (z_i - z0_i)^2 + (μ_i - μ0_i)^2 + (σ_i - σ0_i)^2
-        + λ * [ (z_i - μ_i)^2 / σ_i^2 + log σ_i^2 ]
-    so that z_i resembles a Normal(μ_i, σ_i^2), while staying close to priors.
-    """
-    # elementwise equation for σ_i and its derivative
-    def sigma_fun(sigma, z0, mu0, sigma0, lam):
-        return (
-            (sigma - sigma0)
-            - lam * (sigma * (z0 - mu0) ** 2) / (2 * lam + sigma**2) ** 2
-            + lam / sigma
-        )
-
-    def sigma_fun_derivative(sigma, z0, mu0, sigma0, lam):
-        diff_sq = (z0 - mu0) ** 2
-        denom = 2 * lam + sigma**2
-        term1 = 1.0
-        term2 = -lam * (diff_sq * denom**2 - sigma * diff_sq * 2 * sigma * 2 * denom) / (denom**4)
-        term3 = -lam / (sigma**2)
-        return term1 + term2 + term3
-
-    # Newton's method for each dimension
-    def solve_sigma_single(z0_i, mu0_i, sigma0_i):
-        sigma = jnp.maximum(sigma0_i, 1e-6)
-        
-        def newton_body(sigma):
-            f_val = sigma_fun(sigma, z0_i, mu0_i, sigma0_i, lam)
-            f_prime = sigma_fun_derivative(sigma, z0_i, mu0_i, sigma0_i, lam)
-            sigma_new = sigma - f_val / (f_prime + 1e-8)
-            return jnp.maximum(sigma_new, 1e-6)
-        
-        sigma = jax.lax.fori_loop(0, maxiter, lambda _, s: newton_body(s), sigma)
-        return jnp.maximum(sigma, 1e-8)
-    
-    # vectorize over dimensions
-    solve_sigma_vmap = jax.vmap(solve_sigma_single, in_axes=(0, 0, 0))
-    sigma = solve_sigma_vmap(z0, mu0, sigma0)
-
-    # compute z*, mu* elementwise
-    denom = 2 * lam + sigma**2
-    z = (lam * mu0 + lam * z0 + sigma**2 * z0) / denom
-    mu = (lam * mu0 + lam * z0 + mu0 * sigma**2) / denom
-
-    return mu, sigma
-
-reparameterize = make_computation("reparameterize", reparameterize_op, project_to_normal_vec)
-
-#kl_divergence = make_computation("kl_divergence", kl_divergence_op, prox_kl_std_normal)
 def cross_entropy_op(logits, labels, /):
     """Cross-entropy operation."""
     return logits
