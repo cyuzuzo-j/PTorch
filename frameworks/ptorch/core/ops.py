@@ -163,6 +163,55 @@ def matmul_proj_parr_pt(A, B, Z, alpha=1.0, g=1.0):
     B_proj = torch.stack(B_projs, dim=0).mean(dim=0)   # (K, N) — average over rows
     Z_proj = torch.stack(z_rows, dim=0)                # (M, N)
     return A_proj, B_proj, Z_proj
+    
+@torch.compile(dynamic=True)
+def matmul_proj_exact_pt(A, B, Z, alpha=1.0, g=1.0):
+    """
+    Exact independent bilinear projection for A @ B = Z.
+    A: (M, K), B: (K, N), Z: (M, N).
+
+    Every dot product z_ij = a_i · b_j gets its own independent bilinear
+    projection. Shared variables are then reconciled by consensus averaging:
+      - A_proj[i] = mean over j of the M×N individual a_i proposals
+      - B_proj[:,j] = mean over i of the M×N individual b_j proposals
+
+    This is equivalent to pjax.matmul_slower / matmul_proj_exact but in a
+    single fully-vectorised pass — no Python loops.
+
+    Returns A_proj (M, K), B_proj (K, N), Z_proj (M, N).
+    """
+    M, K = A.shape
+    K2, N = B.shape
+    assert K == K2, f"Shape mismatch: A is ({M},{K}), B is ({K},{N})"
+
+    # --- Expand all (i,j) pairs in one shot ---
+    # a_i replicated for each column j:  (M, N, K)
+    A_exp = A.unsqueeze(1).expand(M, N, K)   # (M, N, K)
+    # b_j replicated for each row i:     (M, N, K)
+    B_exp = B.t().unsqueeze(0).expand(M, N, K)   # (M, N, K)  — B.t() is (N,K)
+    Z_flat = Z  # (M, N)
+
+    # Flatten to (M*N, K) and (M*N,) for a single batched call
+    A_flat = A_exp.reshape(M * N, K)
+    B_flat = B_exp.reshape(M * N, K)
+    Z_flat_1d = Z_flat.reshape(M * N)
+
+    a_projs, b_projs, z_projs = _bilinear_proj_core(
+        A_flat, B_flat, Z_flat_1d, alpha=alpha, g=g
+    )
+    # a_projs: (M*N, K),  b_projs: (M*N, K),  z_projs: (M*N,)
+
+    # Reshape back to (M, N, K)
+    A_proposals = a_projs.reshape(M, N, K)   # proposal of a_i from each j
+    B_proposals = b_projs.reshape(M, N, K)   # proposal of b_j from each i
+
+    # Consensus: average over the "other" index
+    A_proj = A_proposals.mean(dim=1)          # (M, K) — average over N proposals
+    B_proj = B_proposals.mean(dim=0).t()      # (K, N) — average over M proposals, then transpose
+    Z_proj = z_projs.reshape(M, N)
+
+    return A_proj, B_proj, Z_proj
+
 
 @torch.compile(dynamic=True)
 def matmul_proj_iterative_pt(A, B, Z, alpha=1.0, g=1.0, num_iters=5):
@@ -226,6 +275,40 @@ class MatMulProjection(torch.autograd.Function):
             A_proj, B_proj, _Z_proj = matmul_proj_iterative_pt(
                 A_det, B_det, Z_det, alpha=ctx.alpha, g=ctx.g, num_iters=ctx.num_iters)
         return A_proj, B_proj, None, None, None
+
+class MatMulExactProjection(torch.autograd.Function):
+    """
+    Exact per-dot-product bilinear projection for A @ B = Z.
+    Uses matmul_proj_exact_pt in backward: fully vectorised, no Python loops.
+    Equivalent to matmul_slower in pjax — better convergence at cost of memory.
+    """
+    @staticmethod
+    def forward(ctx, A, B, alpha=1.0, g=1.0):
+        ctx.save_for_backward(A, B)
+        ctx.alpha = alpha
+        ctx.g = g
+        return A @ B
+
+    @staticmethod
+    def backward(ctx, Z_target):
+        A, B = ctx.saved_tensors
+        A_det = A.detach()
+        B_det = B.detach()
+        Z_det = Z_target.detach()
+
+        # Handle batched inputs: collapse leading dims to 2D
+        if A_det.ndim > 2:
+            batch_shape = A_det.shape[:-2]
+            A_2d = A_det.reshape(-1, A_det.shape[-1])
+            Z_2d = Z_det.reshape(-1, Z_det.shape[-1])
+            A_proj_2d, B_proj, _ = matmul_proj_exact_pt(
+                A_2d, B_det, Z_2d, alpha=ctx.alpha, g=ctx.g)
+            A_proj = A_proj_2d.reshape(A_det.shape)
+        else:
+            A_proj, B_proj, _ = matmul_proj_exact_pt(
+                A_det, B_det, Z_det, alpha=ctx.alpha, g=ctx.g)
+
+        return A_proj, B_proj, None, None
 
 class MSEProjection(torch.autograd.Function):
     @staticmethod

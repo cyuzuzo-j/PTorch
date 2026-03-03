@@ -1,0 +1,39 @@
+0step [00:00, ?step/s]
+jax.errors.SimplifiedTraceback: For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_pjax_combined.py", line 238, in <module>
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_pjax_combined.py", line 231, in main
+    gc.collect()
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_pjax_combined.py", line 187, in run
+    pbar.set_postfix(val_acc=f"{val_acc:.4f}", best=f"{best_val_acc:.4f}")
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_pjax_combined.py", line 176, in evaluate
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_pjax_combined.py", line 176, in <listcomp>
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_pjax_combined.py", line 170, in eval_fn
+    pred = pred.value
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/nn/modules.py", line 91, in apply
+    return module(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_pjax_combined.py", line 66, in __call__
+    h = pooled
+AttributeError: 'TextMLP' object has no attribute 'mod_'
+jax.errors.SimplifiedTraceback: For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_pjax_combined.py", line 238, in <module>
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_pjax_combined.py", line 231, in main
+    gc.collect()
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_pjax_combined.py", line 187, in run
+    pbar.set_postfix(val_acc=f"{val_acc:.4f}", best=f"{best_val_acc:.4f}")
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_pjax_combined.py", line 176, in evaluate
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_pjax_combined.py", line 176, in <listcomp>
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_pjax_combined.py", line 170, in eval_fn
+    pred = pred.value
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/nn/modules.py", line 91, in apply
+    return module(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_pjax_combined.py", line 66, in __call__
+    h = pooled
+AttributeError: 'TextMLP' object has no attribute 'mod_'

@@ -14,11 +14,12 @@ import torch.nn.functional as F
 from ptorch.nn.modules import LinearBias, ReLU
 from ptorch.core.ops import MarginLossProjection
 import ptorch.optim_static as ptorch_optim_static
+import ptorch.config as ptorch_config
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 import tqdm, time
 import wandb
 
-FRAMEWORK = "ptorch_compiled_itterative"
+FRAMEWORK = "ptorch_parr"
 
 OPTIM_MODULES = vars(ptorch_optim_static)
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
@@ -63,7 +64,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     opt_kwargs = cfg.get("ptorch_optimizer_kwargs", {})
     optimizer  = OPTIM_MODULES[opt_name](model.parameters(), **opt_kwargs)
 
-    run = wandb.init(project="pjax", name=cfg["experiment_name"])
+    run_name = f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}"
+    run = wandb.init(project="pjax", name=run_name)
     wandb.config.update({
         "framework": FRAMEWORK,
         "task": task_cfg["name"],
@@ -76,6 +78,7 @@ def run(cfg, task_cfg, batch_size, run_number, device):
         "max_steps": cfg["max_steps"],
         "eval_every": cfg["eval_every"],
         "patience": cfg["patience"],
+        **ptorch_config.snapshot(),
     })
 
     def step_fn(x, y):

@@ -39,7 +39,7 @@ pjax_orr_optimizer_kwargs:
 
 # ptorch — ptorch.optim_static classes
 ptorch_optimizer: ProjectionAdadelta  # AlternatingProjections | AlternatingProjectionsMomentum | ProjectionSGD | ProjectionAdam | ProjectionAdagrad | ProjectionAdadelta
-ptorch_optimizer_kwargs: {lr: 10}
+ptorch_optimizer_kwargs: {lr: 10_000}
 
 # torch — any torch.optim class
 torch_optimizer: SGD             # Adam | SGD | AdamW | ...

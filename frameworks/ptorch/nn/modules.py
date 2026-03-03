@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from ..core.ops import (
     MatMulProjection,
+    MatMulExactProjection,
     SumReluProjection,
     SimplexProjection
 )
@@ -22,7 +23,7 @@ class Linear(nn.Module):
 
     def forward(self, input):
         # Apply custom matmul projection
-        return MatMulProjection.apply(input, self.weight, self.alpha, self.g, self.num_iters)
+        return MatMulExactProjection.apply(input, self.weight, self.alpha, self.g)
 
 class LinearBias(nn.Module):
     """Linear (fully connected) layer with bias.
@@ -40,7 +41,32 @@ class LinearBias(nn.Module):
         # Append ones to input for bias computation
         ones = torch.ones((*input.shape[:-1], 1), dtype=input.dtype, device=input.device)
         augmented_input = torch.cat([input, ones], dim=-1)
-        return MatMulProjection.apply(augmented_input, self.weight, self.alpha, self.g, self.num_iters)
+        return MatMulExactProjection.apply(augmented_input, self.weight, self.alpha, self.g)
+
+
+class LinearExact(nn.Module):
+    """Linear layer using exact independent bilinear projection.
+
+    Each dot product a_i · b_j is projected independently; shared variables
+    are reconciled by consensus averaging over all (i, j) pairs. Equivalent
+    to ``pjax.matmul_exact`` / ``pjax.matmul_slower``: better convergence at
+    the cost of O(M×N×K) memory per backward pass.
+
+    Args:
+        in_features: number of input features.
+        out_features: number of output features.
+        alpha: stiffness for weight update (default 1.0).
+        g: stiffness for output target (default 1.0).
+    """
+    def __init__(self, in_features: int, out_features: int, alpha: float = 1.0, g: float = 1.0):
+        super().__init__()
+        self.alpha = alpha
+        self.g = g
+        self.weight = nn.Parameter(torch.empty(in_features, out_features))
+        nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
+
+    def forward(self, input):
+        return MatMulExactProjection.apply(input, self.weight, self.alpha, self.g)
 
 
 class Conv2D(nn.Module):

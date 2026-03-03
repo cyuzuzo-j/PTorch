@@ -142,6 +142,8 @@ class Linear(Module):
             return pjax.matmul_l1(input, self.weight)
         elif self.norm == "LINF":
             return pjax.matmul_linf(input, self.weight)
+        elif self.norm == "EXACT":
+            return pjax.matmul_exact(input, self.weight)
         else:
             return pjax.matmul(input, self.weight)
 
@@ -164,7 +166,7 @@ class LinearBias(Module):
                 where the last row contains the bias values.
     """
 
-    def __init__(self, in_features: int, out_features: int, norm: str = "L2"):
+    def __init__(self, in_features: int, out_features: int, norm: str = "L1"):
         super().__init__()
         # Weight includes extra row for bias
         self.weight = Weight((in_features + 1, out_features))

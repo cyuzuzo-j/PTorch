@@ -1,0 +1,5 @@
+0step [00:00, ?step/s, best=0.0000, val_acc=0.5096]/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py:164: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:836.)
+  wandb.log({"train/loss": float(loss)}, step=step)
+2000step [00:14, 134.19step/s, best=0.8173, val_acc=0.8077]
+Test Acc: 0.8143  Time: 14.9s

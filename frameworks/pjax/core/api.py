@@ -126,6 +126,18 @@ def sum_(a: Computation, axis: Axis = None, keepdims: bool = False) -> Computati
     """
     return _unary_op(ops.sum_, a, axis=axis, keepdims=keepdims)
 
+def mean_(a: Computation, axis: Axis = None, keepdims: bool = False) -> Computation:
+    """Computes the mean of an array along the specified axis or axes.
+
+    Args:
+        a: array to compute the mean.
+        axis: axis or axes along which to compute the mean. If ``None``, mean of all elements is computed.
+        keepdims: if ``True``, the reduced axes are kept with length 1.
+
+    Returns:
+        mean of the array along the specified axis.
+    """
+    return _unary_op(ops.mean_, a, axis=axis, keepdims=keepdims)
 
 def add(a: Computation, b: Computation) -> Computation:
     """Element-wise addition of two arrays.
@@ -306,6 +318,36 @@ def matmul_linf(a: Computation, b: Computation) -> Computation:
     out = ops.matmul_linf(a_, b_)
 
     # squeeze dimensions if necessary
+    if a.ndim == 1:
+        out = squeeze(out, axis=-2)
+    if b.ndim == 1:
+        out = squeeze(out, axis=-1)
+    return out
+
+
+def matmul_exact(a: Computation, b: Computation) -> Computation:
+    """Matrix product using exact independent bilinear projections.
+
+    Equivalent to ``matmul_slower`` (each dot product a_i · b_j is projected
+    independently, shared variables averaged via consensus) but implemented
+    as a single computation node without repeat nodes in the graph.
+
+    Args:
+        a: array of shape ``(N,)`` or ``(..., K, N)``.
+        b: array of shape ``(N,)`` or ``(..., N, M)``.
+
+    Returns:
+        matrix product with the same shape semantics as :func:`matmul`.
+    """
+    a_, b_ = a, b
+
+    if a.ndim == 1:
+        a_ = expand_dims(a, 0)
+    if b.ndim == 1:
+        b_ = expand_dims(b, 1)
+
+    out = ops.matmul_exact(a_, b_)
+
     if a.ndim == 1:
         out = squeeze(out, axis=-2)
     if b.ndim == 1:

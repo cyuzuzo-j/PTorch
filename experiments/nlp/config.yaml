@@ -1,0 +1,36 @@
+# ──────────────────────────────────────────────────
+#   Experiment configuration for NLP Benchmarks
+# ──────────────────────────────────────────────────
+experiment_name: "nlp_bench"
+
+# tasks
+tasks:
+  - name: "SST2"
+    classes: 2
+    vocab_size: 10000
+    embed_dim: 128
+    hidden_dim: [256, 256] # for MLP model
+    max_seq_len: 64
+
+batch_sizes: [64, 128]
+num_runs: 1
+random_seed: 42
+eval_every: 100
+max_steps: 2000
+patience: 10
+
+# optimizers
+torch_optimizer: "AdamW"
+torch_optimizer_kwargs:
+  lr: 0.001
+  weight_decay: 0.01
+
+pjax_optimizer: "AlternatingProjections"
+pjax_optimizer_kwargs:
+
+pjax_orr_optimizer: "AlternatingProjections"
+pjax_orr_optimizer_kwargs:
+
+ptorch_optimizer: "Adam"
+ptorch_optimizer_kwargs:
+  lr: 0.001

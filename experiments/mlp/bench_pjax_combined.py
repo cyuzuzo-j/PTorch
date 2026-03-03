@@ -26,11 +26,20 @@ except Exception:
 
 def load_impl(name):
     mod = importlib.import_module(name)
-    nn = getattr(mod, 'nn')
-    optim = getattr(mod, 'optim')
-    optim_static = getattr(mod, 'optim_static', None)
+    nn = importlib.import_module(f"{name}.nn")
+    optim = importlib.import_module(f"{name}.optim")
+    try:
+        optim_static = importlib.import_module(f"{name}.optim_static")
+    except ImportError:
+        optim_static = None
     reshape = getattr(mod, 'reshape', jnp.reshape)
-    cross_entropy = getattr(mod, 'cross_entropy', None)
+    try:
+        cross_entropy = importlib.import_module(f"{name}.nn").cross_entropy
+    except AttributeError:
+        cross_entropy = getattr(mod, 'cross_entropy', None)
+        
+    config = importlib.import_module(f"{name}.config")
+
     return {
         'mod': mod,
         'nn': nn,
@@ -38,6 +47,7 @@ def load_impl(name):
         'optim_static': optim_static,
         'reshape': reshape,
         'cross_entropy': cross_entropy,
+        'config': config,
     }
 
 
@@ -120,7 +130,8 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
     opt_kwargs = cfg.get(f"{impl_name}_optimizer_kwargs") or cfg.get("pjax_optimizer_kwargs") or cfg.get("pjax_orr_optimizer_kwargs") or {}
     optimizer = OPTIM_MODULES[opt_name](**opt_kwargs)
 
-    run = wandb.init(project="pjax", name=cfg["experiment_name"])
+    run_name = f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}"
+    run = wandb.init(project="pjax", name=run_name)
     wandb.config.update({
         "framework": FRAMEWORK,
         "task": task_cfg["name"],
@@ -133,6 +144,7 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
         "max_steps": cfg["max_steps"],
         "eval_every": cfg["eval_every"],
         "patience": cfg["patience"],
+        **(impl['config'].snapshot() if hasattr(impl['config'], 'snapshot') else {}),
     })
 
     # fall back cross_entropy implementation if missing

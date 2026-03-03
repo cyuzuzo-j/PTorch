@@ -28,7 +28,6 @@ def identity_proj(a, z, /):
 
 identity = make_computation("identity", identity_op, identity_proj)
 
-
 def sum_op(a, /):
     """Sum operation for 1D arrays."""
     assert a.ndim == 1
@@ -40,8 +39,23 @@ def sum_proj(a, z, /):
     assert a.ndim == 1 and z.ndim == 0
     t = (z - a.sum()) / (a.size + z.size)
     return (a + t,)
+def mean_op(a, /):
+    """Mean operation for 1D arrays."""
+    assert a.ndim == 1
+    return a.mean()
 
 
+def mean_proj(a, z, /):
+    """Project onto mean function graph."""
+    assert a.ndim == 1 and z.ndim == 0
+    n = a.size
+    
+    # Calculate λ: (n * y0 - sum(x0)) / (n + 1)
+    lmbda = (n * z - a.sum()) / (n + z.size) 
+    
+    # Return the updated x: x0 + λ * (1/n)
+    return (a + lmbda / n,)
+mean_ = make_computation("mean", mean_op, mean_proj)
 sum_ = make_computation("sum", sum_op, sum_proj)
 
 def _resolve_pool_padding(input_shape, pool_size, strides, padding):
@@ -802,10 +816,61 @@ def matmul_proj_parr(a, b, z, /):
     b_avg = jnp.mean(b_buffer, axis=0)
     return a_buffer, b_avg
 
+def matmul_proj_exact(a, b, z, /):
+    """Project onto matmul constraint using exact independent bilinear projections.
+
+    Equivalent to matmul_slower's vmap(dot) approach but implemented as a
+    single projection function — no repeat nodes in the computation graph.
+
+    For A @ B = Z where A is (M, K), B is (K, N), Z is (M, N):
+    each z_ij = a_i · b_j gets an independent bilinear projection, then:
+      - a_i is averaged across columns  (consensus: a_i shared by N dot products)
+      - b_j is averaged across rows     (consensus: b_j shared by M dot products)
+    """
+    def _project_2d(a_mat, b_mat, z_mat):
+        a_2d = jnp.atleast_2d(a_mat)
+        z_2d = jnp.atleast_2d(z_mat)
+
+        def proj_row(a_row, z_row):
+            # vmap over columns of B: bilinear(a_row, b[:,j], z_row[j])
+            a_props, b_props = jax.vmap(
+                lambda bj, zj: bilinear(a_row, bj, zj),
+                in_axes=(1, 0), out_axes=(0, 1)
+            )(b_mat, z_row)
+            # a_props: (N, K) — one a proposal per column
+            # b_props: (K, N) — projected b columns
+            return jnp.mean(a_props, axis=0), b_props
+
+        # vmap over rows of A
+        a_result, b_buffer = jax.vmap(proj_row)(a_2d, z_2d)
+        # a_result: (M, K),  b_buffer: (M, K, N)
+        b_result = jnp.mean(b_buffer, axis=0)  # (K, N)
+
+        if a_mat.ndim == 1:
+            a_result = a_result[0]
+        return a_result, b_result
+
+    if a.ndim <= 2:
+        return _project_2d(a, b, z)
+
+    # Batched case: flatten leading dims, vmap, reshape back
+    batch_shape = a.shape[:-2]
+    a_batch = a.reshape((-1,) + a.shape[-2:])
+    z_batch = z.reshape((-1,) + z.shape[-2:])
+
+    a_results, b_results = jax.vmap(
+        lambda ai, zi: _project_2d(ai, b, zi)
+    )(a_batch, z_batch)
+    a_results = a_results.reshape(batch_shape + a_results.shape[-2:])
+    b_result = jnp.mean(b_results, axis=0)
+    return a_results, b_result
+
+
 # --- Config-based dispatch for matmul projection ---
 _matmul_proj_methods = {
     "seq": matmul_proj_seq,    # jax.lax.scan over batch
     "parr": matmul_proj_parr,  # jax.vmap over batch
+    "exact": matmul_proj_exact, # independent bilinear projections (matches matmul_slower)
 }
 
 def matmul_proj_dispatch(a, b, z, /):
@@ -901,3 +966,5 @@ def matmul_proj_dispatch(a, b, z, /):
 
 
 matmul = make_computation("matmul", matmul_op, matmul_proj_dispatch)
+
+matmul_exact = make_computation("matmul_exact", matmul_op, matmul_proj_exact)

@@ -47,7 +47,6 @@ class Config:
         """Access a configuration value by key."""
         return self._config[name]
 
-
 config = Config()
 
 
