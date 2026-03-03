@@ -447,6 +447,21 @@ def sum_relu(*args: Computation) -> Computation:
     return ops.sum_relu(*broadcast_arrays(*args))
 
 
+def simplexproj(a: Computation) -> Computation:
+    """Project onto the probability simplex.
+
+    Applies the simplex projection element-wise along the last dimension:
+    finds the closest point in :math:`\\Delta^{N-1} = \\{x \\geq 0 : \\sum x = 1\\}`.
+
+    Args:
+        a: input array of shape ``(..., N)``.
+
+    Returns:
+        array projected onto the probability simplex, same shape as ``a``.
+    """
+    return ops.simplex(a)
+
+
 def quantize(a: Computation, levels=2, scale=1.0) -> Computation:
     """Quantize an array to equally spaced levels on the interval ``[-scale, scale]``.
 

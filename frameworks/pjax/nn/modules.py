@@ -225,6 +225,23 @@ class ReLU(Module):
         return pjax.sum_relu(self.bias, *inputs)
 
 
+class Simplex(Module):
+    """Simplex projection activation.
+
+    Projects the input onto the probability simplex along the last dimension:
+    finds the closest point in Δ^{N-1} = {x ≥ 0 : sum(x) = 1}.
+
+    Args:
+        features: (unused, kept for API compatibility with ReLU).
+    """
+
+    def __init__(self, features: int = 0):
+        super().__init__()
+
+    def __call__(self, input):
+        return pjax.simplexproj(input)
+
+
 class ReLU_NB(Module):
     """Rectified Linear Unit with bias.
 
@@ -304,7 +321,7 @@ class MultiHeadAttention(Module):
         scale = 1.0 / jnp.sqrt(q.shape[-1])
         qk = pjax.matmul(q, pjax.transpose(k, (0, 1, 3, 2)))
         qk = pjax.add(qk, pjax.array(scale))  # simple scaling via addition
-        qk = pjax.relu(qk)
+        qk = pjax.simplexproj(qk)
 
         # compute the weighted sum of values
         o = pjax.matmul(qk, v)

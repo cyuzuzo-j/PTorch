@@ -96,6 +96,7 @@ class TinyAttentionBase:
                 embedded = self.embedding(x)            # (B, S, E)
                 context = self.attention(embedded)      # (B, S, E)
                 pooled = pjax.sum(context, axis=1)     # (B, E)
+                pooled = pjax.identity(pooled)
                 return self.out(pooled)
 
         return TinyAttention(self.vocab_size, self.embed_dim, self.classes)
@@ -165,12 +166,16 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name, model_name):
         loss = loss_fn(params)
         res = optimizer.update(loss_fn, params)
         new_params = res[0] if isinstance(res, (tuple, list)) else res
-        return new_params, jnp.mean(loss)
+        # pjax returns an Operation; extract the concrete array for jnp.mean
+        loss_val = loss.value if hasattr(loss, 'value') else loss
+        return new_params, jnp.mean(loss_val)
 
     @jax.jit
     def eval_fn(params, x, y):
         pred = model.apply(params, x)
-        return jnp.mean(jnp.argmax(pred, axis=-1) == y)
+        # pjax returns an Operation (lazy graph node); extract the concrete array
+        pred_val = pred.value if hasattr(pred, 'value') else pred
+        return jnp.mean(jnp.argmax(pred_val, axis=-1) == y)
 
     def evaluate(loader, p):
         accs = [float(eval_fn(p, jnp.array(x), jnp.array(y))) for x, y in loader]
@@ -216,7 +221,7 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name, model_name):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--impl', choices=['pjax', 'pjax_orr'], default=os.environ.get('PJAX_IMPL', 'pjax'))
-    p.add_argument('--model', choices=['mlp', 'attention'], default='mlp')
+    p.add_argument('--model', choices=['mlp', 'attention'], default='attention')
     args = p.parse_args()
 
     cfg = yaml.safe_load(open(CFG_PATH))

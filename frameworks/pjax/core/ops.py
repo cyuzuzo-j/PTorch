@@ -435,6 +435,93 @@ def sum_relu_proj(*args):
 sum_relu = make_computation("sum_relu", sum_relu_op, sum_relu_proj)
 
 
+def simplex_op(a, /):
+    """Project onto the probability simplex (forward).
+
+    Given input array ``a`` of shape ``(..., N)``, returns the closest point
+    on the probability simplex Δ^{N-1} = {x : x >= 0, sum(x) = 1}.
+    Uses the sort-based O(N log N) algorithm.
+    """
+    n = a.shape[-1]
+    # Sort descending
+    u = jnp.sort(a, axis=-1)[..., ::-1]
+    # Cumulative sums and candidate thresholds
+    cssv = jnp.cumsum(u, axis=-1)
+    k_range = jnp.arange(1, n + 1, dtype=a.dtype)
+    tau_candidates = (cssv - 1.0) / k_range
+    # Active set: elements greater than their candidate threshold
+    valid_mask = u > tau_candidates
+    rho = jnp.sum(valid_mask, axis=-1, keepdims=True).clip(min=1)
+    # Extract tau at the valid boundary
+    tau = jnp.take_along_axis(tau_candidates, rho - 1, axis=-1)
+    return jnp.maximum(a - tau, 0.0)
+
+
+def simplex_proj(a, z, /):
+    """Project onto the simplex function graph (backward/projection step).
+
+    Given the original input ``a`` and target ``z`` (both shape ``(..., N)``),
+    finds the closest point on the graph {(a', z') : z' = simplex(a')}.
+    Ported from ptorch's ``simplex_proj_pt``.
+    """
+    n = a.shape[-1]
+    k_range = jnp.arange(1, n + 1, dtype=a.dtype)
+
+    # Combined pull w = a + z, sort ascending to process descending
+    w = a + z
+    idx = jnp.argsort(w, axis=-1)
+    a_s = jnp.take_along_axis(a, idx, axis=-1)
+    z_s = jnp.take_along_axis(z, idx, axis=-1)
+    w_s = jnp.take_along_axis(w, idx, axis=-1)
+
+    # Flip to descending order
+    a_d = a_s[..., ::-1]
+    z_d = z_s[..., ::-1]
+    w_d = w_s[..., ::-1]
+
+    # Candidate thresholds for all k = 1..n
+    tau = (jnp.cumsum(w_d, axis=-1) - 2.0) / k_range   # (..., n)
+
+    # Active mask: lower-triangular (row k has k+1 active elements)
+    tri = jnp.tril(jnp.ones((n, n), dtype=bool))  # (n, n)
+
+    # Expand for broadcasting: (..., n, n)
+    tau_m   = tau[..., :, jnp.newaxis]   # (..., n, 1)
+    w_d_m   = w_d[..., jnp.newaxis, :]  # (..., 1, n)
+    a_d_m   = a_d[..., jnp.newaxis, :]  # (..., 1, n)
+    z_d_m   = z_d[..., jnp.newaxis, :]  # (..., 1, n)
+
+    # Active-set candidates
+    a_active  = (w_d_m + tau_m) / 2.0
+    z_active  = (w_d_m - tau_m) / 2.0
+    a_clamped = jnp.minimum(a_d_m, tau_m)
+    z_clamped = jnp.zeros_like(z_active)
+
+    a_cand = jnp.where(tri, a_active, a_clamped)  # (..., n, n)
+    z_cand = jnp.where(tri, z_active, z_clamped)
+
+    # Squared Euclidean distances
+    dist = jnp.sum((a_cand - a_d_m) ** 2 + (z_cand - z_d_m) ** 2, axis=-1)  # (..., n)
+
+    # Only consider valid candidates where w_d >= tau
+    valid = w_d >= tau
+    dist_valid = jnp.where(valid, dist, jnp.inf)
+    best_k = jnp.argmin(dist_valid, axis=-1, keepdims=True)  # (..., 1)
+
+    # Extract the best candidate for a
+    best_k_exp = jnp.broadcast_to(best_k[..., jnp.newaxis], best_k.shape + (n,))
+    best_a_d = jnp.take_along_axis(a_cand, best_k_exp, axis=-2).squeeze(-2)
+
+    # Undo the flip then the sort
+    best_a_s = best_a_d[..., ::-1]
+    inv_idx = jnp.argsort(idx, axis=-1)
+    a_new = jnp.take_along_axis(best_a_s, inv_idx, axis=-1)
+    return (a_new,)
+
+
+simplex = make_computation("simplex", simplex_op, simplex_proj)
+
+
 def quantize_op(a, /, *, levels=2, scale=1.0):
     """Quantize values to discrete levels."""
     assert levels >= 2
@@ -763,7 +850,12 @@ def bilinear_matrix(a, B, z, method_override_key=None):
 def matmul_proj_seq(a, b, z, /):
     """
     Project onto matrix multiplication constraint.
-    Uses jax.lax.scan to process batches sequentiely.
+    Uses jax.lax.scan to process batches sequentially.
+
+    Handles two cases:
+    - b is 2D (shared weight matrix): cyclic scan accumulates updates to b.
+    - b is batched (same batch dims as a, e.g. attention qk @ v): each
+      (a_i, b_i, z_i) triple is projected independently via vmap.
     """
     def _project_single(a_matrix, b_matrix, z_matrix):
         a_batched = jnp.atleast_2d(a_matrix)
@@ -784,6 +876,18 @@ def matmul_proj_seq(a, b, z, /):
     if a.ndim <= 2:
         return _project_single(a, b, z)
 
+    # Both a and b are batched (e.g. attention): process matching pairs independently.
+    if b.ndim > 2:
+        batch_shape = a.shape[:-2]
+        a_batch = a.reshape((-1,) + a.shape[-2:])
+        b_batch = b.reshape((-1,) + b.shape[-2:])
+        z_batch = z.reshape((-1,) + z.shape[-2:])
+        a_result, b_result = jax.vmap(_project_single)(a_batch, b_batch, z_batch)
+        a_result = a_result.reshape(batch_shape + a_result.shape[-2:])
+        b_result = b_result.reshape(batch_shape + b_result.shape[-2:])
+        return a_result, b_result
+
+    # b is a shared 2D weight: cyclic scan accumulates updates to b.
     batch_shape = a.shape[:-2]
     a_batch = a.reshape((-1,) + a.shape[-2:])
     z_batch = z.reshape((-1,) + z.shape[-2:])
