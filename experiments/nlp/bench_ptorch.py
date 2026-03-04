@@ -11,8 +11,8 @@ import yaml
 import torch
 import torch.nn as tnn
 import torch.nn.functional as F
-from ptorch.nn.modules import LinearBias, ReLU
-from ptorch.core.ops import MarginLossProjection
+from ptorch.nn.modules import LinearBias, ReLU, MultiHeadAttention, Conversion, LinearExact
+from ptorch.core.ops import MarginLossProjection, CrossEntropyProjection
 import ptorch.optim_static as ptorch_optim_static
 import ptorch.config as ptorch_config
 from experiments.nlp.data import SST2DataModule
@@ -31,23 +31,24 @@ class TextMLP(tnn.Module):
     def __init__(self, vocab_size, embed_dim, hidden_dims, classes):
         super().__init__()
         self.embedding = tnn.Embedding(vocab_size, embed_dim)
-        
+        self.conversion = Conversion()  # bridge right after embedding
+
         last = embed_dim
         self.hidden_layers = tnn.ModuleList()
         for f in hidden_dims:
-            self.hidden_layers.append(LinearBias(last, f))
-            self.hidden_layers.append(ReLU(f))
+            self.hidden_layers.append(LinearExact(last, f))  # projection-based
+            self.hidden_layers.append(ReLU(f))               # projection-based
             last = f
-        self.n_hidden = len(hidden_dims)
+
         self.out = LinearBias(last, classes)
 
     def forward(self, x):
         embedded = self.embedding(x)
         x = embedded.mean(dim=1)
-        
+        x = self.conversion(x)   # bridge: gradient → projection (only for embedding)
         for i in range(0, len(self.hidden_layers), 2):
-            x = self.hidden_layers[i](x)      # LinearBias
-            x = self.hidden_layers[i + 1](x)  # ReLU
+            x = self.hidden_layers[i](x)      # ptorch LinearBias
+            x = self.hidden_layers[i + 1](x)  # ptorch ReLU
         return self.out(x)
 
 
@@ -55,16 +56,17 @@ class TinyAttention(tnn.Module):
     def __init__(self, vocab_size, embed_dim, classes):
         super().__init__()
         self.embedding = tnn.Embedding(vocab_size, embed_dim)
-        # Using PyTorch native MultiheadAttention for ptorch (as ptorch uses PyTorch NN modules)
-        self.attention = tnn.MultiheadAttention(embed_dim=embed_dim, num_heads=1, batch_first=True)
+        self.conversion = Conversion()
+        self.attention = MultiHeadAttention(embed_dim, embed_dim, heads=1)
         self.out = LinearBias(embed_dim, classes)
         self.embed_dim = embed_dim
         
     def forward(self, x):
         embedded = self.embedding(x) # B, S, E
+        embedded = self.conversion(embedded)  # bridge: gradient → projection
         
-        # Self-attention: query=key=value=embedded
-        context, _ = self.attention(embedded, embedded, embedded) # B, S, E
+        # Self-attention
+        context = self.attention(embedded) # B, S, E
         
         pooled = context.mean(dim=1) # B, E
         
@@ -107,7 +109,16 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
 
     opt_name   = cfg["ptorch_optimizer"]
     opt_kwargs = cfg.get("ptorch_optimizer_kwargs", {})
-    optimizer  = OPTIM_MODULES[opt_name](model.parameters(), **opt_kwargs)
+
+    optimizer       = OPTIM_MODULES[opt_name](model.parameters(), **opt_kwargs)
+
+    # Linear warmup scheduler: ramp lr from 0 → embed_lr over warmup_steps
+    warmup_steps = 200
+    def lr_lambda(current_step):
+        if current_step < warmup_steps:
+            return current_step / warmup_steps
+        return 1.0
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     run_name = f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}_{model_name}_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}"
     run = wandb.init(project="pjax", name=run_name)
@@ -124,17 +135,19 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
         "max_steps": cfg["max_steps"],
         "eval_every": cfg["eval_every"],
         "patience": cfg["patience"],
+        "warmup_steps": warmup_steps,
         **ptorch_config.snapshot(),
     })
 
     def step_fn(x, y):
         logits  = model(x)
         y_oh    = F.one_hot(y.long(), num_classes=logits.shape[-1]).float()
-        projected = MarginLossProjection.apply(logits, y_oh)
+        projected = CrossEntropyProjection.apply(logits, y_oh)
         optimizer.zero_grad()
         projected.sum().backward()
         loss = F.cross_entropy(logits.detach(), y.long())
         optimizer.step()
+        scheduler.step()
         return loss
 
     def eval_fn(x, y):

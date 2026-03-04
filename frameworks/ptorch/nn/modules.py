@@ -5,7 +5,8 @@ from ..core.ops import (
     MatMulProjection,
     MatMulExactProjection,
     SumReluProjection,
-    SimplexProjection
+    SimplexProjection,
+    Conversion as ConversionFn
 )
 
 class Linear(nn.Module):
@@ -180,3 +181,82 @@ class Simplex(nn.Module):
         
     def forward(self, input):
         return SimplexProjection.apply(input)
+
+class Conversion(nn.Module):
+    """Bridge layer: converts projection targets into real gradients.
+    
+    Forward: identity (pass-through).
+    Backward: receives projection target, returns gradient (input - target)
+    so that upstream gradient-based layers (e.g. Embedding) can learn.
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, input):
+        return ConversionFn.apply(input)
+
+class MultiHeadAttention(nn.Module):
+    """Multi-head attention mechanism for transformer architectures.
+
+    Implements the multi-head attention mechanism as described in "Attention
+    Is All You Need" (Vaswani et al., 2017). Splits the input into multiple
+    attention heads and applies scaled dot-product attention.
+
+    Uses SimplexProjection instead of softmax for attention weights,
+    and MatMulExactProjection for projected matrix multiplications.
+
+    Args:
+        model_features: dimensionality of input and output features.
+        qkv_features: dimensionality of query, key, and value vectors per head.
+        heads: number of attention heads.
+
+    Attributes:
+        query_layer: linear layer for computing queries.
+        key_layer: linear layer for computing keys.
+        value_layer: linear layer for computing values.
+        out_layer: output projection layer.
+        heads: number of attention heads.
+    """
+
+    def __init__(self, model_features, qkv_features, heads, alpha=1.0, g=1.0):
+        super().__init__()
+        self.query_layer = Linear(model_features, heads * qkv_features, alpha=alpha, g=g)
+        self.key_layer = Linear(model_features, heads * qkv_features, alpha=alpha, g=g)
+        self.value_layer = Linear(model_features, heads * qkv_features, alpha=alpha, g=g)
+        self.out_layer = Linear(heads * qkv_features, model_features, alpha=alpha, g=g)
+        self.heads = heads
+
+    def forward(self, input):
+        """Compute multi-head attention.
+
+        Args:
+            input: tensor of shape ``(batch_size, seq_len, model_features)``.
+
+        Returns:
+            tensor of shape ``(batch_size, seq_len, model_features)``.
+        """
+        q = self.query_layer(input)
+        k = self.key_layer(input)
+        v = self.value_layer(input)
+
+        # Split into heads: (batch_size, seq_len, heads*qkv) -> (batch_size, heads, seq_len, qkv)
+        batch_size, seq_len = input.shape[:2]
+
+        def split_heads(x):
+            return x.reshape(batch_size, seq_len, self.heads, -1).permute(0, 2, 1, 3)
+
+        q, k, v = map(split_heads, (q, k, v))
+
+        # Compute attention scores
+        scale = 1.0 / (q.shape[-1] ** 0.5)
+        qk = MatMulExactProjection.apply(q, k.transpose(-2, -1), self.query_layer.alpha, self.query_layer.g)
+        qk = qk + scale  # simple scaling via addition (matches pjax)
+        qk = SimplexProjection.apply(qk)
+
+        # Weighted sum of values
+        o = MatMulExactProjection.apply(qk, v, self.query_layer.alpha, self.query_layer.g)
+
+        # Merge heads: (batch_size, heads, seq_len, qkv) -> (batch_size, seq_len, heads*qkv)
+        o = o.permute(0, 2, 1, 3).reshape(batch_size, seq_len, -1)
+
+        return self.out_layer(o)

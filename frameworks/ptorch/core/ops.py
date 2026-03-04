@@ -358,6 +358,21 @@ class CrossEntropyProjection(torch.autograd.Function):
 
         return x, labels
 
+
+class Conversion(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input):
+        ctx.save_for_backward(input)
+        return input
+
+    @staticmethod
+    def backward(ctx, z_target):
+        (input,) = ctx.saved_tensors
+        # Convert projection target into gradient: push input toward target
+        grad = (input - z_target)
+        #grad = grad/ torch.norm(grad)
+        return grad
+
 class SumReluProjection(torch.autograd.Function):
     """
     PyTorch equivalent of PJAX sum_relu projection.

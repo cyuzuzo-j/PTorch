@@ -7,30 +7,29 @@ experiment_name: "nlp_bench"
 tasks:
   - name: "SST2"
     classes: 2
-    vocab_size: 10000
+    vocab_size: 10_000
     embed_dim: 128
-    hidden_dim: [256, 256] # for MLP model
+    hidden_dim: [256, 128] # for MLP model
     max_seq_len: 64
 
-batch_sizes: [64, 128]
+batch_sizes: [512]
 num_runs: 1
 random_seed: 42
 eval_every: 100
-max_steps: 2000
-patience: 10
+max_steps: 50_000
+patience: 50
 
 # optimizers
-torch_optimizer: "AdamW"
+torch_optimizer: "SGD"
 torch_optimizer_kwargs:
   lr: 0.001
-  weight_decay: 0.01
 
-pjax_optimizer: "CyclicProjections"
+pjax_optimizer: "DouglasRachford"
 pjax_optimizer_kwargs:
 
 pjax_orr_optimizer: "AlternatingProjections"
 pjax_orr_optimizer_kwargs:
 
-ptorch_optimizer: "Adam"
+ptorch_optimizer: "ProjectionAdadelta"
 ptorch_optimizer_kwargs:
-  lr: 0.001
+  lr: 10

@@ -220,8 +220,8 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name, model_name):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--impl', choices=['pjax', 'pjax_orr'], default=os.environ.get('PJAX_IMPL', 'pjax'))
-    p.add_argument('--model', choices=['mlp', 'attention'], default='attention')
+    p.add_argument('--impl', choices=['pjax', 'pjax_orr'], default=os.environ.get('PJAX_IMPL', 'pjax_orr'))
+    p.add_argument('--model', choices=['mlp', 'attention'], default='mlp')
     args = p.parse_args()
 
     cfg = yaml.safe_load(open(CFG_PATH))

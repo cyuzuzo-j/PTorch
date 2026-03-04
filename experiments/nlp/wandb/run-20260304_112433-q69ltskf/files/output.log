@@ -1,0 +1,48 @@
+0step [00:00, ?step/s, best=0.0000, val_acc=0.4907]/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py:164: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:836.)
+  wandb.log({"train/loss": float(loss)}, step=step)
+3413step [01:26, 39.62step/s, best=0.7836, val_acc=0.7593]
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 205, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device, args.model)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 140, in run
+    accs.append(eval_fn(x, y))
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 126, in eval_fn
+    return (model(x).argmax(dim=-1) == y).float().mean()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 42, in forward
+    return self.out(self.body(pooled))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/container.py", line 249, in forward
+    for module in self:
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/container.py", line 239, in __iter__
+    return iter(self._modules.values())
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 205, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device, args.model)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 140, in run
+    accs.append(eval_fn(x, y))
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 126, in eval_fn
+    return (model(x).argmax(dim=-1) == y).float().mean()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 42, in forward
+    return self.out(self.body(pooled))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/container.py", line 249, in forward
+    for module in self:
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/container.py", line 239, in __iter__
+    return iter(self._modules.values())
+KeyboardInterrupt

@@ -1,0 +1,48 @@
+0step [00:00, ?step/s, best=0.0000, val_acc=0.4948]/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py:176: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:836.)
+  wandb.log({"train/loss": float(loss)}, step=step)
+999step [00:18, 53.04step/s, best=0.5482, val_acc=0.5586]
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 217, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device, args.model)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 173, in run
+    loss = step_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 131, in step_fn
+    loss = F.cross_entropy(model(x), y.long())
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 40, in forward
+    embedded = self.drop(self.embedding(x)) * mask  # zero out pad
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/dropout.py", line 73, in forward
+    return F.dropout(input, self.p, self.training, self.inplace)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/functional.py", line 1418, in dropout
+    _VF.dropout_(input, p, training) if inplace else _VF.dropout(input, p, training)
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 217, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device, args.model)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 173, in run
+    loss = step_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 131, in step_fn
+    loss = F.cross_entropy(model(x), y.long())
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 40, in forward
+    embedded = self.drop(self.embedding(x)) * mask  # zero out pad
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/dropout.py", line 73, in forward
+    return F.dropout(input, self.p, self.training, self.inplace)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/functional.py", line 1418, in dropout
+    _VF.dropout_(input, p, training) if inplace else _VF.dropout(input, p, training)
+KeyboardInterrupt

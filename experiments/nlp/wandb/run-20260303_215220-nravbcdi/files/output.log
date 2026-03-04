@@ -1,0 +1,17 @@
+0step [00:00, ?step/s, best=0.0000, val_acc=0.0000]
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 223, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device, args.model)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 179, in run
+    loss = step_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 135, in step_fn
+    embed_optimizer.zero_grad()
+NameError: name 'embed_optimizer' is not defined
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 223, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device, args.model)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 179, in run
+    loss = step_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 135, in step_fn
+    embed_optimizer.zero_grad()
+NameError: name 'embed_optimizer' is not defined

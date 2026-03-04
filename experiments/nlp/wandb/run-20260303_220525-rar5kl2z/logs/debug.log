@@ -1,0 +1,509 @@
+2026-03-03 22:05:25,757 INFO    MainThread:97428 [wandb_setup.py:_flush():81] Current SDK version is 0.25.0
+2026-03-03 22:05:25,758 INFO    MainThread:97428 [wandb_setup.py:_flush():81] Configure stats pid to 97428
+2026-03-03 22:05:25,758 INFO    MainThread:97428 [wandb_setup.py:_flush():81] Loading settings from environment variables
+2026-03-03 22:05:25,758 INFO    MainThread:97428 [wandb_init.py:setup_run_log_directory():717] Logging user logs to /home/cyuzuzo/thesisV5/experiments/nlp/wandb/run-20260303_220525-rar5kl2z/logs/debug.log
+2026-03-03 22:05:25,758 INFO    MainThread:97428 [wandb_init.py:setup_run_log_directory():718] Logging internal logs to /home/cyuzuzo/thesisV5/experiments/nlp/wandb/run-20260303_220525-rar5kl2z/logs/debug-internal.log
+2026-03-03 22:05:25,758 INFO    MainThread:97428 [wandb_init.py:init():844] calling init triggers
+2026-03-03 22:05:25,758 INFO    MainThread:97428 [wandb_init.py:init():849] wandb.init called with sweep_config: {}
+config: {'_wandb': {}}
+2026-03-03 22:05:25,758 INFO    MainThread:97428 [wandb_init.py:init():892] starting backend
+2026-03-03 22:05:26,116 INFO    MainThread:97428 [wandb_init.py:init():895] sending inform_init request
+2026-03-03 22:05:26,123 INFO    MainThread:97428 [wandb_init.py:init():903] backend started and connected
+2026-03-03 22:05:26,124 INFO    MainThread:97428 [wandb_init.py:init():973] updated telemetry
+2026-03-03 22:05:26,134 INFO    MainThread:97428 [wandb_init.py:init():997] communicating run to backend with 90.0 second timeout
+2026-03-03 22:05:27,210 INFO    MainThread:97428 [wandb_init.py:init():1042] starting run threads in backend
+2026-03-03 22:05:27,718 INFO    MainThread:97428 [wandb_run.py:_console_start():2524] atexit reg
+2026-03-03 22:05:27,718 INFO    MainThread:97428 [wandb_run.py:_redirect():2373] redirect: wrap_raw
+2026-03-03 22:05:27,718 INFO    MainThread:97428 [wandb_run.py:_redirect():2442] Wrapping output streams.
+2026-03-03 22:05:27,718 INFO    MainThread:97428 [wandb_run.py:_redirect():2465] Redirects installed.
+2026-03-03 22:05:27,725 INFO    MainThread:97428 [wandb_init.py:init():1082] run started, returning control to user process
+2026-03-03 22:05:27,726 INFO    MainThread:97428 [wandb_run.py:_config_callback():1403] config_cb None None {'framework': 'ptorch_parr_mlp', 'task': 'SST2', 'embed_dim': 128, 'hidden': [512], 'optimizer': 'ProjectionAdadelta', 'opt_lr': 10000, 'batch_size': 128, 'seed': 42, 'run_number': 1, 'max_steps': 2000, 'eval_every': 1, 'patience': 100000, 'bilinear_projection_num_newton_steps': 10, 'cross_entropy_method': 'fixed_point', 'cross_entropy_num_steps': 10, 'cross_entropy_lambda': 5.0, 'bilinear_method': 'fast', 'bilinear_matrix_method': 'parr', 'matmul_proj_method': 'seq'}
+2026-03-03 22:07:54,689 INFO    wandb-AsyncioManager-main:97428 [service_client.py:_forward_responses():134] Reached EOF.
+2026-03-03 22:07:54,690 INFO    wandb-AsyncioManager-main:97428 [mailbox.py:close():155] Closing mailbox, abandoning 1 handles.
+2026-03-03 22:07:54,951 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,956 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,957 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,958 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,962 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,963 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,964 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,964 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,965 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,966 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,967 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,968 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,968 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,968 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,969 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,970 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,971 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,972 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,973 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,974 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,975 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,976 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,977 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,978 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,979 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,980 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,981 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,989 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost
+2026-03-03 22:07:54,996 ERROR   wandb-AsyncioManager-main:97428 [asyncio_manager.py:fn_wrap_exceptions():184] Uncaught exception in run_soon callback.
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 182, in fn_wrap_exceptions
+    await fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 45, in publish
+    await self._send_server_request(request)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 78, in _send_server_request
+    raise self._broken_exc.with_traceback(self._broken_tb)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 87, in _send_server_request
+    await self._drain_writer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/service/service_client.py", line 96, in _drain_writer
+    await self._writer.drain()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 371, in drain
+    await self._protocol._drain_helper()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/asyncio/streams.py", line 167, in _drain_helper
+    raise ConnectionResetError('Connection lost')
+ConnectionResetError: Connection lost

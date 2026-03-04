@@ -1,0 +1,84 @@
+_wandb:
+    value:
+        cli_version: 0.25.0
+        e:
+            rafktlwmmdl7eeu3fwt0ofj35bzc347h:
+                codePath: experiments/nlp/bench_ptorch.py
+                codePathLocal: bench_ptorch.py
+                cpu_count: 4
+                cpu_count_logical: 8
+                disk:
+                    /:
+                        total: "254520852480"
+                        used: "242269577216"
+                email: jeff.jambe@student.kuleuven.be
+                executable: /home/cyuzuzo/.pyenv/versions/3.10.19/bin/python3
+                git:
+                    commit: 23b268ab721e328d9e44ebf86bd30408bca1c05a
+                    remote: git@github.com:cyuzuzo-j/learning_with_projections.git
+                host: cyuzuzo
+                memory:
+                    total: "16595554304"
+                os: Linux-6.18.7-arch1-1-surface-x86_64-with-glibc2.42
+                program: /home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py
+                python: CPython 3.10.19
+                root: /home/cyuzuzo/thesisV5/experiments/nlp
+                startedAt: "2026-03-03T21:03:23.017778Z"
+                writerId: rafktlwmmdl7eeu3fwt0ofj35bzc347h
+        m: []
+        python_version: 3.10.19
+        t:
+            "1":
+                - 1
+                - 49
+                - 51
+            "2":
+                - 1
+                - 49
+                - 51
+            "3":
+                - 13
+                - 61
+            "4": 3.10.19
+            "5": 0.25.0
+            "12": 0.25.0
+            "13": linux-x86_64
+batch_size:
+    value: 128
+bilinear_matrix_method:
+    value: parr
+bilinear_method:
+    value: fast
+bilinear_projection_num_newton_steps:
+    value: 10
+cross_entropy_lambda:
+    value: 5
+cross_entropy_method:
+    value: fixed_point
+cross_entropy_num_steps:
+    value: 10
+embed_dim:
+    value: 128
+eval_every:
+    value: 1
+framework:
+    value: ptorch_parr_mlp
+hidden:
+    value:
+        - 512
+matmul_proj_method:
+    value: seq
+max_steps:
+    value: 2000
+opt_lr:
+    value: 1
+optimizer:
+    value: ProjectionAdadelta
+patience:
+    value: 100000
+run_number:
+    value: 1
+seed:
+    value: 42
+task:
+    value: SST2
