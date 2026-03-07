@@ -11,7 +11,7 @@ import yaml
 import torch
 import torch.nn as tnn
 import torch.nn.functional as F
-from ptorch.nn.modules import LinearBias, ReLU, MultiHeadAttention, Conversion, LinearExact
+from ptorch.nn.modules import LinearBias, ReLU, MultiHeadAttention, Conversion, Mean
 from ptorch.core.ops import MarginLossProjection, CrossEntropyProjection
 import ptorch.optim_static as ptorch_optim_static
 import ptorch.config as ptorch_config
@@ -36,7 +36,7 @@ class TextMLP(tnn.Module):
         last = embed_dim
         self.hidden_layers = tnn.ModuleList()
         for f in hidden_dims:
-            self.hidden_layers.append(LinearExact(last, f))  # projection-based
+            self.hidden_layers.append(LinearBias(last, f))  # projection-based
             self.hidden_layers.append(ReLU(f))               # projection-based
             last = f
 
@@ -68,7 +68,7 @@ class TinyAttention(tnn.Module):
         # Self-attention
         context = self.attention(embedded) # B, S, E
         
-        pooled = context.mean(dim=1) # B, E
+        pooled = Mean(context) # B, E
         
         return self.out(pooled)
 
@@ -210,7 +210,7 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', choices=['mlp', 'attention'], default='mlp', help='Model choice')
+    parser.add_argument('--model', choices=['mlp', 'attention'], default='attention', help='Model choice')
     args = parser.parse_args()
     
     cfg    = yaml.safe_load(open(CFG_PATH))

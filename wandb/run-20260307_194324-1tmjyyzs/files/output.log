@@ -1,0 +1,52 @@
+0step [00:00, ?step/s, best=0.0000, val_acc=0.5352]/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py:164: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:836.)
+  wandb.log({"train/loss": float(loss)}, step=step)
+1091step [10:21,  1.76step/s, best=0.8125, val_acc=0.8125]
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 205, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device, args.model)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 161, in run
+    loss = step_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 119, in step_fn
+    loss = F.cross_entropy(model(x), y.long())
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 57, in forward
+    context, _ = self.attention(embedded, embedded, embedded) # B, S, E
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/activation.py", line 1488, in forward
+    attn_output, attn_output_weights = F.multi_head_attention_forward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/functional.py", line 6307, in multi_head_attention_forward
+    q, k, v = _in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/functional.py", line 5706, in _in_projection_packed
+    .contiguous()
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 205, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device, args.model)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 161, in run
+    loss = step_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 119, in step_fn
+    loss = F.cross_entropy(model(x), y.long())
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_torch.py", line 57, in forward
+    context, _ = self.attention(embedded, embedded, embedded) # B, S, E
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/activation.py", line 1488, in forward
+    attn_output, attn_output_weights = F.multi_head_attention_forward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/functional.py", line 6307, in multi_head_attention_forward
+    q, k, v = _in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/functional.py", line 5706, in _in_projection_packed
+    .contiguous()
+KeyboardInterrupt

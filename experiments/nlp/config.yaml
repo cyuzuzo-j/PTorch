@@ -20,7 +20,7 @@ max_steps: 50_000
 patience: 50
 
 # optimizers
-torch_optimizer: "SGD"
+torch_optimizer: "Adam"
 torch_optimizer_kwargs:
   lr: 0.001
 
@@ -30,6 +30,6 @@ pjax_optimizer_kwargs:
 pjax_orr_optimizer: "AlternatingProjections"
 pjax_orr_optimizer_kwargs:
 
-ptorch_optimizer: "ProjectionAdadelta"
+ptorch_optimizer: "ProjectionMuon"
 ptorch_optimizer_kwargs:
-  lr: 10
+  lr: 0.001

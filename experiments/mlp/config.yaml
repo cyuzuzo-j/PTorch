@@ -42,6 +42,6 @@ ptorch_optimizer: ProjectionMuon  # AlternatingProjections | AlternatingProjecti
 ptorch_optimizer_kwargs: {lr: 0.001}
 
 # torch — any torch.optim class
-torch_optimizer: SGD             # Adam | SGD | AdamW | ...
+torch_optimizer: Adam             # Adam | SGD | AdamW | ...
 torch_optimizer_kwargs:
   lr: 0.001

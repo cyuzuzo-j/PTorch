@@ -191,7 +191,7 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', choices=['mlp', 'attention'], default='mlp', help='Model choice')
+    parser.add_argument('--model', choices=['mlp', 'attention'], default='attention', help='Model choice')
     args = parser.parse_args()
     
     cfg    = yaml.safe_load(open(CFG_PATH))

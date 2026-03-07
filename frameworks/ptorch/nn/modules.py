@@ -6,6 +6,7 @@ from ..core.ops import (
     SumReluProjection,
     SimplexProjection,
     Conversion as ConversionFn,
+    MeanProjection
 )
 
 class Linear(nn.Module):
@@ -93,6 +94,13 @@ class Conversion(nn.Module):
     def forward(self, input):
         return ConversionFn.apply(input)
 
+class Mean(nn.Module):
+    def __init__(self):
+        super().__init__()
+    
+    def forward(self, input):
+        return MeanProjection.apply(input)
+        
 class MultiHeadAttention(nn.Module):
     """Multi-head attention mechanism for transformer architectures.
 
@@ -123,6 +131,8 @@ class MultiHeadAttention(nn.Module):
         self.value_layer = Linear(model_features, heads * qkv_features, alpha=alpha, g=g)
         self.out_layer = Linear(heads * qkv_features, model_features, alpha=alpha, g=g)
         self.heads = heads
+        self.proj_cache_1 = {}
+        self.proj_cache_2 = {}
 
     def forward(self, input):
         """Compute multi-head attention.
@@ -147,12 +157,11 @@ class MultiHeadAttention(nn.Module):
 
         # Compute attention scores
         scale = 1.0 / (q.shape[-1] ** 0.5)
-        qk = MatMulProjection.apply(q, k.transpose(-2, -1), self.query_layer.alpha, self.query_layer.g)
-        qk = qk* scale  # simple scaling via addition (matches pjax)
+        qk = MatMulProjection.apply(q, k.transpose(-2, -1), self.proj_cache_1, self.query_layer.alpha, self.query_layer.g, scale)
         qk = SimplexProjection.apply(qk)
 
         # Weighted sum of values
-        o = MatMulProjection.apply(qk, v, self.query_layer.alpha, self.query_layer.g)
+        o = MatMulProjection.apply(qk, v,self.proj_cache_2, self.query_layer.alpha, self.query_layer.g)
 
         # Merge heads: (batch_size, heads, seq_len, qkv) -> (batch_size, seq_len, heads*qkv)
         o = o.permute(0, 2, 1, 3).reshape(batch_size, seq_len, -1)

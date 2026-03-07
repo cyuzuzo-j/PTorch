@@ -6,66 +6,8 @@ from .. import config
 # Suppress pin_memory warning when no accelerator is available
 warnings.filterwarnings("ignore", message=".*pin_memory.*")
 
-def _bilinear_proj_core(a, b, z, alpha=1.0, g=1.0, omega=1.0, num_steps=10):
-    """
-    Batched projection onto bilinear function graph using Newton's method.
-
-    a: (*, K)      -- vectors (inputs)
-    b: (*, K)      -- vectors (weights)
-    z: (*,)        -- scalar targets (Omega * y)
-    alpha: float   -- stiffness for weights  (penalty on ||w' - w||^2)
-    g: float       -- stiffness for targets  (penalty on (y' - y)^2)
-    omega: float   -- constraint multiplier for the target
-    num_steps: int -- number of Newton iterations
-
-    Returns a_new (*, K), b_new (*, K), z_new (*,)
-    """
-    p = (a * b).sum(dim=-1)            # (*,)
-    qa = (a * a).sum(dim=-1)           # (*,)
-    qb = (b * b).sum(dim=-1)           # (*,)
-    
-    # Effective q incorporating alpha
-    q_eff = qa + alpha * qb            # (*,)
-    
-    t = torch.zeros_like(p)            # (*,)
-    max_t = 0.999 * (alpha ** 0.5)
-    
-    target_penalty = (omega ** 2) / (g ** 2)
-
-    for _ in range(num_steps):
-        t2 = t * t
-        alpha_minus_t2 = alpha - t2
-
-        N = alpha * (p * (alpha + t2) + t * q_eff)
-        
-        f_val = (N / (alpha_minus_t2 * alpha_minus_t2)) - z + t * target_penalty
-
-        N_prime = alpha * (2.0 * t * p + q_eff)
-        
-        f_prime_val = ((N_prime * alpha_minus_t2) + 4.0 * t * N) / (alpha_minus_t2 ** 3) + target_penalty
-
-        step = f_val / (f_prime_val + 1e-8)
-        t = torch.clamp(t - step, -max_t, max_t)
-
-    t2 = t * t
-    denom = alpha - t2
-
-    t_k = t.unsqueeze(-1)          # (*, 1)
-    denom_k = denom.unsqueeze(-1)  # (*, 1)
-
-    # Reconstruct updated tensors
-    a_new = alpha * (a + t_k * b) / denom_k
-    b_new = (alpha * b + t_k * a) / denom_k
-    
-    z_new = z - t * target_penalty
-    
-    return a_new, b_new, z_new
-
-
-
-
-@torch.compile(dynamic=True)
-def matmul_proj(A, B, Z, t_init=None, alpha=1.0, g=1.0, omega=1.0, num_steps=2):
+@torch.compile
+def matmul_proj(A, B, Z, t_init=None, alpha=1.0, g=1.0, omega=1.0, num_steps=1):
     """
     Exact independent bilinear projection for A @ B = Z.
     
@@ -126,14 +68,17 @@ def matmul_proj(A, B, Z, t_init=None, alpha=1.0, g=1.0, omega=1.0, num_steps=2):
 # ─── autograd.Function wrappers ───────────────────────────────────────────────
 class MatMulProjection(torch.autograd.Function):
     """
-    Exact per-dot-product bilinear projection for A @ B = Z.
+    Minimize || A_{new} - A_{old} ||_F^2 + alpha * || B_{new} - B_{old} ||_F^2 + g * || Z_{new} - Z_{old} ||_F^2
+    subject to A_{new} @ B_{new} = Z_{new}
     """
     @staticmethod
-    def forward(ctx, A, B, proj_cache=None, alpha=1.0, g=1.0):
+    def forward(ctx, A, B, proj_cache=None, alpha=1.0, g=1.0, omega=1.0, num_steps=1):
         ctx.save_for_backward(A, B)
         ctx.alpha = alpha
         ctx.g = g
+        ctx.num_steps = num_steps
         ctx.proj_cache = proj_cache  # Store reference to the mutable dictionary
+        ctx.omega = omega
         return A @ B
 
     @staticmethod
@@ -152,23 +97,27 @@ class MatMulProjection(torch.autograd.Function):
             B_2d = B_det.reshape(-1, B_det.shape[-2], B_det.shape[-1]).mean(dim=0)
             
             A_proj_2d, B_proj_2d, _, t_new = matmul_proj(
-                A_2d, B_2d, Z_2d, t_init=t_init, alpha=ctx.alpha, g=ctx.g)
+                A_2d, B_2d, Z_2d, t_init=t_init, alpha=ctx.alpha, g=ctx.g, num_steps=ctx.num_steps, omega=ctx.omega)
             
             A_proj = A_proj_2d.reshape(A_det.shape)
             B_proj = B_proj_2d.reshape(B_det.shape[-2], B_det.shape[-1]).expand(B_det.shape)
         else:
             A_proj, B_proj, _, t_new = matmul_proj(
-                A_det, B_det, Z_det, t_init=t_init, alpha=ctx.alpha, g=ctx.g)
+                A_det, B_det, Z_det, t_init=t_init, alpha=ctx.alpha, g=ctx.g, num_steps=ctx.num_steps, omega=ctx.omega)
 
         # Update the cache for the next iteration
         if ctx.proj_cache is not None:
             ctx.proj_cache['t'] = t_new
 
         # Return Nones for proj_cache, alpha, g to match forward args
-        return A_proj, B_proj, None, None, None
+        return A_proj, B_proj, None, None, None, None, None
 
 
 class MSEProjection(torch.autograd.Function):
+    """
+    Minimize || predictions_{new} - predictions_{old} ||_2^2 + ||targets_{new} - targets_{old} ||_2^2 subject to 
+    predictions_{new} = targets_{new}
+    """
     @staticmethod
     def forward(ctx, predictions, targets):
         ctx.save_for_backward(predictions, targets)
@@ -179,6 +128,30 @@ class MSEProjection(torch.autograd.Function):
         predictions, targets = ctx.saved_tensors
         out = (predictions + targets) / 2
         return out, out
+
+class CrossEntropyProjection(torch.autograd.Function):
+    """
+    prox_{lambda * l_CE(., y)}(x_0) = arg min_{x} (lambda * l_CE(x, y) + 1/2 * ||x - x_0||^2)
+    """
+    
+    @staticmethod
+    def forward(ctx, logits, labels, num_steps=5, lmbda = 1.0):
+        ctx.save_for_backward(logits, labels)
+        ctx.num_steps = num_steps
+        ctx.lmbda = lmbda
+        return logits
+
+    @staticmethod
+    def backward(ctx, z_target):
+        logits, labels = ctx.saved_tensors
+        lmbda = ctx.lmbda
+        steps = ctx.num_steps
+
+        x = logits
+        for _ in range(steps):
+            x = x + lmbda * (labels - F.softmax(x, dim=-1))
+
+        return x, labels
 
 class MarginLossProjection(torch.autograd.Function):
     @staticmethod
@@ -198,23 +171,6 @@ class MarginLossProjection(torch.autograd.Function):
 
         return new_logits, labels
 
-class CrossEntropyProjection(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, logits, labels):
-        ctx.save_for_backward(logits, labels)
-        return logits
-
-    @staticmethod
-    def backward(ctx, z_target):
-        logits, labels = ctx.saved_tensors
-        lmbda = 1.0
-        steps = 5
-
-        x = logits
-        for _ in range(steps):
-            x = x + lmbda * (labels - F.softmax(x, dim=-1))
-
-        return x, labels
 
 class Conversion(torch.autograd.Function):
     @staticmethod
@@ -265,6 +221,44 @@ class SumReluProjection(torch.autograd.Function):
         result = tuple(torch.where(dist_1 < dist_2, x_1, x_2)
                        for x_1, x_2 in zip(new_inputs_1, new_inputs_2))
         return result
+
+class MeanProjection(torch.autograd.Function):
+    """
+    Projects inputs onto the mean constraint graph.
+    https://gemini.google.com/share/53aeb9b49de3
+    """
+    @staticmethod
+    def forward(ctx, x, dim=-1):
+        # Note: Changed *inputs to x as torch.mean operates on a single tensor.
+        ctx.save_for_backward(x)
+        ctx.dim = dim
+        return torch.mean(x, dim=dim)
+    
+    @staticmethod
+    def backward(ctx, z_target):
+        x, = ctx.saved_tensors
+        dim = ctx.dim
+        n = x.size(dim)
+        
+        # Calculate the mean of the original input
+        x_mean = torch.mean(x, dim=dim, keepdim=True)
+        
+        # Align z_target dimensions for broadcasting if the forward pass reduced the dimension
+        if z_target.dim() < x.dim():
+            z_target_expanded = z_target.unsqueeze(dim)
+        else:
+            z_target_expanded = z_target
+            
+        # Compute lambda: (y_0 - mean(x_0)) / (n + 1)
+        lambda_val = (z_target_expanded - x_mean) / (n + 1)
+        
+        # Projected input: x_0 + lambda * 1
+        projected_x = x + lambda_val
+        
+        # Return the projected tensor. 
+        # We must return None for the 'dim' argument since it does not require a gradient.
+        return projected_x, None
+
 
 class StepProjection(torch.autograd.Function):
     """

@@ -7,13 +7,6 @@ defaults = {
     "cross_entropy_method": "fixed_point",
     "cross_entropy_num_steps": 10,
     "cross_entropy_lambda": 5.0,
-    # Projection method selection for matmul pipeline
-    # bilinear_method: "original" (float32 cast + jax.grad) or "fast" (hand-coded f_and_f_prime)
-    "bilinear_method": "fast",
-    # bilinear_matrix_method: "seq" (jax.lax.scan cyclic) or "parr" (jax.vmap + mean)
-    "bilinear_matrix_method": "parr",
-    # matmul_proj_method: "seq" (jax.lax.scan over batch) or "parr" (jax.vmap over batch)
-    "matmul_proj_method": "seq",
 }
 
 

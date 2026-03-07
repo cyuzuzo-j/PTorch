@@ -97,7 +97,7 @@ class ProjectionAdagrad(torch.optim.Adagrad):
         # Convert projection targets (stored in p.grad) to pseudo-gradients
         for group in self.param_groups:
             for p in group['params']:
-                if p.grad is not None:
+                if p.graProjectionAdadeltad is not None:
                     p.grad.copy_(p.data - p.grad)
         
         return super().step(closure)
