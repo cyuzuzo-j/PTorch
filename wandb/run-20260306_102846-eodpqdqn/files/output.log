@@ -1,0 +1,57 @@
+2600step [03:24, 12.73step/s, best=0.3703, val_acc=0.3715]
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 161, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device)
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 107, in run
+    accs = [eval_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 107, in <listcomp>
+    accs = [eval_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 96, in eval_fn
+    return (model(x).argmax(dim=-1) == y).float().mean()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 47, in forward
+    x = self.hidden_layers[i + 1](x)  # Simplex
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/nn/modules.py", line 238, in forward
+    return SimplexProjection.apply(input)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/function.py", line 581, in apply
+    return super().apply(*args, **kwargs)  # type: ignore[misc]
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/core/ops.py", line 703, in forward
+    return simplex_op_pt(a)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/core/ops.py", line 621, in simplex_op_pt
+    rho = torch.sum(valid_mask, dim=-1, keepdim=True)
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 161, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device)
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 107, in run
+    accs = [eval_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 107, in <listcomp>
+    accs = [eval_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 96, in eval_fn
+    return (model(x).argmax(dim=-1) == y).float().mean()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 47, in forward
+    x = self.hidden_layers[i + 1](x)  # Simplex
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/nn/modules.py", line 238, in forward
+    return SimplexProjection.apply(input)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/function.py", line 581, in apply
+    return super().apply(*args, **kwargs)  # type: ignore[misc]
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/core/ops.py", line 703, in forward
+    return simplex_op_pt(a)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/core/ops.py", line 621, in simplex_op_pt
+    rho = torch.sum(valid_mask, dim=-1, keepdim=True)
+KeyboardInterrupt

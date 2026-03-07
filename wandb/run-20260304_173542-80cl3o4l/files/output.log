@@ -1,0 +1,73 @@
+0step [00:13, ?step/s, best=0.0000, val_acc=0.0915]
+jax.errors.SimplifiedTraceback: For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/bench_pjax_combined.py", line 193, in <module>
+    main()
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/bench_pjax_combined.py", line 186, in main
+    run(cfg, task_cfg, batch_size, run_number, all_keys[ki], args.impl)
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/bench_pjax_combined.py", line 155, in run
+    params, loss = step_fn(params, jnp.array(x), jnp.array(y))
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/bench_pjax_combined.py", line 118, in step_fn
+    res = optimizer.update(apply_fn, params)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/optim.py", line 213, in update
+    inputs, losses = jax.lax.scan(step, inputs, None, length=steps_per_update)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/optim.py", line 210, in step
+    new_vars = self._step(vars_, *projections)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/optim.py", line 342, in _step
+    reflection(projection_b, reflection(projection_a, vars)),
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/optim.py", line 337, in reflection
+    return jax.tree.map(lambda x, y: 2.0 * x - y, projection(vars), vars)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/optim.py", line 123, in multiple_projection
+    inputs = projection(computation, inputs, graph)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/optim.py", line 116, in projection
+    projection_inputs = computation.projection(*inputs[computation], output)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/core/ops.py", line 1022, in matmul_proj_dispatch_l1
+    return methods[config.matmul_proj_method](a, b, z)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/core/ops.py", line 1010, in matmul_proj_seq_l1
+    b_final, a_result = jax.lax.scan(batch_scan_body, b, (a_batch, z_batch))
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/core/ops.py", line 1007, in batch_scan_body
+    a_final, b_new = _project_single(a_sample, b_curr, z_sample)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/core/ops.py", line 993, in _project_single
+    b_final, a_result = jax.lax.scan(scan_body, b_matrix, (a_batched, z_batched))
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/core/ops.py", line 991, in scan_body
+    a_final, b_new = _bilinear_matrix_methods[config.bilinear_matrix_method](a_sample, b_curr, z_sample, "l1")
+TypeError: bilinearMatrix_parr() takes 3 positional arguments but 4 were given
+jax.errors.SimplifiedTraceback: For simplicity, JAX has removed its internal frames from the traceback of the following exception. Set JAX_TRACEBACK_FILTERING=off to include these.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/bench_pjax_combined.py", line 193, in <module>
+    main()
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/bench_pjax_combined.py", line 186, in main
+    run(cfg, task_cfg, batch_size, run_number, all_keys[ki], args.impl)
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/bench_pjax_combined.py", line 155, in run
+    params, loss = step_fn(params, jnp.array(x), jnp.array(y))
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/bench_pjax_combined.py", line 118, in step_fn
+    res = optimizer.update(apply_fn, params)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/optim.py", line 213, in update
+    inputs, losses = jax.lax.scan(step, inputs, None, length=steps_per_update)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/optim.py", line 210, in step
+    new_vars = self._step(vars_, *projections)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/optim.py", line 342, in _step
+    reflection(projection_b, reflection(projection_a, vars)),
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/optim.py", line 337, in reflection
+    return jax.tree.map(lambda x, y: 2.0 * x - y, projection(vars), vars)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/optim.py", line 123, in multiple_projection
+    inputs = projection(computation, inputs, graph)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/optim.py", line 116, in projection
+    projection_inputs = computation.projection(*inputs[computation], output)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/core/ops.py", line 1022, in matmul_proj_dispatch_l1
+    return methods[config.matmul_proj_method](a, b, z)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/core/ops.py", line 1010, in matmul_proj_seq_l1
+    b_final, a_result = jax.lax.scan(batch_scan_body, b, (a_batch, z_batch))
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/core/ops.py", line 1007, in batch_scan_body
+    a_final, b_new = _project_single(a_sample, b_curr, z_sample)
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/core/ops.py", line 993, in _project_single
+    b_final, a_result = jax.lax.scan(scan_body, b_matrix, (a_batched, z_batched))
+  File "/home/cyuzuzo/thesisV5/frameworks/pjax/core/ops.py", line 991, in scan_body
+    a_final, b_new = _bilinear_matrix_methods[config.bilinear_matrix_method](a_sample, b_curr, z_sample, "l1")
+TypeError: bilinearMatrix_parr() takes 3 positional arguments but 4 were given

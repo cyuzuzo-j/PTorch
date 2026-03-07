@@ -1,0 +1,231 @@
+0step [00:44, ?step/s, best=0.0000, val_acc=0.7500]
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1433, in _compile
+    guarded_code, tracer_output = compile_inner(code, one_graph, hooks)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_utils_internal.py", line 92, in wrapper_function
+    return function(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1117, in compile_inner
+    return _compile_inner(code, one_graph, hooks)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1151, in _compile_inner
+    dynamo_output = compile_frame(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1032, in compile_frame
+    bytecode, tracer_output = transform_code_object(code, transform)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/bytecode_transformation.py", line 1592, in transform_code_object
+    tracer_output = transformations(instructions, code_options)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1004, in transform
+    tracer_output = trace_frame(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 312, in _fn
+    return fn(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 815, in trace_frame
+    run_tracer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 797, in run_tracer
+    tracer.run()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/symbolic_convert.py", line 1487, in run
+    while self.step():
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/symbolic_convert.py", line 1348, in step
+    self.dispatch_table[inst.opcode](self, inst)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/symbolic_convert.py", line 904, in wrapper
+    return inner_fn(self, inst)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/symbolic_convert.py", line 2320, in CALL_FUNCTION
+    self.call_function(fn, args, {})
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/symbolic_convert.py", line 1266, in call_function
+    self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/variables/misc.py", line 1115, in call_function
+    return self.obj.call_method(tx, self.name, args, kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/variables/tensor.py", line 713, in call_method
+    return wrap_fx_proxy(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/variables/builder.py", line 2645, in wrap_fx_proxy
+    return wrap_fx_proxy_cls(target_cls=TensorVariable, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/variables/builder.py", line 2711, in wrap_fx_proxy_cls
+    return _wrap_fx_proxy(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/variables/builder.py", line 2809, in _wrap_fx_proxy
+    example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/utils.py", line 3376, in get_fake_value
+    ret_val = wrap_fake_exception(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/utils.py", line 2864, in wrap_fake_exception
+    return fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/utils.py", line 3377, in <lambda>
+    lambda: run_node(tx.output, node, args, kwargs, nnmodule)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/utils.py", line 3557, in run_node
+    return getattr(args[0], node.target)(*args[1:], **kwargs)  # type: ignore[arg-type]
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/sym_node.py", line 613, in guard_or_true
+    return guard_or_true(SymBool(self))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 1407, in guard_or_true
+    return _guard_or(a, True)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 1390, in _guard_or
+    r = sym_node.shape_env.evaluate_sym_node(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 7233, in evaluate_sym_node
+    return self.evaluate_expr(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 7333, in evaluate_expr
+    return self._inner_evaluate_expr(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/recording.py", line 272, in wrapper
+    return retlog(fn(*args, **kwargs))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 7356, in _inner_evaluate_expr
+    return self._evaluate_expr(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 7481, in _evaluate_expr
+    static_expr = self._maybe_evaluate_static(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 2547, in wrapper
+    return fn_cache(self, *args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 6308, in _maybe_evaluate_static
+    r = _maybe_evaluate_static_worker(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 2401, in _maybe_evaluate_static_worker
+    out = bound_sympy(new_expr, new_range_env)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/utils/_sympy/value_ranges.py", line 1041, in bound_sympy
+    return sympy_interp(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/utils/_sympy/interp.py", line 201, in sympy_interp
+    return analysis.constant(expr, dtype)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/utils/_sympy/value_ranges.py", line 439, in constant
+    if isinstance(value, SupportsFloat) and math.isnan(value):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/typing.py", line 1502, in __instancecheck__
+    _is_callable_members_only(cls)) and
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/typing.py", line 1427, in _is_callable_members_only
+    return all(callable(getattr(cls, attr, None)) for attr in _get_protocol_attrs(cls))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/typing.py", line 1417, in _get_protocol_attrs
+    continue
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/boolean/bench_ptorch.py", line 145, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device)
+  File "/home/cyuzuzo/thesisV5/experiments/boolean/bench_ptorch.py", line 117, in run
+    loss = step_fn(x_train, y_train)
+  File "/home/cyuzuzo/thesisV5/experiments/boolean/bench_ptorch.py", line 82, in step_fn
+    projected.sum().backward()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_tensor.py", line 625, in backward
+    torch.autograd.backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/__init__.py", line 354, in backward
+    _engine_run_backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/graph.py", line 841, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/function.py", line 315, in apply
+    return user_fn(self, *args)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/core/ops.py", line 311, in backward
+    A_proj, B_proj, _ = matmul_proj_exact_pt(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 832, in compile_wrapper
+    return fn(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1874, in __call__
+    result = self._torchdynamo_orig_backend(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1624, in __call__
+    result = self._inner_convert(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 688, in __call__
+    result = _compile(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1509, in _compile
+    if tracer_output:
+UnboundLocalError: local variable 'tracer_output' referenced before assignment
+Traceback (most recent call last):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1433, in _compile
+    guarded_code, tracer_output = compile_inner(code, one_graph, hooks)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_utils_internal.py", line 92, in wrapper_function
+    return function(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1117, in compile_inner
+    return _compile_inner(code, one_graph, hooks)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1151, in _compile_inner
+    dynamo_output = compile_frame(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1032, in compile_frame
+    bytecode, tracer_output = transform_code_object(code, transform)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/bytecode_transformation.py", line 1592, in transform_code_object
+    tracer_output = transformations(instructions, code_options)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1004, in transform
+    tracer_output = trace_frame(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 312, in _fn
+    return fn(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 815, in trace_frame
+    run_tracer()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 797, in run_tracer
+    tracer.run()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/symbolic_convert.py", line 1487, in run
+    while self.step():
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/symbolic_convert.py", line 1348, in step
+    self.dispatch_table[inst.opcode](self, inst)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/symbolic_convert.py", line 904, in wrapper
+    return inner_fn(self, inst)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/symbolic_convert.py", line 2320, in CALL_FUNCTION
+    self.call_function(fn, args, {})
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/symbolic_convert.py", line 1266, in call_function
+    self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/variables/misc.py", line 1115, in call_function
+    return self.obj.call_method(tx, self.name, args, kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/variables/tensor.py", line 713, in call_method
+    return wrap_fx_proxy(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/variables/builder.py", line 2645, in wrap_fx_proxy
+    return wrap_fx_proxy_cls(target_cls=TensorVariable, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/variables/builder.py", line 2711, in wrap_fx_proxy_cls
+    return _wrap_fx_proxy(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/variables/builder.py", line 2809, in _wrap_fx_proxy
+    example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/utils.py", line 3376, in get_fake_value
+    ret_val = wrap_fake_exception(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/utils.py", line 2864, in wrap_fake_exception
+    return fn()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/utils.py", line 3377, in <lambda>
+    lambda: run_node(tx.output, node, args, kwargs, nnmodule)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/utils.py", line 3557, in run_node
+    return getattr(args[0], node.target)(*args[1:], **kwargs)  # type: ignore[arg-type]
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/sym_node.py", line 613, in guard_or_true
+    return guard_or_true(SymBool(self))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 1407, in guard_or_true
+    return _guard_or(a, True)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 1390, in _guard_or
+    r = sym_node.shape_env.evaluate_sym_node(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 7233, in evaluate_sym_node
+    return self.evaluate_expr(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 7333, in evaluate_expr
+    return self._inner_evaluate_expr(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/recording.py", line 272, in wrapper
+    return retlog(fn(*args, **kwargs))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 7356, in _inner_evaluate_expr
+    return self._evaluate_expr(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 7481, in _evaluate_expr
+    static_expr = self._maybe_evaluate_static(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 2547, in wrapper
+    return fn_cache(self, *args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 6308, in _maybe_evaluate_static
+    r = _maybe_evaluate_static_worker(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/fx/experimental/symbolic_shapes.py", line 2401, in _maybe_evaluate_static_worker
+    out = bound_sympy(new_expr, new_range_env)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/utils/_sympy/value_ranges.py", line 1041, in bound_sympy
+    return sympy_interp(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/utils/_sympy/interp.py", line 201, in sympy_interp
+    return analysis.constant(expr, dtype)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/utils/_sympy/value_ranges.py", line 439, in constant
+    if isinstance(value, SupportsFloat) and math.isnan(value):
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/typing.py", line 1502, in __instancecheck__
+    _is_callable_members_only(cls)) and
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/typing.py", line 1427, in _is_callable_members_only
+    return all(callable(getattr(cls, attr, None)) for attr in _get_protocol_attrs(cls))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/typing.py", line 1417, in _get_protocol_attrs
+    continue
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/boolean/bench_ptorch.py", line 145, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device)
+  File "/home/cyuzuzo/thesisV5/experiments/boolean/bench_ptorch.py", line 117, in run
+    loss = step_fn(x_train, y_train)
+  File "/home/cyuzuzo/thesisV5/experiments/boolean/bench_ptorch.py", line 82, in step_fn
+    projected.sum().backward()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_tensor.py", line 625, in backward
+    torch.autograd.backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/__init__.py", line 354, in backward
+    _engine_run_backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/graph.py", line 841, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/function.py", line 315, in apply
+    return user_fn(self, *args)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/core/ops.py", line 311, in backward
+    A_proj, B_proj, _ = matmul_proj_exact_pt(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 832, in compile_wrapper
+    return fn(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1874, in __call__
+    result = self._torchdynamo_orig_backend(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1624, in __call__
+    result = self._inner_convert(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 688, in __call__
+    result = _compile(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1509, in _compile
+    if tracer_output:
+UnboundLocalError: local variable 'tracer_output' referenced before assignment

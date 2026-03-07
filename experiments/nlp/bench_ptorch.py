@@ -112,14 +112,6 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
 
     optimizer       = OPTIM_MODULES[opt_name](model.parameters(), **opt_kwargs)
 
-    # Linear warmup scheduler: ramp lr from 0 → embed_lr over warmup_steps
-    warmup_steps = 200
-    def lr_lambda(current_step):
-        if current_step < warmup_steps:
-            return current_step / warmup_steps
-        return 1.0
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-
     run_name = f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}_{model_name}_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}"
     run = wandb.init(project="pjax", name=run_name)
     wandb.config.update({
@@ -135,7 +127,6 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
         "max_steps": cfg["max_steps"],
         "eval_every": cfg["eval_every"],
         "patience": cfg["patience"],
-        "warmup_steps": warmup_steps,
         **ptorch_config.snapshot(),
     })
 
@@ -147,7 +138,6 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
         projected.sum().backward()
         loss = F.cross_entropy(logits.detach(), y.long())
         optimizer.step()
-        scheduler.step()
         return loss
 
     def eval_fn(x, y):

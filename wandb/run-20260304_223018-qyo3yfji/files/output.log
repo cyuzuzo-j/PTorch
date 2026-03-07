@@ -1,0 +1,33 @@
+150step [01:28,  1.70step/s, best=0.0914, val_acc=0.0751]
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/bench_ptorch.py", line 157, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device)
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/bench_ptorch.py", line 95, in run
+    accs.append(eval_fn(x_tensor, y_tensor))
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/bench_ptorch.py", line 78, in eval_fn
+    return (model(x).argmax(dim=-1) == y).float().mean()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/models.py", line 125, in forward
+    x = self._forward_features(x)
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/models.py", line 120, in _forward_features
+    x = getattr(self, f'group{i+1}')(x)
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/bench_ptorch.py", line 157, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device)
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/bench_ptorch.py", line 95, in run
+    accs.append(eval_fn(x_tensor, y_tensor))
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/bench_ptorch.py", line 78, in eval_fn
+    return (model(x).argmax(dim=-1) == y).float().mean()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/models.py", line 125, in forward
+    x = self._forward_features(x)
+  File "/home/cyuzuzo/thesisV5/experiments/cnn_benchmarks/models.py", line 120, in _forward_features
+    x = getattr(self, f'group{i+1}')(x)
+KeyboardInterrupt

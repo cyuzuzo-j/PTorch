@@ -1,0 +1,81 @@
+_wandb:
+    value:
+        cli_version: 0.25.0
+        e:
+            kn0r3v123zqo6r5hn7q5aikmfi0y22vl:
+                codePath: experiments/mlp/bench_ptorch.py
+                codePathLocal: experiments/mlp/bench_ptorch.py
+                cpu_count: 4
+                cpu_count_logical: 8
+                disk:
+                    /:
+                        total: "254520852480"
+                        used: "243204542464"
+                email: jeff.jambe@student.kuleuven.be
+                executable: /home/cyuzuzo/.pyenv/versions/3.10.19/bin/python3
+                git:
+                    commit: dfc7451197ce948538632310e7a0fa3785312f3f
+                    remote: git@github.com:cyuzuzo-j/learning_with_projections.git
+                host: cyuzuzo
+                memory:
+                    total: "16595558400"
+                os: Linux-6.18.7-arch1-1-surface-x86_64-with-glibc2.42
+                program: /home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py
+                python: CPython 3.10.19
+                root: /home/cyuzuzo/thesisV5
+                startedAt: "2026-03-05T14:51:50.492795Z"
+                writerId: kn0r3v123zqo6r5hn7q5aikmfi0y22vl
+        m: []
+        python_version: 3.10.19
+        t:
+            "1":
+                - 1
+                - 41
+            "2":
+                - 1
+                - 41
+            "3":
+                - 2
+                - 13
+                - 61
+            "4": 3.10.19
+            "5": 0.25.0
+            "12": 0.25.0
+            "13": linux-x86_64
+batch_size:
+    value: 128
+bilinear_matrix_method:
+    value: parr
+bilinear_method:
+    value: fast
+bilinear_projection_num_newton_steps:
+    value: 10
+cross_entropy_lambda:
+    value: 5
+cross_entropy_method:
+    value: fixed_point
+cross_entropy_num_steps:
+    value: 10
+eval_every:
+    value: 50
+framework:
+    value: ptorch_parr
+hidden:
+    value:
+        - 128
+matmul_proj_method:
+    value: seq
+max_steps:
+    value: 5000
+opt_lr:
+    value: 0.001
+optimizer:
+    value: AlternatingProjections
+patience:
+    value: 10
+run_number:
+    value: 2
+seed:
+    value: 43
+task:
+    value: MNIST

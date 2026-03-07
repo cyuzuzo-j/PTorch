@@ -1,0 +1,50 @@
+##################################################
+###   Shared experiment configuration          ###
+###   Used by all benchmark scripts            ###
+##################################################
+
+# ── Experiment identity ───────────────────────────
+experiment_name: cnn_benchmark   # shown in wandb as the run prefix
+random_seed: 43
+max_steps: 10000
+num_runs: 2
+eval_every: 50
+patience: 10
+
+# ── Model architecture ───────────────────────────
+# Each entry is the width of one ConvGroup block.
+# The number of entries determines how many ConvGroup layers are stacked.
+conv_widths: [4]
+
+# ── Batch sizes to sweep ─────────────────────────
+batch_sizes: [128]
+
+# ── Tasks ─────────────────────────────────────────
+tasks:
+  - name: MNIST
+    classes: 10
+    in_channels: 1
+
+  - name: CIFAR10
+    classes: 10
+    in_channels: 3
+
+# ── Optimizers per framework ──────────────────────
+# pjax (new) — optim_static or optim classes
+pjax_optimizer: DouglasRachford
+pjax_optimizer_kwargs:
+  steps_per_update: 50
+
+# pjax_orr (original) — optim classes
+pjax_orr_optimizer: DouglasRachford
+pjax_orr_optimizer_kwargs:
+  steps_per_update: 50
+
+# ptorch — ptorch.optim_static classes
+ptorch_optimizer: AlternatingProjections
+ptorch_optimizer_kwargs: {}
+
+# torch — any torch.optim class
+torch_optimizer: Adam
+torch_optimizer_kwargs:
+  lr: 0.001

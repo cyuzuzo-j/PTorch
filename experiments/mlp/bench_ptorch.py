@@ -11,15 +11,15 @@ import yaml
 import torch
 import torch.nn as tnn
 import torch.nn.functional as F
-from ptorch.nn.modules import LinearBias, ReLU
-from ptorch.core.ops import MarginLossProjection
+from ptorch.nn.modules import LinearBias, ReLU, Simplex
+from ptorch.core.ops import MarginLossProjection, CrossEntropyProjection
 import ptorch.optim_static as ptorch_optim_static
 import ptorch.config as ptorch_config
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 import tqdm, time
 import wandb
 
-FRAMEWORK = "ptorch_parr"
+FRAMEWORK = "ptorch_new_matmul"
 
 OPTIM_MODULES = vars(ptorch_optim_static)
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
@@ -44,7 +44,7 @@ class MLP(tnn.Module):
         x = x.reshape(x.shape[0], -1)
         for i in range(0, len(self.hidden_layers), 2):
             x = self.hidden_layers[i](x)      # LinearBias
-            x = self.hidden_layers[i + 1](x)  # ReLU
+            x = self.hidden_layers[i + 1](x)  # Simplex
         return self.out(x)
 
 
@@ -84,7 +84,7 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     def step_fn(x, y):
         logits  = model(x)
         y_oh    = F.one_hot(y.long(), num_classes=logits.shape[-1]).float()
-        projected = MarginLossProjection.apply(logits, y_oh)
+        projected = CrossEntropyProjection.apply(logits, y_oh)
         optimizer.zero_grad()
         projected.sum().backward()
         loss = F.cross_entropy(logits.detach(), y.long())

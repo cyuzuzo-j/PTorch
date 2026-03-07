@@ -1,1 +1,49 @@
-1448step [00:54, 32.62step/s, best=0.7422, val_acc=0.7129]
+6340step [03:39, 28.85step/s, best=0.7910, val_acc=0.7832]
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 224, in <module>
+    args = parser.parse_args()
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 180, in run
+    best_val_acc, best_step = val_acc, step
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 140, in step_fn
+    })
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/optimizer.py", line 517, in wrapper
+    out = func(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/optim_static.py", line 121, in step
+    return super().step(closure)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/optimizer.py", line 82, in _use_grad
+    ret = func(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/adadelta.py", line 172, in step
+    adadelta(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/optimizer.py", line 150, in maybe_fallback
+    return func(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/adadelta.py", line 456, in adadelta
+    func(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/adadelta.py", line 297, in _single_tensor_adadelta
+    acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 224, in <module>
+    args = parser.parse_args()
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 180, in run
+    best_val_acc, best_step = val_acc, step
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 140, in step_fn
+    })
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/optimizer.py", line 517, in wrapper
+    out = func(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/optim_static.py", line 121, in step
+    return super().step(closure)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/optimizer.py", line 82, in _use_grad
+    ret = func(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/adadelta.py", line 172, in step
+    adadelta(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/optimizer.py", line 150, in maybe_fallback
+    return func(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/adadelta.py", line 456, in adadelta
+    func(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/adadelta.py", line 297, in _single_tensor_adadelta
+    acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)
+KeyboardInterrupt

@@ -289,18 +289,18 @@ def matmul_l1(a: Computation, b: Computation) -> Computation:
     a_, b_ = a, b
 
     # expand dimensions if necessary
-    if a.ndim == 1:
+    if len(a.shape) == 1:
         a_ = expand_dims(a, 0)
-    if b.ndim == 1:
+    if len(b.shape) == 1:
         b_ = expand_dims(b, 1)
 
     # call efficient op
     out = ops.matmul_l1(a_, b_)
 
     # squeeze dimensions if necessary
-    if a.ndim == 1:
+    if len(a.shape) == 1:
         out = squeeze(out, axis=-2)
-    if b.ndim == 1:
+    if len(b.shape) == 1:
         out = squeeze(out, axis=-1)
     return out
 
@@ -309,18 +309,18 @@ def matmul_linf(a: Computation, b: Computation) -> Computation:
     a_, b_ = a, b
 
     # expand dimensions if necessary
-    if a.ndim == 1:
+    if len(a.shape) == 1:
         a_ = expand_dims(a, 0)
-    if b.ndim == 1:
+    if len(b.shape) == 1:
         b_ = expand_dims(b, 1)
 
     # call efficient op
     out = ops.matmul_linf(a_, b_)
 
     # squeeze dimensions if necessary
-    if a.ndim == 1:
+    if len(a.shape) == 1:
         out = squeeze(out, axis=-2)
-    if b.ndim == 1:
+    if len(b.shape) == 1:
         out = squeeze(out, axis=-1)
     return out
 

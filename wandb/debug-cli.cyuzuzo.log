@@ -1,0 +1,30 @@
+2026-03-04 18:05:02 INFO Running runs: []
+2026-03-04 18:05:04 INFO Agent received command: run
+2026-03-04 18:05:04 INFO Agent starting run with config:
+	alpha: 62.17783345192173
+	architecture: [8, 16, 16]
+	batch_size: 16
+	eval_every: 100
+	g: 46.76049550183996
+	lr: 0.008929528884050639
+	max_steps: 5000
+	optimizer: ProjectionAdagrad
+	patience: 15
+	seed: 43
+2026-03-04 18:05:04 INFO About to run command: /usr/bin/env python experiments/cnn_benchmarks/sweep_ptorch.py --alpha=62.17783345192173 "--architecture=[8, 16, 16]" --batch_size=16 --eval_every=100 --g=46.76049550183996 --lr=0.008929528884050639 --max_steps=5000 --optimizer=ProjectionAdagrad --patience=15 --seed=43
+2026-03-04 18:05:09 INFO Running runs: ['wr58sx6l']
+2026-03-04 18:06:03 INFO Running runs: []
+2026-03-04 18:06:04 INFO Agent received command: run
+2026-03-04 18:06:04 INFO Agent starting run with config:
+	alpha: 1.2020730574806588
+	architecture: [4, 8, 16]
+	batch_size: 32
+	eval_every: 100
+	g: 0.021856687300171138
+	lr: 0.0021095145001740973
+	max_steps: 5000
+	optimizer: AlternatingProjections
+	patience: 15
+	seed: 43
+2026-03-04 18:06:04 INFO About to run command: /usr/bin/env python experiments/cnn_benchmarks/sweep_ptorch.py --alpha=1.2020730574806588 "--architecture=[4, 8, 16]" --batch_size=32 --eval_every=100 --g=0.021856687300171138 --lr=0.0021095145001740973 --max_steps=5000 --optimizer=AlternatingProjections --patience=15 --seed=43
+2026-03-04 18:06:09 INFO Running runs: ['jsmxg2z7']

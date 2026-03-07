@@ -8,7 +8,7 @@ experiment_name: mlp_benchmark   # shown in Aim as the experiment group
 random_seed: 43
 max_steps: 5000
 num_runs: 2
-eval_every: 50
+eval_every: 200
 patience: 10
 
 # ── Batch sizes to sweep ─────────────────────────
@@ -38,8 +38,8 @@ pjax_orr_optimizer_kwargs:
   steps_per_update: 50
 
 # ptorch — ptorch.optim_static classes
-ptorch_optimizer: ProjectionAdadelta  # AlternatingProjections | AlternatingProjectionsMomentum | ProjectionSGD | ProjectionAdam | ProjectionAdagrad | ProjectionAdadelta
-ptorch_optimizer_kwargs: {lr: 10_000}
+ptorch_optimizer: ProjectionMuon  # AlternatingProjections | AlternatingProjectionsMomentum | ProjectionSGD | ProjectionAdam | ProjectionAdagrad | ProjectionAdadelta
+ptorch_optimizer_kwargs: {lr: 0.001}
 
 # torch — any torch.optim class
 torch_optimizer: SGD             # Adam | SGD | AdamW | ...

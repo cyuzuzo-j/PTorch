@@ -1,12 +1,8 @@
-# Large dataset files
-dataset/*.pt
-dataset/*.tar.gz
-dataset/*.tar
-dataset/*.zip
-pjax-main/dataset/*.pt
-pjax-main/dataset/*.tar.gz
-pjax-main/dataset/*.tar
-pjax-main/dataset/*.zip
+# Large dataset files (match at any depth)
+**/dataset/*.pt
+**/dataset/*.tar.gz
+**/dataset/*.tar
+**/dataset/*.zip
 
 # Python cache
 __pycache__/
@@ -21,3 +17,8 @@ env/
 
 # Jupyter checkpoints
 .ipynb_checkpoints/
+
+# Ignore large datasets
+dataset/**/*.pt
+dataset/**/*.tar.gz
+experiments/**/dataset/
