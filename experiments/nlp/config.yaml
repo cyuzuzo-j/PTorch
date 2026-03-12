@@ -3,13 +3,17 @@
 # ──────────────────────────────────────────────────
 experiment_name: "nlp_bench"
 
+# model
+# attention_type: one of [simplex, hardmax, softmax]
+attention_type: "softmax"
+
 # tasks
 tasks:
   - name: "SST2"
     classes: 2
     vocab_size: 10_000
-    embed_dim: 128
-    hidden_dim: [256, 128] # for MLP model
+    embed_dim: 512
+    hidden_dim: [512] # for MLP model
     max_seq_len: 64
 
 batch_sizes: [512]

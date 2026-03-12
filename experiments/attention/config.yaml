@@ -12,7 +12,7 @@ eval_every: 50
 patience: 1000
 
 # ── Batch sizes to sweep ─────────────────────────
-batch_sizes: [512]
+batch_sizes: [32]
 
 # ── Tasks (comment out to disable) ───────────────
 tasks:
@@ -29,5 +29,5 @@ torch_optimizer_kwargs:
   weight_decay: 0.01
 
 
-ptorch_optimizer: ProjectionAdadelta  # AlternatingProjections | AlternatingProjectionsMomentum | ProjectionSGD | ProjectionAdam | ProjectionAdagrad | ProjectionAdadelta
-ptorch_optimizer_kwargs: {lr: 1}
+ptorch_optimizer: ProjectionMuon  # AlternatingProjections | AlternatingProjectionsMomentum | ProjectionSGD | ProjectionAdam | ProjectionAdagrad | ProjectionAdadelta
+ptorch_optimizer_kwargs: {lr: 0.01}

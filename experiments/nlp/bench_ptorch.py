@@ -11,8 +11,8 @@ import yaml
 import torch
 import torch.nn as tnn
 import torch.nn.functional as F
-from ptorch.nn.modules import LinearBias, ReLU, MultiHeadAttention, Conversion, Mean
-from ptorch.core.ops import MarginLossProjection, CrossEntropyProjection
+from ptorch.nn.modules import LinearBias, ReLU, MultiHeadAttention, Conversion, Mean, Dropout
+from ptorch.core.ops import CrossEntropyProjection, SoftmaxProjection
 import ptorch.optim_static as ptorch_optim_static
 import ptorch.config as ptorch_config
 from experiments.nlp.data import SST2DataModule
@@ -35,30 +35,33 @@ class TextMLP(tnn.Module):
 
         last = embed_dim
         self.hidden_layers = tnn.ModuleList()
+        
         for f in hidden_dims:
             self.hidden_layers.append(LinearBias(last, f))  # projection-based
             self.hidden_layers.append(ReLU(f))               # projection-based
+            self.hidden_layers.append(Dropout(p=0.2))
             last = f
-
         self.out = LinearBias(last, classes)
 
     def forward(self, x):
         embedded = self.embedding(x)
         x = embedded.mean(dim=1)
         x = self.conversion(x)   # bridge: gradient → projection (only for embedding)
-        for i in range(0, len(self.hidden_layers), 2):
+        for i in range(0, len(self.hidden_layers), 3):
             x = self.hidden_layers[i](x)      # ptorch LinearBias
             x = self.hidden_layers[i + 1](x)  # ptorch ReLU
+            x = self.hidden_layers[i + 2](x)  # ptorch Dropout
         return self.out(x)
 
 
 class TinyAttention(tnn.Module):
-    def __init__(self, vocab_size, embed_dim, classes):
+    def __init__(self, vocab_size, embed_dim, classes, attention_type='simplex'):
         super().__init__()
         self.embedding = tnn.Embedding(vocab_size, embed_dim)
         self.conversion = Conversion()
-        self.attention = MultiHeadAttention(embed_dim, embed_dim, heads=1)
+        self.attention = MultiHeadAttention(embed_dim, embed_dim, heads=10, attention_type=attention_type)
         self.out = LinearBias(embed_dim, classes)
+        self.mean = Mean(dim=1)
         self.embed_dim = embed_dim
         
     def forward(self, x):
@@ -68,7 +71,7 @@ class TinyAttention(tnn.Module):
         # Self-attention
         context = self.attention(embedded) # B, S, E
         
-        pooled = Mean(context) # B, E
+        pooled = self.mean(context) # B, E
         
         return self.out(pooled)
 
@@ -104,7 +107,8 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
         model = TinyAttention(
             vocab_size,
             task_cfg["embed_dim"],
-            task_cfg["classes"]
+            task_cfg["classes"],
+            attention_type=cfg.get("attention_type", "simplex"),
         ).to(device)
 
     opt_name   = cfg["ptorch_optimizer"]

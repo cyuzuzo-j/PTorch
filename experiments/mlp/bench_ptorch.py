@@ -12,7 +12,7 @@ import torch
 import torch.nn as tnn
 import torch.nn.functional as F
 from ptorch.nn.modules import LinearBias, ReLU, Simplex
-from ptorch.core.ops import MarginLossProjection, CrossEntropyProjection
+from ptorch.core.ops import CrossEntropyProjection, HardMarginProjection, ProximalHingeMargin, SmoothSoftMargin
 import ptorch.optim_static as ptorch_optim_static
 import ptorch.config as ptorch_config
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
@@ -25,6 +25,16 @@ OPTIM_MODULES = vars(ptorch_optim_static)
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 
 DATASETS = {"MNIST": MNISTDataModule, "CIFAR10": InfiniteCifarDataModule}
+
+# ── Loss projection registry ──────────────────────
+# Maps config key → autograd.Function class.
+# All classes must accept (logits, one_hot_labels) in .apply().
+LOSS_PROJECTIONS = {
+    "CrossEntropyProjection": CrossEntropyProjection,
+    "HardMarginProjection":   HardMarginProjection,
+    "ProximalHingeMargin":    ProximalHingeMargin,
+    "SmoothSoftMargin":       SmoothSoftMargin,
+}
 
 
 # ── Model ────────────────────────────────────────
@@ -49,7 +59,7 @@ class MLP(tnn.Module):
 
 
 # ── Training ─────────────────────────────────────
-def run(cfg, task_cfg, batch_size, run_number, device):
+def run(cfg, task_cfg, batch_size, run_number, device, loss_projection_cls=CrossEntropyProjection, log_loss_projection=False):
     seed = cfg["random_seed"]
     torch.manual_seed(seed + run_number)
 
@@ -64,7 +74,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     opt_kwargs = cfg.get("ptorch_optimizer_kwargs", {})
     optimizer  = OPTIM_MODULES[opt_name](model.parameters(), **opt_kwargs)
 
-    run_name = f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}"
+    loss_proj_name = loss_projection_cls.__name__
+    run_name = f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}_{loss_proj_name}"
     run = wandb.init(project="pjax", name=run_name)
     wandb.config.update({
         "framework": FRAMEWORK,
@@ -78,18 +89,21 @@ def run(cfg, task_cfg, batch_size, run_number, device):
         "max_steps": cfg["max_steps"],
         "eval_every": cfg["eval_every"],
         "patience": cfg["patience"],
+        "loss_projection": loss_proj_name,
+        "log_loss_projection": log_loss_projection,
         **ptorch_config.snapshot(),
     })
 
     def step_fn(x, y):
         logits  = model(x)
         y_oh    = F.one_hot(y.long(), num_classes=logits.shape[-1]).float()
-        projected = CrossEntropyProjection.apply(logits, y_oh)
+        projected = loss_projection_cls.apply(logits, y_oh)
+        proj_loss = projected.sum()
         optimizer.zero_grad()
-        projected.sum().backward()
+        proj_loss.backward()
         loss = F.cross_entropy(logits.detach(), y.long())
         optimizer.step()
-        return loss
+        return loss, float(proj_loss.detach())
 
     def eval_fn(x, y):
         with torch.no_grad():
@@ -124,10 +138,13 @@ def run(cfg, task_cfg, batch_size, run_number, device):
                     break
 
             x, y = next(train_iter)
-            loss = step_fn(
+            loss, proj_loss_val = step_fn(
                 torch.tensor(x, dtype=torch.float32, device=device),
                 torch.tensor(y, dtype=torch.long,  device=device))
-            wandb.log({"train/loss": float(loss)}, step=step)
+            log_dict = {"train/loss": float(loss)}
+            if log_loss_projection:
+                log_dict["train/loss_projection"] = proj_loss_val
+            wandb.log(log_dict, step=step)
             step += 1
             pbar.update(1)
             if cfg["max_steps"] and step >= cfg["max_steps"]:
@@ -158,7 +175,11 @@ if __name__ == "__main__":
         for task_cfg in cfg["tasks"]:
             print(f"\n{'='*50}\n{FRAMEWORK} | {task_cfg['name']} | bs={batch_size}")
             for run_number in range(1, cfg["num_runs"] + 1):
-                run(cfg, task_cfg, batch_size, run_number, device)
+                proj_name = cfg.get("ptorch_loss_projection", "CrossEntropyProjection")
+                proj_cls  = LOSS_PROJECTIONS[proj_name]
+                run(cfg, task_cfg, batch_size, run_number, device,
+                    loss_projection_cls=proj_cls,
+                    log_loss_projection=cfg.get("log_loss_projection", False))
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()

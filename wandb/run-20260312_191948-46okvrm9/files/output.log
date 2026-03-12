@@ -1,0 +1,94 @@
+4500step [14:21,  4.20s/step, best=0.4055, val_acc=0.3953]Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 141, in run
+    loss, proj_loss_val = step_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 105, in step_fn
+    optimizer.step()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/optimizer.py", line 517, in wrapper
+    out = func(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/optim_static.py", line 140, in step
+    return super().step(closure)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/_muon.py", line 190, in step
+    muon(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/optimizer.py", line 150, in maybe_fallback
+    return func(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/_muon.py", line 349, in muon
+    func(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/_muon.py", line 315, in _single_tensor_muon
+    update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/_muon.py", line 67, in _zeropower_via_newtonschulz
+    ortho_grad = torch.addmm(ortho_grad, gram_update, ortho_grad, beta=a)
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 180, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device,
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 117, in run
+    with tqdm.tqdm(unit="step") as pbar:
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/tqdm/std.py", line 1140, in __exit__
+    self.close()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/tqdm/std.py", line 1302, in close
+    self.display(pos=0)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/tqdm/std.py", line 1495, in display
+    self.sp(self.__str__() if msg is None else msg)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/tqdm/std.py", line 458, in print_status
+    len_s = disp_len(s)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/tqdm/utils.py", line 383, in disp_len
+    return _text_width(RE_ANSI.sub('', data))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/tqdm/utils.py", line 375, in _text_width
+    return sum(2 if east_asian_width(ch) in 'FW' else 1 for ch in str(s))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/tqdm/utils.py", line 375, in <genexpr>
+    return sum(2 if east_asian_width(ch) in 'FW' else 1 for ch in str(s))
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 141, in run
+    loss, proj_loss_val = step_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 105, in step_fn
+    optimizer.step()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/optimizer.py", line 517, in wrapper
+    out = func(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/optim_static.py", line 140, in step
+    return super().step(closure)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/_muon.py", line 190, in step
+    muon(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/optimizer.py", line 150, in maybe_fallback
+    return func(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/_muon.py", line 349, in muon
+    func(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/_muon.py", line 315, in _single_tensor_muon
+    update = _zeropower_via_newtonschulz(update, ns_coefficients, ns_steps, eps)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/optim/_muon.py", line 67, in _zeropower_via_newtonschulz
+    ortho_grad = torch.addmm(ortho_grad, gram_update, ortho_grad, beta=a)
+KeyboardInterrupt
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 180, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device,
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 117, in run
+    with tqdm.tqdm(unit="step") as pbar:
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/tqdm/std.py", line 1140, in __exit__
+    self.close()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/tqdm/std.py", line 1302, in close
+    self.display(pos=0)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/tqdm/std.py", line 1495, in display
+    self.sp(self.__str__() if msg is None else msg)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/tqdm/std.py", line 458, in print_status
+    len_s = disp_len(s)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/tqdm/utils.py", line 383, in disp_len
+    return _text_width(RE_ANSI.sub('', data))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/tqdm/utils.py", line 375, in _text_width
+    return sum(2 if east_asian_width(ch) in 'FW' else 1 for ch in str(s))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/tqdm/utils.py", line 375, in <genexpr>
+    return sum(2 if east_asian_width(ch) in 'FW' else 1 for ch in str(s))
+KeyboardInterrupt

@@ -1,0 +1,130 @@
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+    scale=0.8, transform shape,
+    font=\small\sffamily,
+    >=Stealth,
+    greenNode/.style={circle, draw=green!60!black, fill=green!20, thick, minimum size=1.8cm, inner sep=1pt, align=center, drop shadow={opacity=0.1}},
+    redNode/.style={circle, draw=red!70!black, fill=red!20, thick, minimum size=1.8cm, inner sep=1pt, align=center, drop shadow={opacity=0.1}},
+    ptorchOp/.style={circle, draw=blue!60!black, fill=blue!10, thick, minimum size=1.8cm, inner sep=1pt, align=center, drop shadow={opacity=0.1}},
+    ptorchParam/.style={circle, draw=purple!60!black, fill=purple!10, thick, minimum size=1.8cm, inner sep=1pt, align=center, drop shadow={opacity=0.1}},
+    stdEdge/.style={->, thick, color=gray!80},
+    bipartiteEdge/.style={<->, line width=1.5pt, color=orange, dashed},
+    bwdEdge/.style={->, line width=1.5pt, color=blue!80!black, dashed},
+    fwdEdge/.style={->, thick, color=gray!80},
+    annot/.style={draw=black!35, fill=white, rounded corners=3pt, inner sep=4pt, align=left, font=\scriptsize\sffamily},
+    container/.style={draw=gray!30, thick, rounded corners=10pt, inner sep=15pt, fill=black!2}
+]
+
+\begin{scope}[local bounding box=pjaxBox]
+    \node[redNode] (pjax-X) at (0, 1.5) {Array};
+    \node[redNode] (pjax-W0) at (0, -1.5) {dense\_0\\weight};
+    \node[greenNode] (pjax-Dot0) at (3, 0) {dot\\$z=xw$};
+    \node[redNode] (pjax-Z0) at (6, 0) {dense\_0\\out};
+    \node[redNode] (pjax-B0) at (6, -2.5) {relu\_0\\bias};
+    \node[greenNode] (pjax-SumRelu) at (9, 0) {sum\_\\relu\\$z=\sigma(x+b)$};
+    \node[redNode] (pjax-A0) at (12, -0.5) {relu\_0\\out};
+    \node[redNode] (pjax-W1) at (12, -2.5) {out\_\\weight};
+    \node[greenNode] (pjax-Dot1) at (15, -1) {dot\\$z=xw$};
+    \node[redNode] (pjax-Z1) at (18, -0.5) {out\_\\out};
+    \node[redNode] (pjax-Y) at (18, 1.5) {Array};
+    \node[greenNode] (pjax-CE) at (21, 0) {cross\_\\entropy\\$\mathbb{P}_{ce}(\hat{y})$};
+
+    \draw[stdEdge] (pjax-X) -- (pjax-Dot0);
+    \draw[stdEdge] (pjax-W0) -- (pjax-Dot0);
+    \draw[stdEdge] (pjax-Dot0) -- (pjax-Z0);
+    \draw[stdEdge] (pjax-Z0) -- (pjax-SumRelu);
+    \draw[stdEdge] (pjax-B0) -- (pjax-SumRelu);
+    \draw[stdEdge] (pjax-SumRelu) -- (pjax-A0);
+    \draw[stdEdge] (pjax-A0) -- (pjax-Dot1);
+    \draw[stdEdge] (pjax-W1) -- (pjax-Dot1);
+    \draw[stdEdge] (pjax-Dot1) -- (pjax-Z1);
+    \draw[stdEdge] (pjax-Z1) -- (pjax-CE);
+    \draw[stdEdge] (pjax-Y) -- (pjax-CE);
+
+    \draw[bipartiteEdge] (pjax-X) to[bend left=30] node[above, font=\scriptsize, text=orange!90!black, sloped] {Local Projections (AP/DR)} (pjax-Dot0);
+    \draw[bipartiteEdge] (pjax-W0) to[bend right=30] (pjax-Dot0);
+    \draw[bipartiteEdge] (pjax-Dot0) to[bend left=30] (pjax-Z0);
+    \draw[bipartiteEdge] (pjax-Z0) to[bend left=30] (pjax-SumRelu);
+    \draw[bipartiteEdge] (pjax-B0) to[bend right=30] (pjax-SumRelu);
+    \draw[bipartiteEdge] (pjax-SumRelu) to[bend left=30] (pjax-A0);
+    \draw[bipartiteEdge] (pjax-A0) to[bend left=30] (pjax-Dot1);
+    \draw[bipartiteEdge] (pjax-W1) to[bend right=30] (pjax-Dot1);
+    \draw[bipartiteEdge] (pjax-Dot1) to[bend right=30] (pjax-Z1);
+    \draw[bipartiteEdge] (pjax-Z1) to[bend right=30] (pjax-CE);
+    \draw[bipartiteEdge] (pjax-Y) to[bend left=15] (pjax-CE);
+\end{scope}
+
+\begin{scope}[on background layer]
+    \node[container, fit=(pjaxBox)] (pjaxBg) {};
+\end{scope}
+
+\begin{scope}[yshift=-8cm, local bounding box=ptorchBox]
+    \node[ptorchParam] (pt-X) at (0, 1.5) {Array\\$x^{(0)}$};
+    \node[ptorchParam] (pt-W0) at (0, -1.5) {dense\_0\\weight\\$w^{(0)}_0$};
+    \node[ptorchOp] (pt-Dot0) at (3, 0) {dot\\$z_0=x_0 w_0$};
+    \node[ptorchParam] (pt-B0) at (6, -2.5) {relu\_0\\bias\\$b^{(0)}_0$};
+    \node[ptorchOp] (pt-SumRelu) at (9, 0) {sum\_\\relu\\$z_1=\sigma(z_0+b_0)$};
+    \node[ptorchParam] (pt-W1) at (12, -2.5) {out\_\\weight\\$w^{(0)}_1$};
+    \node[ptorchOp] (pt-Dot1) at (15, -1) {dot\\$z_2=x_1 w_1$};
+    \node[ptorchParam] (pt-Y) at (18, 1.5) {Array\\$y$};
+    \node[ptorchOp, fill=yellow!20, draw=orange!80!black] (pt-CE) at (21, 0) {cross\_\\entropy\\$\mathbb{P}_{ce}(\hat{y})$};
+
+    \draw[fwdEdge] (pt-X) -- node[above]{\scriptsize $x_0^{(0)}$} (pt-Dot0);
+    \draw[fwdEdge] (pt-W0) -- node[below]{\scriptsize $w_0^{(0)}$} (pt-Dot0);
+    \draw[fwdEdge] (pt-Dot0) -- node[above]{\scriptsize $z_0^{(0)}$} (pt-SumRelu);
+    \draw[fwdEdge] (pt-B0) -- node[below]{\scriptsize $b_0^{(0)}$} (pt-SumRelu);
+    \draw[fwdEdge] (pt-SumRelu) -- node[above]{\scriptsize $z_1^{(0)}=x_1^{(0)}$} (pt-Dot1);
+    \draw[fwdEdge] (pt-W1) -- node[below]{\scriptsize $w_1^{(0)}$} (pt-Dot1);
+    \draw[fwdEdge] (pt-Dot1) -- node[above]{\scriptsize $z_2^{(0)}=\hat{y}$} (pt-CE);
+    \draw[fwdEdge] (pt-Y) -- (pt-CE);
+
+    \draw[bwdEdge] (pt-CE) to[bend left=45] node[below, font=\scriptsize, text=blue!80!black] {$\hat{y}^{(i)} = x_{\mathrm{dot}}^{(i+1)} = \mathbb{P}_{\mathcal{Y}}(\hat y^{(i)})$} (pt-Dot1);
+    \draw[bwdEdge] (pt-Dot1) to[bend left=30] node[above, font=\scriptsize, text=blue!80!black] {$z_1^{(i)} \leftarrow x_1^{(i+1)}$} (pt-SumRelu);
+    \draw[bwdEdge] (pt-Dot1) to[bend left=30] node[below, font=\scriptsize, text=blue!80!black] {$w_1^{(i+1)}$} (pt-W1);
+    \draw[bwdEdge] (pt-SumRelu) to[bend left=30] node[below, font=\scriptsize, text=blue!80!black] {$b_0^{(i+1)}$} (pt-B0);
+    \draw[bwdEdge] (pt-SumRelu) to[bend right=35] node[above, font=\scriptsize, text=blue!80!black] {$z_0^{(i)} \leftarrow x_0^{(i+1)}$} (pt-Dot0);
+    \draw[bwdEdge] (pt-Dot0) to[bend left=30] node[below, font=\scriptsize, text=blue!80!black] {$w_0^{(i+1)}$} (pt-W0);
+    \draw[bwdEdge] (pt-Dot0) to[bend right=35] node[above, font=\scriptsize, text=blue!80!black] {$x_0^{(i+1)}$} (pt-X);
+
+    \node[annot, anchor=south west] (idxnote) at (0.2, 2.35) {$z$ starts at $i=0$; all other states start at $i=1$\\First forward pass: update $z^{(0)}$ and then $x^{(1)}$.};
+    \node[annot, anchor=west] (mapnote) at (16.4, -2.9) {$z_{v}^{i} \leftarrow x_{v+1}^{i+1}$ (target passed backward)};
+    \draw[->, thick, black!60] (mapnote.north west) to[bend left=12] (pt-Dot1.south east);
+    \draw[->, thick, black!60] (mapnote.north east) to[bend right=10] (pt-CE.south west);
+
+    \node[annot, anchor=west] (rootnote) at (22.7, 0.8) {Root node: output projection only\\$\hat y^{i+1}=\mathbb{P}_{\mathcal{Y}}(\hat y^{i})$};
+    \draw[->, thick, black!60] (rootnote.west) -- (pt-CE.east);
+\end{scope}
+
+\begin{scope}[on background layer]
+    \node[container, fit=(ptorchBox)] (ptorchBg) {};
+\end{scope}
+\end{tikzpicture}%
+}
+\caption{Conceptual comparison between pjax (top: local projection updates) and Ptorch (bottom: global backpropagation).}
+\label{fig:pjax-vs-ptorch}
+\end{figure}
+
+\subsection{Mathematical Formulation of Propagation}
+Let us formally define the neural network as a directed acyclic computational graph $\mathcal{G} = (\mathcal{V}, \mathcal{E})$. To leverage PyTorch's native \texttt{autograd} engine, Ptorch redefines the semantics of the forward and backward passes for each node $v \in \mathcal{V}$. 
+
+During the forward pass, the computation remains identical to standard gradient-based training. A node $v$ evaluates its specific operation $f_v$ given its current inputs $x_v$ and local parameters (or weights) $w_v$, yielding an output evaluation $z_v = f_v(x_v, w_v)$. Crucially, the engine caches these original states $x_v$ and $w_v$, which we will denote as $x_v^{(0)}$ and $w_v^{(0)}$, for subsequent use in the backward pass.
+
+The divergence from traditional deep learning occurs during the backward propagation. Rather than calculating gradients via the chain rule, the backward pass in Ptorch propagates \textit{projections}. When node $v$ receives a target tensor $z_v^i$ from its downstream operations (representing the desired output required to satisfy subsequent constraints, essentially linking $z_v^i \leftarrow x_{v+1}^{i+1}$), it computes the updated inputs $x_v^{i+1}$ and parameters $w_v^{i+1}$. This is formulated as finding the closest states to the original cached vectors that satisfy the locally defined constraint:
+\begin{equation}
+    (x_v^{i+1}, w_v^{i+1}) = \mathbb{P}_{\mathcal{C}_v}^{(\alpha, g)}\left(x_v^{(0)}, w_v^{(0)}, z_v^{i}\right),
+    \qquad \mathcal{C}_v := \{(x,w,z) \mid f_v(x,w)=z\}
+\end{equation}
+where $\alpha$ and $g$ are weighting factors corresponding to the penalty assigned to the parameter updates and the output adjustments versus the input adjustments. Note that the projection relies on minimizing the distance to the \emph{original} states $x_v^{(0)}$ and $w_v^{(0)}$ bounded by the updated requirement $z_v^i$. Once computed, the projected optimal inputs $x_v^{i+1}$ are passed backward through the graph as the target for the preceding upstream node $v-1$, linking $z_{v-1}^i = x_v^{i+1}$.
+
+At the output node (the equivalent of a loss function), however, there is no upstream target $z^*$ to receive. Instead, the backward operator acts as the initial constraint that triggers the entire backward propagation sequence. For instance, consider a Hard Margin loss comparing predictions $\hat{y}$ (i.e., logits) to true labels $y$. The backward pass applies a proximal operator that functions as a ``strict teacher", projecting $\hat{y}$ directly to the nearest boundary of the zero-loss feasible region. The computation taking place is defined piecewise as:
+\begin{equation}
+    \hat{y}^{(1)}_j = 
+    \begin{cases} 
+        0, & \text{if } y_j \le 0 \text{ and } \hat{y}_j > 0 \\
+        y_j, & \text{if } y_j > 0 \text{ and } \hat{y}_j < y_j \\
+        \hat{y}_j, & \text{otherwise}
+    \end{cases}
+\end{equation}
+This mathematically enforces that positive samples strictly meet the margin $y_j$ and negative samples are suppressed to or below $0$. The resulting projected tensor $\hat{y}^{(1)}$ then serves as the initial target passed to the preceding layer, starting the backward flow of global projections through the graph $\mathcal{G}$.

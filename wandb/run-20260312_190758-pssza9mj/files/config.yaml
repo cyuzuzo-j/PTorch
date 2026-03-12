@@ -1,0 +1,79 @@
+_wandb:
+    value:
+        cli_version: 0.25.0
+        e:
+            t839jzi5iuw501pfwh1okihv78d2we7g:
+                codePath: experiments/mlp/bench_ptorch.py
+                codePathLocal: experiments/mlp/bench_ptorch.py
+                cpu_count: 4
+                cpu_count_logical: 8
+                disk:
+                    /:
+                        total: "254520852480"
+                        used: "245202956288"
+                email: jeff.jambe@student.kuleuven.be
+                executable: /home/cyuzuzo/.pyenv/versions/3.10.19/bin/python3
+                git:
+                    commit: 9394f4bee76b61598f6c81011e83631aa8306f31
+                    remote: git@github.com:cyuzuzo-j/learning_with_projections.git
+                host: cyuzuzo
+                memory:
+                    total: "16595558400"
+                os: Linux-6.18.7-arch1-1-surface-x86_64-with-glibc2.42
+                program: /home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py
+                python: CPython 3.10.19
+                root: /home/cyuzuzo/thesisV5
+                startedAt: "2026-03-12T18:07:58.952391Z"
+                writerId: t839jzi5iuw501pfwh1okihv78d2we7g
+        m: []
+        python_version: 3.10.19
+        t:
+            "1":
+                - 1
+                - 41
+            "2":
+                - 1
+                - 41
+            "3":
+                - 2
+                - 13
+                - 61
+            "4": 3.10.19
+            "5": 0.25.0
+            "12": 0.25.0
+            "13": linux-x86_64
+batch_size:
+    value: 8
+bilinear_projection_num_newton_steps:
+    value: 10
+cross_entropy_lambda:
+    value: 5
+cross_entropy_method:
+    value: fixed_point
+cross_entropy_num_steps:
+    value: 10
+eval_every:
+    value: 200
+framework:
+    value: ptorch_new_matmul
+hidden:
+    value:
+        - 128
+log_loss_projection:
+    value: true
+loss_projection:
+    value: HardMarginProjection
+max_steps:
+    value: 5000
+opt_lr:
+    value: 0.001
+optimizer:
+    value: ProjectionMuon
+patience:
+    value: 10
+run_number:
+    value: 2
+seed:
+    value: 43
+task:
+    value: MNIST
