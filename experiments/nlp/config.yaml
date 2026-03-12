@@ -12,11 +12,11 @@ tasks:
   - name: "SST2"
     classes: 2
     vocab_size: 10_000
-    embed_dim: 512
-    hidden_dim: [512] # for MLP model
+    embed_dim: 64
+    hidden_dim: [64] # for MLP model
     max_seq_len: 64
 
-batch_sizes: [512]
+batch_sizes: [64]
 num_runs: 1
 random_seed: 42
 eval_every: 100

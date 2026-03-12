@@ -302,6 +302,23 @@ class SumReluProjection(torch.autograd.Function):
                        for x_1, x_2 in zip(new_inputs_1, new_inputs_2))
         return result
 
+def midpoint_softmax_proj_pt(a, z):
+    """
+    Computes the entropy-regularized projection.
+    Finds the probability distribution that is maximally aligned with both 
+    the forward logits (a) and the target data (z).
+    """
+    # Step 1: Find the midpoint of the forward and target data
+    m = (a + z) / 2.0
+    
+    # Step 2: Apply the derived exponential scaling (Softmax)
+    projected_p = F.softmax(m, dim=-1)
+    
+    # Note: Returning as a tuple to match the (projected_a,) style 
+    # of your earlier hardmax/simplex projection functions.
+    return (projected_p,)
+
+
 class SoftmaxProjection(torch.autograd.Function):
     """
     PyTorch autograd function using the midpoint Softmax projection 
