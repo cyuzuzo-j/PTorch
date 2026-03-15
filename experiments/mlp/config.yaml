@@ -40,8 +40,8 @@ pjax_orr_optimizer_kwargs:
 
 # ptorch — ptorch.optim_static classes
 ptorch_optimizer: ProjectionMuon  # AlternatingProjections | AlternatingProjectionsMomentum | ProjectionSGD | ProjectionAdam | ProjectionAdagrad | ProjectionAdadelta
-ptorch_optimizer_kwargs: {lr: 0.001}
-ptorch_loss_projection: SmoothSoftMargin  # CrossEntropyProjection | HardMarginProjection | ProximalHingeMargin | SmoothSoftMargin
+ptorch_optimizer_kwargs: {lr: 0.01}
+ptorch_loss_projection: CrossEntropyProjection  # CrossEntropyProjection | HardMarginProjection | ProximalHingeMargin | SmoothSoftMargin
 
 # torch — any torch.optim class
 torch_optimizer: Adam             # Adam | SGD | AdamW | ...

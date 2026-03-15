@@ -1,0 +1,153 @@
+0step [00:04, ?step/s, best=0.0000, val_acc=0.1080]E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1] Error while creating guard:
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1] Name: ''
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]     Source: shape_env
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]     Create Function: SHAPE_ENV
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]     Guard Types: ['SHAPE_ENV', 'SHAPE_ENV', 'SHAPE_ENV', 'SHAPE_ENV', 'SHAPE_ENV', 'SHAPE_ENV', 'SHAPE_ENV', 'SHAPE_ENV', 'SHAPE_ENV', 'SHAPE_ENV', 'SHAPE_ENV', 'SHAPE_ENV', 'SHAPE_ENV']
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]     Code List: ["L['A'].stride()[0] == L['A'].size()[1]", "L['B'].size()[0] == L['A'].size()[1]", "L['B'].stride()[0] == L['B'].size()[1]", "___as_tensor(L['omega']).item() == 1.0", "L['omega'] == 1.0", "L['num_steps'] == 1", "L['Z'].size()[0] == L['A'].size()[0]", "L['Z'].size()[1] == L['B'].size()[1]", "L['Z'].stride()[0] == L['B'].size()[1]", "torch.sym_float(L['alpha']) >= 0.0", "2 <= L['A'].size()[0] and L['A'].size()[0] <= 4194304", "2 <= L['A'].size()[1] and L['A'].size()[1] <= 4194304", "2 <= L['B'].size()[1] and L['B'].size()[1] <= 4194304"]
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]     Object Weakref: None
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]     Guarded Class Weakref: None
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1] Traceback (most recent call last):
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]   File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_guards.py", line 366, in create
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]     return self.create_fn(builder, self)
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]   File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/guards.py", line 2671, in SHAPE_ENV
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]     clib = CppCodeCache.load(func_str)
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]   File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_inductor/codecache.py", line 2839, in load
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]     return cls.load_async(*args, **kwargs)()
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]   File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_inductor/codecache.py", line 2824, in load_fn
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]     lib = cls._load_library(binary_path, key)
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]   File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_inductor/codecache.py", line 2662, in _load_library
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]     result = cls._load_library_inner(path, key)
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]   File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_inductor/codecache.py", line 2657, in _load_library_inner
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]     return cdll.LoadLibrary(path)
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]   File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/ctypes/__init__.py", line 452, in LoadLibrary
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]     return self._dlltype(name)
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]   File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/ctypes/__init__.py", line 374, in __init__
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1]     self._handle = _dlopen(self._name, mode)
+E0314 14:56:58.816000 133698 site-packages/torch/_guards.py:368] [0/1] OSError: /tmp/torchinductor_cyuzuzo/da/cdagcb2jjm3rw7v565fosdge6c2sutqjn3dsk6giu6bdmwt3smfv.main.so: file too short
+E0314 14:56:58.821000 133698 site-packages/torch/_guards.py:370] [0/1] Created at:
+E0314 14:56:58.821000 133698 site-packages/torch/_guards.py:370] [0/1]   File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 773, in trace_frame
+E0314 14:56:58.821000 133698 site-packages/torch/_guards.py:370] [0/1]     tracer = InstructionTranslator(
+E0314 14:56:58.821000 133698 site-packages/torch/_guards.py:370] [0/1]   File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/symbolic_convert.py", line 3847, in __init__
+E0314 14:56:58.821000 133698 site-packages/torch/_guards.py:370] [0/1]     output=OutputGraph(
+E0314 14:56:58.821000 133698 site-packages/torch/_guards.py:370] [0/1]   File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/output_graph.py", line 508, in __init__
+E0314 14:56:58.821000 133698 site-packages/torch/_guards.py:370] [0/1]     self.init_ambient_guards()
+E0314 14:56:58.821000 133698 site-packages/torch/_guards.py:370] [0/1]   File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/output_graph.py", line 668, in init_ambient_guards
+E0314 14:56:58.821000 133698 site-packages/torch/_guards.py:370] [0/1]     self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+0step [00:14, ?step/s, best=0.0000, val_acc=0.1080]
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 192, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device,
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 153, in run
+    loss, proj_loss_val = step_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 115, in step_fn
+    proj_loss.backward()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_tensor.py", line 625, in backward
+    torch.autograd.backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/__init__.py", line 354, in backward
+    _engine_run_backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/graph.py", line 841, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/function.py", line 315, in apply
+    return user_fn(self, *args)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/core/ops.py", line 116, in backward
+    A_proj, B_proj, _, t_new = matmul_proj(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 832, in compile_wrapper
+    return fn(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1874, in __call__
+    result = self._torchdynamo_orig_backend(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1624, in __call__
+    result = self._inner_convert(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 688, in __call__
+    result = _compile(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1494, in _compile
+    raise InternalTorchDynamoError(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1433, in _compile
+    guarded_code, tracer_output = compile_inner(code, one_graph, hooks)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_utils_internal.py", line 92, in wrapper_function
+    return function(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1117, in compile_inner
+    return _compile_inner(code, one_graph, hooks)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1251, in _compile_inner
+    check_fn = dynamo_output.build_guards(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 856, in build_guards
+    return CheckFunctionManager(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/guards.py", line 3383, in __init__
+    builder, guard_manager = self.build_guards(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/guards.py", line 3674, in build_guards
+    guard.create(builder)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_guards.py", line 366, in create
+    return self.create_fn(builder, self)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/guards.py", line 2671, in SHAPE_ENV
+    clib = CppCodeCache.load(func_str)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_inductor/codecache.py", line 2839, in load
+    return cls.load_async(*args, **kwargs)()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_inductor/codecache.py", line 2824, in load_fn
+    lib = cls._load_library(binary_path, key)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_inductor/codecache.py", line 2662, in _load_library
+    result = cls._load_library_inner(path, key)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_inductor/codecache.py", line 2657, in _load_library_inner
+    return cdll.LoadLibrary(path)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/ctypes/__init__.py", line 452, in LoadLibrary
+    return self._dlltype(name)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/ctypes/__init__.py", line 374, in __init__
+    self._handle = _dlopen(self._name, mode)
+torch._dynamo.exc.InternalTorchDynamoError: OSError: /tmp/torchinductor_cyuzuzo/da/cdagcb2jjm3rw7v565fosdge6c2sutqjn3dsk6giu6bdmwt3smfv.main.so: file too short
+
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 192, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device,
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 153, in run
+    loss, proj_loss_val = step_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 115, in step_fn
+    proj_loss.backward()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_tensor.py", line 625, in backward
+    torch.autograd.backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/__init__.py", line 354, in backward
+    _engine_run_backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/graph.py", line 841, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/function.py", line 315, in apply
+    return user_fn(self, *args)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/core/ops.py", line 116, in backward
+    A_proj, B_proj, _, t_new = matmul_proj(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 832, in compile_wrapper
+    return fn(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1874, in __call__
+    result = self._torchdynamo_orig_backend(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1624, in __call__
+    result = self._inner_convert(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 688, in __call__
+    result = _compile(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1494, in _compile
+    raise InternalTorchDynamoError(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1433, in _compile
+    guarded_code, tracer_output = compile_inner(code, one_graph, hooks)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_utils_internal.py", line 92, in wrapper_function
+    return function(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1117, in compile_inner
+    return _compile_inner(code, one_graph, hooks)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 1251, in _compile_inner
+    check_fn = dynamo_output.build_guards(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/convert_frame.py", line 856, in build_guards
+    return CheckFunctionManager(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/guards.py", line 3383, in __init__
+    builder, guard_manager = self.build_guards(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/guards.py", line 3674, in build_guards
+    guard.create(builder)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_guards.py", line 366, in create
+    return self.create_fn(builder, self)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/guards.py", line 2671, in SHAPE_ENV
+    clib = CppCodeCache.load(func_str)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_inductor/codecache.py", line 2839, in load
+    return cls.load_async(*args, **kwargs)()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_inductor/codecache.py", line 2824, in load_fn
+    lib = cls._load_library(binary_path, key)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_inductor/codecache.py", line 2662, in _load_library
+    result = cls._load_library_inner(path, key)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_inductor/codecache.py", line 2657, in _load_library_inner
+    return cdll.LoadLibrary(path)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/ctypes/__init__.py", line 452, in LoadLibrary
+    return self._dlltype(name)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/ctypes/__init__.py", line 374, in __init__
+    self._handle = _dlopen(self._name, mode)
+torch._dynamo.exc.InternalTorchDynamoError: OSError: /tmp/torchinductor_cyuzuzo/da/cdagcb2jjm3rw7v565fosdge6c2sutqjn3dsk6giu6bdmwt3smfv.main.so: file too short

@@ -1,1 +1,73 @@
-2510step [07:24,  5.21step/s, best=0.5805, val_acc=0.5745]
+2899step [08:38,  5.59step/s, best=0.5805, val_acc=0.5709]
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 228, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device, args.model)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 184, in run
+    loss = step_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 142, in step_fn
+    projected.sum().backward()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_tensor.py", line 625, in backward
+    torch.autograd.backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/__init__.py", line 354, in backward
+    _engine_run_backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/graph.py", line 841, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/function.py", line 315, in apply
+    return user_fn(self, *args)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/core/ops.py", line 116, in backward
+    A_proj, B_proj, _, t_new = matmul_proj(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 832, in compile_wrapper
+    return fn(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/core/ops.py", line 9, in matmul_proj
+    @torch.compile(dynamic=True)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+    return fn(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_functorch/aot_autograd.py", line 1130, in forward
+    return compiled_fn(full_args)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 353, in runtime_wrapper
+    all_outs = call_func_at_runtime_with_args(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/utils.py", line 129, in call_func_at_runtime_with_args
+    out = normalize_as_list(f(args))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 526, in wrapper
+    return compiled_fn(runtime_args)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_inductor/output_code.py", line 613, in __call__
+    return self.current_callable(inputs)
+  File "/tmp/torchinductor_cyuzuzo/cs/ccsgvpxkz6oebskd6dc2eldz2kvnujevdq6qllkffv4aghiavqet.py", line 2164, in call
+    extern_kernels.bmm(reinterpret_tensor(arg4_1, (s50*s52, s3, s11), (s11*s3, 1, s3), 0), reinterpret_tensor(buf33, (s50*s52, s11, s14), (s11*s14, s14, 1), 0), out=buf37)
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 228, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device, args.model)
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 184, in run
+    loss = step_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/nlp/bench_ptorch.py", line 142, in step_fn
+    projected.sum().backward()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_tensor.py", line 625, in backward
+    torch.autograd.backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/__init__.py", line 354, in backward
+    _engine_run_backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/graph.py", line 841, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/function.py", line 315, in apply
+    return user_fn(self, *args)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/core/ops.py", line 116, in backward
+    A_proj, B_proj, _, t_new = matmul_proj(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 832, in compile_wrapper
+    return fn(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/core/ops.py", line 9, in matmul_proj
+    @torch.compile(dynamic=True)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 1044, in _fn
+    return fn(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_functorch/aot_autograd.py", line 1130, in forward
+    return compiled_fn(full_args)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 353, in runtime_wrapper
+    all_outs = call_func_at_runtime_with_args(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/utils.py", line 129, in call_func_at_runtime_with_args
+    out = normalize_as_list(f(args))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 526, in wrapper
+    return compiled_fn(runtime_args)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_inductor/output_code.py", line 613, in __call__
+    return self.current_callable(inputs)
+  File "/tmp/torchinductor_cyuzuzo/cs/ccsgvpxkz6oebskd6dc2eldz2kvnujevdq6qllkffv4aghiavqet.py", line 2164, in call
+    extern_kernels.bmm(reinterpret_tensor(arg4_1, (s50*s52, s3, s11), (s11*s3, 1, s3), 0), reinterpret_tensor(buf33, (s50*s52, s11, s14), (s11*s14, s14, 1), 0), out=buf37)
+KeyboardInterrupt

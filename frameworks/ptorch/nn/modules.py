@@ -3,14 +3,17 @@ import torch
 import torch.nn as nn
 from ..core.ops import (
     MatMulProjection,
-    SumReluProjection,
+    ReluInversionProjection,
+    ReLUProjection,
     SimplexProjection,
     HardmaxProjection,
     Conversion as ConversionFn,
     MeanProjection,
     LayerNormProjection,
     DropoutProjection,
-    SoftmaxProjection
+    SoftmaxProjection,
+    AddProjection,
+    AverageGradient
 )
 
 
@@ -33,7 +36,7 @@ class Linear(nn.Module):
 
     def forward(self, input, return_attention=False):
         # Apply custom matmul projection
-        return MatMulProjection.apply(input, self.weight, self.proj_cache, self.alpha, self.g)
+        return MatMulProjection.apply(input, self.weight, self.proj_cache, self.alpha, self.g, 1.0, self.num_iters)
 
 class LinearBias(nn.Module):
     """Linear (fully connected) layer with bias.
@@ -53,19 +56,25 @@ class LinearBias(nn.Module):
         # Append ones to input for bias computation
         ones = torch.ones((*input.shape[:-1], 1), dtype=input.dtype, device=input.device)
         augmented_input = torch.cat([input, ones], dim=-1)
-        return MatMulProjection.apply(augmented_input, self.weight, self.proj_cache, self.alpha, self.g)
+        return MatMulProjection.apply(augmented_input, self.weight, self.proj_cache, self.alpha, self.g, 1.0, self.num_iters)
 
+class ReLuInversion(nn.Module):
+    def __init__(self):
+        super().__init__()
+        
+    def forward(self, inputs):
+        return ReluInversionProjection.apply(inputs)
 
 class ReLU(nn.Module):
-    """Rectified Linear Unit with bias."""
-    def __init__(self, features: int):
+    """Rectified Linear Unit."""
+    def __init__(self):
         super().__init__()
 
     def forward(self, *inputs):
-        return SumReluProjection.apply(*inputs)
+        return ReLUProjection.apply(*inputs)
 
 class Step(nn.Module):
-    """Step activation function with bias."""
+    """Step activation function."""
     def __init__(self, features: int):
         super().__init__()
         
@@ -73,14 +82,6 @@ class Step(nn.Module):
         from ..core.ops import StepProjection # Avoid circular import if needed or just use it here
         return StepProjection.apply(*inputs)
 
-class Step_NB(nn.Module):
-    """Step activation function without bias."""
-    def __init__(self):
-        super().__init__()
-        
-    def forward(self, *inputs):
-        from ..core.ops import StepProjection
-        return StepProjection.apply(*inputs)
 
 class Simplex(nn.Module):
     """Simplex activation function."""
@@ -126,6 +127,18 @@ class LayerNorm(nn.Module):
         return LayerNormProjection.apply(input, self.eps)
 
 
+class Add(nn.Module):
+    """Residual addition using AddProjection.
+    
+    Forward: returns x1 + x2.
+    Backward: projects x1 and x2 onto the addition constraint graph.
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x1, x2):
+        return AddProjection.apply(x1, x2)
+
 class Dropout(nn.Module):
     """Projection-aware dropout.
 
@@ -139,6 +152,27 @@ class Dropout(nn.Module):
 
     def forward(self, input):
         return DropoutProjection.apply(input, self.p, self.training)
+
+class Residual(nn.Module):
+    """Residual connection wrapper.
+    Instead of AddProjection, it uses AverageGradient to intercept the tensor
+    before the split, matching the user's requested approach.
+    """
+    def __init__(self, subspace: nn.Module):
+        super().__init__()
+        self.subspace = subspace
+
+    def forward(self, x):
+        # 1. Intercept the tensor BEFORE the split.
+        # num_paths=2 (main pathway + skip connection)
+        x_node = AverageGradient.apply(x, 2)
+        
+        # 2. Main pathway + Skip connection
+        # PyTorch natively sums the gradients of 'out' and 'x_node' here,
+        # then passes that sum to AverageGradient.backward().
+        out = self.subspace(x_node) + x_node
+        
+        return out
 
 class MultiHeadAttention(nn.Module):
     """Multi-head attention mechanism for transformer architectures.

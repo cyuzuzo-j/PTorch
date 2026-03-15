@@ -6,6 +6,25 @@ from .. import config
 # Suppress pin_memory warning when no accelerator is available
 warnings.filterwarnings("ignore", message=".*pin_memory.*")
 
+class AverageGradient(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, num_paths=2):
+        ctx.num_paths = num_paths
+        
+        # .clone() is critical here. It creates a distinct new node in the 
+        # computational graph to accumulate the summed gradients from the split.
+        return x.clone()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # grad_output is the sum of the gradients from all paths.
+        # We divide it to get the average.
+        grad_input = grad_output / ctx.num_paths
+        
+        # Return a gradient for every input to forward().
+        # num_paths is an int, so it requires no gradient (None).
+        return grad_input, None
+        
 @torch.compile(dynamic=True)
 def matmul_proj(A, B, Z, t_init=None, alpha=1.0, g=1.0, omega=1.0, num_steps=1):
     """
@@ -266,16 +285,41 @@ class Conversion(torch.autograd.Function):
         #grad = grad/ torch.norm(grad)
         return grad
 
-class SumReluProjection(torch.autograd.Function):
+class ReluInversionProjection(torch.autograd.Function):
+    """
+    Sets the new input directly based on the target z.
+    Ignores the original input x entirely.
+    """
+    @staticmethod
+    def forward(ctx, x):
+        ctx.save_for_backward(x)
+        return torch.relu(x)
+
+    @staticmethod
+    def backward(ctx, z):
+        x, = ctx.saved_tensors
+
+        # Solution 1: project onto inactive branch (x <= 0, output = 0)
+        x_1 = torch.clamp(x, max=0)
+        dist_1 = (x - x_1)**2 + z**2
+
+        # Solution 2: project onto active branch (x > 0, output = x)
+        x_2 = torch.clamp((x + z) / 2.0, min=0)
+        dist_2 = (x - x_2)**2 + (z - x_2)**2
+
+        # Select solution minimizing distance
+        result = torch.where(dist_1 < dist_2, x_1, x_2)
+        return result        
+
+class ReLUProjection(torch.autograd.Function):
     """
     PyTorch equivalent of PJAX sum_relu projection.
     Forward: relu(sum of inputs)
-    Backward: projects inputs onto the sum-ReLU constraint graph.
+    Backward: projects inputs onto the ReLU constraint graph.
     """
     @staticmethod
     def forward(ctx, *inputs):
         ctx.save_for_backward(*inputs)
-        ctx.n_inputs = len(inputs)
         return torch.relu(sum(inputs))
 
     @staticmethod
