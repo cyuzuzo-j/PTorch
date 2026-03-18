@@ -1,10 +1,15 @@
 from typing import Sequence, Tuple, Union
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from ..core.ops import (
     MatMulProjection,
-    ReluInversionProjection,
+    MatMulProjectionLinf,
+    SumReLUProjection,
+    StepProjection,
     ReLUProjection,
+    LeakyReLUProjection,
+    simplex_op_pt,
     SimplexProjection,
     HardmaxProjection,
     Conversion as ConversionFn,
@@ -13,74 +18,193 @@ from ..core.ops import (
     DropoutProjection,
     SoftmaxProjection,
     AddProjection,
-    AverageGradient
+    AffineBatchNormProjection,
 )
+from .. import config
 
-
-
-
-class Linear(nn.Module):
-    """Linear (fully connected) layer without bias.
+class Linear(nn.Linear):
+    """Linear (fully connected) layer.
     Applies a linear transformation to input data.
-    """
-    def __init__(self, in_features: int, out_features: int, alpha: float = 1.0, g: float = 1.0, num_iters: int = 5):
-        super().__init__()
+        """
+    def __init__(self, in_features: int, out_features: int, bias: bool = True, alpha: float = 1.0, g: float = 1.0, omega=1.0, num_iters: int = 5, residual: bool = True):
+        # Never let nn.Linear create the bias; we create our own 2D version below.
+        super().__init__(in_features, out_features, bias=False)
         self.alpha = alpha
         self.g = g
+        self.omega = omega
         self.num_iters = num_iters
-        # In pjax: Weight((in_features, out_features))
-        self.weight = nn.Parameter(torch.empty(in_features, out_features))
-        self.weight.is_projection = True
+        self.use_bias = bias
         self.proj_cache = {}
-        nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
-
-    def forward(self, input, return_attention=False):
-        # Apply custom matmul projection
-        return MatMulProjection.apply(input, self.weight, self.proj_cache, self.alpha, self.g, 1.0, self.num_iters)
-
-class LinearBias(nn.Module):
-    """Linear (fully connected) layer with bias.
-    The bias is implemented by expanding the weight matrix.
-    """
-    def __init__(self, in_features: int, out_features: int, alpha: float = 1.0, g: float = 1.0, num_iters: int = 1):
-        super().__init__()
-        self.alpha = alpha
-        self.g = g
-        self.num_iters = num_iters  
-        self.weight = nn.Parameter(torch.empty(in_features + 1, out_features))
-        self.weight.is_projection = True
-        self.proj_cache = {}
-        nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
-
-    def forward(self, input, return_attention=False):
-        # Append ones to input for bias computation
-        ones = torch.ones((*input.shape[:-1], 1), dtype=input.dtype, device=input.device)
-        augmented_input = torch.cat([input, ones], dim=-1)
-        return MatMulProjection.apply(augmented_input, self.weight, self.proj_cache, self.alpha, self.g, 1.0, self.num_iters)
-
-class ReLuInversion(nn.Module):
-    def __init__(self):
-        super().__init__()
+        self.residual = residual
         
-    def forward(self, inputs):
-        return ReluInversionProjection.apply(inputs)
+        nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
+        if self.residual:
+            with torch.no_grad():
+                identity = torch.eye(
+                    out_features,
+                    in_features,
+                    device=self.weight.device,
+                    dtype=self.weight.dtype,
+                )
+                self.weight.copy_(identity - self.weight)
+            
+            
+        if self.use_bias:
+            self.bias = nn.Parameter(torch.zeros(1, out_features))
 
-class ReLU(nn.Module):
+    def forward(self, input):
+        if config.use_projections:
+            weight_t = self.weight.T
+            if self.use_bias:
+                input = F.pad(input, (0, 1), value=1.0)
+                weight_t = torch.cat([weight_t, self.bias], dim=0)
+            if self.residual:
+                in_dim = input.shape[-1]
+                out_dim = weight_t.shape[-1]
+                padded_dim = max(in_dim, out_dim)
+
+                if padded_dim > in_dim:
+                    input = F.pad(input, (0, padded_dim - in_dim), value=0.0)
+
+                if padded_dim != in_dim or padded_dim != out_dim:
+                    padded_weight_t = weight_t.new_zeros((padded_dim, padded_dim))
+                    padded_weight_t[:in_dim, :out_dim] = weight_t
+                    weight_t = padded_weight_t
+
+                output = MatMulProjection.apply(input, weight_t, self.num_iters, self.alpha, self.g, self.omega, self.proj_cache, False, True)
+                return output[..., :self.out_features]
+            return MatMulProjection.apply(input, weight_t, self.num_iters, self.alpha, self.g, self.omega, self.proj_cache, False, self.residual)
+
+        output = F.linear(input, self.weight)
+        if self.use_bias:
+            output = output + self.bias
+        return output / self.omega
+
+class LinearLinf(nn.Linear):
+    """Linear layer that uses the L∞ (Chebyshev) matmul projection.
+
+    Drop-in replacement for :class:`Linear` that switches the backward
+    projection from the Frobenius (L2) norm to the L∞ (Chebyshev) norm.
+    See ``MatMulProjectionLinf`` in ``ops.py`` for the mathematical details.
+
+    Args:
+        in_features:  number of input features.
+        out_features: number of output features.
+        bias:         if True (default), adds a learnable bias.
+        g:            Z-slack weight in the L∞ projection (default 1.0).
+        omega:        output scale divisor, same role as in Linear (default 1.0).
+        num_iters:    Newton iterations inside the L∞ projection (default 5).
+        residual:     if True, forward computes ``(x - x @ W) / omega``
+                      and the residual isomorphism is applied in the projection.
+    """
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        bias: bool = True,
+        g: float = 1.0,
+        omega: float = 1.0,
+        num_iters: int = 5,
+        residual: bool = True,
+    ):
+        super().__init__(in_features, out_features, bias=False)
+        self.g = g
+        self.omega = omega
+        self.num_iters = num_iters
+        self.use_bias = bias
+        self.residual = residual
+        self.proj_cache: dict = {}
+
+        nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
+        if self.residual:
+            with torch.no_grad():
+                identity = torch.eye(
+                    out_features, in_features,
+                    device=self.weight.device,
+                    dtype=self.weight.dtype,
+                )
+                self.weight.copy_(identity - self.weight)
+
+        if self.use_bias:
+            self.bias = nn.Parameter(torch.zeros(1, out_features))
+
+    def forward(self, input):
+        if config.use_projections:
+            weight_t = self.weight.T
+            if self.use_bias:
+                input = F.pad(input, (0, 1), value=1.0)
+                weight_t = torch.cat([weight_t, self.bias], dim=0)
+            if self.residual:
+                in_dim = input.shape[-1]
+                out_dim = weight_t.shape[-1]
+                padded_dim = max(in_dim, out_dim)
+
+                if padded_dim > in_dim:
+                    input = F.pad(input, (0, padded_dim - in_dim), value=0.0)
+
+                if padded_dim != in_dim or padded_dim != out_dim:
+                    padded_weight_t = weight_t.new_zeros((padded_dim, padded_dim))
+                    padded_weight_t[:in_dim, :out_dim] = weight_t
+                    weight_t = padded_weight_t
+
+                output = MatMulProjectionLinf.apply(
+                    input, weight_t,
+                    self.num_iters, self.g, self.omega,
+                    self.proj_cache, False, True,
+                )
+                return output[..., :self.out_features]
+
+            return MatMulProjectionLinf.apply(
+                input, weight_t,
+                self.num_iters, self.g, self.omega,
+                self.proj_cache, False, self.residual,
+            )
+
+        output = F.linear(input, self.weight)
+        if self.use_bias:
+            output = output + self.bias
+        return output / self.omega
+
+
+class ReLU(nn.ReLU):
+    def __init__(self, inplace: bool = False):
+        super().__init__(inplace=inplace)
+        
+    def forward(self, input):
+        if config.use_projections:
+            return ReLUProjection.apply(input)
+        return super().forward(input)
+
+
+class LeakyReLU(nn.LeakyReLU):
+    def __init__(self, negative_slope: float = 0.01, inplace: bool = False):
+        super().__init__(negative_slope=negative_slope, inplace=inplace)
+
+    def forward(self, input):
+        if config.use_projections:
+            return LeakyReLUProjection.apply(input, self.negative_slope)
+        return super().forward(input)
+
+class SumReLU(nn.Module):
     """Rectified Linear Unit."""
     def __init__(self):
         super().__init__()
 
     def forward(self, *inputs):
-        return ReLUProjection.apply(*inputs)
+        if config.use_projections:
+            return SumReLUProjection.apply(*inputs)
+        return torch.relu(sum(inputs))
 
 class Step(nn.Module):
     """Step activation function."""
-    def __init__(self, features: int):
+    def __init__(self):
         super().__init__()
         
-    def forward(self, *inputs):
-        from ..core.ops import StepProjection # Avoid circular import if needed or just use it here
-        return StepProjection.apply(*inputs)
+    def forward(self, input):
+        if config.use_projections:
+            return StepProjection.apply(input)
+        return torch.where(input >= 0, torch.tensor(1.0, dtype=input.dtype, device=input.device), 
+                           torch.tensor(-1.0, dtype=input.dtype, device=input.device))
 
 
 class Simplex(nn.Module):
@@ -89,7 +213,10 @@ class Simplex(nn.Module):
         super().__init__()
         
     def forward(self, input):
-        return SimplexProjection.apply(input)
+        if config.use_projections:
+            return SimplexProjection.apply(input)
+        Warning.warn("Simplex is not supported in gradient mode")
+        return simplex_op_pt(input)
 
 class Conversion(nn.Module):
     """Bridge layer: converts projection targets into real gradients.
@@ -102,7 +229,10 @@ class Conversion(nn.Module):
         super().__init__()
 
     def forward(self, input):
-        return ConversionFn.apply(input)
+        if config.use_projections:
+            return ConversionFn.apply(input)
+        return input
+
 
 class Mean(nn.Module):
     def __init__(self, dim):
@@ -110,7 +240,9 @@ class Mean(nn.Module):
         super().__init__()
     
     def forward(self, input):
-        return MeanProjection.apply(input, self.dim)
+        if config.use_projections:
+            return MeanProjection.apply(input, self.dim)
+        return torch.mean(input, dim=self.dim)
 
 class LayerNorm(nn.Module):
     """Layer normalisation using LayerNormProjection.
@@ -124,7 +256,12 @@ class LayerNorm(nn.Module):
         self.eps = eps
 
     def forward(self, input):
-        return LayerNormProjection.apply(input, self.eps)
+        if config.use_projections:
+            return LayerNormProjection.apply(input, self.eps)
+        mu = input.mean(dim=-1, keepdim=True)
+        var = input.var(dim=-1, keepdim=True, unbiased=False)
+        sigma = torch.sqrt(var + self.eps)
+        return (input - mu) / sigma
 
 
 class Add(nn.Module):
@@ -137,7 +274,9 @@ class Add(nn.Module):
         super().__init__()
 
     def forward(self, x1, x2):
-        return AddProjection.apply(x1, x2)
+        if config.use_projections:
+            return AddProjection.apply(x1, x2)
+        return x1 + x2
 
 class Dropout(nn.Module):
     """Projection-aware dropout.
@@ -151,28 +290,13 @@ class Dropout(nn.Module):
         self.p = p
 
     def forward(self, input):
-        return DropoutProjection.apply(input, self.p, self.training)
+        if config.use_projections:
+            return DropoutProjection.apply(input, self.p, self.training)
+        if self.training and self.p > 0.0:
+            mask = (torch.rand_like(input) > self.p).to(input.dtype)
+            return input * mask * (1.0 / (1.0 - self.p))
+        return input
 
-class Residual(nn.Module):
-    """Residual connection wrapper.
-    Instead of AddProjection, it uses AverageGradient to intercept the tensor
-    before the split, matching the user's requested approach.
-    """
-    def __init__(self, subspace: nn.Module):
-        super().__init__()
-        self.subspace = subspace
-
-    def forward(self, x):
-        # 1. Intercept the tensor BEFORE the split.
-        # num_paths=2 (main pathway + skip connection)
-        x_node = AverageGradient.apply(x, 2)
-        
-        # 2. Main pathway + Skip connection
-        # PyTorch natively sums the gradients of 'out' and 'x_node' here,
-        # then passes that sum to AverageGradient.backward().
-        out = self.subspace(x_node) + x_node
-        
-        return out
 
 class MultiHeadAttention(nn.Module):
     """Multi-head attention mechanism for transformer architectures.
@@ -207,6 +331,9 @@ class MultiHeadAttention(nn.Module):
         self.attention_type = attention_type
 
     def _project_pairwise_matmul(self, left, right, omega=1.0):
+        if not config.use_projections:
+            return (left @ right) / omega
+            
         if left.ndim > 2 and right.ndim > 2:
             batch_shape = left.shape[:-2]
             if batch_shape != right.shape[:-2]:
@@ -215,12 +342,13 @@ class MultiHeadAttention(nn.Module):
         return MatMulProjection.apply(
             left,
             right,
-            None, # no cache for pairwise
+            10,
             self.query_layer.alpha,
             1,
             omega,
-            10,   # num_steps = 10
-            True  # pairwise
+            None,
+            True,
+            False,
         )
 
     def forward(self, input, return_attention=False):
@@ -248,11 +376,22 @@ class MultiHeadAttention(nn.Module):
         scale = (q.shape[-1] ** 0.5)
         qk = self._project_pairwise_matmul(q, k.transpose(-2, -1), omega=scale)
         if self.attention_type == 'hardmax':
-            qk = HardmaxProjection.apply(qk)
+            if config.use_projections:
+                qk = HardmaxProjection.apply(qk)
+            else:
+                from ..core.ops import hardmax_op_pt
+                qk = hardmax_op_pt(qk)
         elif self.attention_type == 'simplex':
-            qk = SimplexProjection.apply(qk)
+            if config.use_projections:
+                qk = SimplexProjection.apply(qk)
+            else:
+                from ..core.ops import simplex_op_pt
+                qk = simplex_op_pt(qk)
         else:
-            qk = SoftmaxProjection.apply(qk)
+            if config.use_projections:
+                qk = SoftmaxProjection.apply(qk)
+            else:
+                qk = F.softmax(qk, dim=-1)
         attention_weights = qk
 
         # Weighted sum of values
@@ -265,3 +404,31 @@ class MultiHeadAttention(nn.Module):
         if return_attention:
             return output, attention_weights
         return output
+
+
+class BatchNorm(nn.Module):
+    """
+    Affine Batch normalisation using full projection logic.
+    Projects the input tensor AND the learnable scale/shift parameters.
+    """
+    def __init__(self, num_features: int, eps: float = 1e-5, num_steps: int = 3):
+        super().__init__()
+        self.num_features = num_features
+        self.eps = eps
+        self.num_steps = num_steps
+        
+        # The scale (gamma) and shift (beta)
+        self.weight = nn.Parameter(torch.ones(1,num_features))
+        self.bias = nn.Parameter(torch.zeros(1,num_features))
+
+    def forward(self, input):
+        if config.use_projections:
+            return AffineBatchNormProjection.apply(
+                input, self.weight, self.bias, self.eps, self.num_steps
+            )
+            
+        # Standard execution if projections are turned off
+        mu = input.mean(dim=0, keepdim=True)
+        var = input.var(dim=0, keepdim=True, unbiased=False)
+        x_hat = (input - mu) / torch.sqrt(var + self.eps)
+        return self.weight * x_hat + self.bias

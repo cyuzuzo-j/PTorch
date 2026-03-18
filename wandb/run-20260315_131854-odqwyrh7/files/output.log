@@ -1,0 +1,29 @@
+1074step [01:45, 10.22step/s, best=0.6602, val_acc=0.6729]
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/hybrid_benchmarks/bench_ptorch.py", line 224, in <module>
+    torch._dynamo.disable()
+  File "/home/cyuzuzo/thesisV5/experiments/hybrid_benchmarks/bench_ptorch.py", line 187, in run
+    else:
+  File "/home/cyuzuzo/thesisV5/experiments/hybrid_benchmarks/bench_ptorch.py", line 142, in step_fn
+    loss = F.cross_entropy(logits.detach(), y.long())
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_tensor.py", line 625, in backward
+    torch.autograd.backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/__init__.py", line 354, in backward
+    _engine_run_backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/graph.py", line 841, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/hybrid_benchmarks/bench_ptorch.py", line 224, in <module>
+    torch._dynamo.disable()
+  File "/home/cyuzuzo/thesisV5/experiments/hybrid_benchmarks/bench_ptorch.py", line 187, in run
+    else:
+  File "/home/cyuzuzo/thesisV5/experiments/hybrid_benchmarks/bench_ptorch.py", line 142, in step_fn
+    loss = F.cross_entropy(logits.detach(), y.long())
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_tensor.py", line 625, in backward
+    torch.autograd.backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/__init__.py", line 354, in backward
+    _engine_run_backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/graph.py", line 841, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+KeyboardInterrupt

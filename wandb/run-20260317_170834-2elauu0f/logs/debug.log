@@ -1,0 +1,22 @@
+2026-03-17 17:08:34,683 INFO    MainThread:134887 [wandb_init.py:setup_run_log_directory():717] Logging user logs to /home/cyuzuzo/thesisV5/wandb/run-20260317_170834-2elauu0f/logs/debug.log
+2026-03-17 17:08:34,683 INFO    MainThread:134887 [wandb_init.py:setup_run_log_directory():718] Logging internal logs to /home/cyuzuzo/thesisV5/wandb/run-20260317_170834-2elauu0f/logs/debug-internal.log
+2026-03-17 17:08:34,683 INFO    MainThread:134887 [wandb_init.py:init():844] calling init triggers
+2026-03-17 17:08:34,683 INFO    MainThread:134887 [wandb_init.py:init():849] wandb.init called with sweep_config: {}
+config: {'_wandb': {}}
+2026-03-17 17:08:34,683 INFO    MainThread:134887 [wandb_init.py:init():892] starting backend
+2026-03-17 17:08:34,683 INFO    MainThread:134887 [wandb_init.py:init():895] sending inform_init request
+2026-03-17 17:08:34,684 INFO    MainThread:134887 [wandb_init.py:init():903] backend started and connected
+2026-03-17 17:08:34,686 INFO    MainThread:134887 [wandb_init.py:init():973] updated telemetry
+2026-03-17 17:08:34,690 INFO    MainThread:134887 [wandb_init.py:init():997] communicating run to backend with 90.0 second timeout
+2026-03-17 17:08:35,917 INFO    MainThread:134887 [wandb_init.py:init():1042] starting run threads in backend
+2026-03-17 17:08:36,115 INFO    MainThread:134887 [wandb_run.py:_console_start():2524] atexit reg
+2026-03-17 17:08:36,116 INFO    MainThread:134887 [wandb_run.py:_redirect():2373] redirect: wrap_raw
+2026-03-17 17:08:36,116 INFO    MainThread:134887 [wandb_run.py:_redirect():2442] Wrapping output streams.
+2026-03-17 17:08:36,116 INFO    MainThread:134887 [wandb_run.py:_redirect():2465] Redirects installed.
+2026-03-17 17:08:36,117 INFO    MainThread:134887 [wandb_init.py:init():1082] run started, returning control to user process
+2026-03-17 17:08:36,117 INFO    MainThread:134887 [wandb_run.py:_config_callback():1403] config_cb None None {'framework': 'ptorch_new_matmul_reluinv ', 'task': 'MNIST', 'hidden': [128, 128, 128, 128, 128], 'optimizer': 'ProjectionMuon', 'opt_lr': 0.001, 'batch_size': 128, 'seed': 43, 'run_number': 1, 'max_steps': 50000, 'eval_every': 200, 'patience': 10, 'loss_projection': 'HardMarginProjection', 'log_loss_projection': True, 'bilinear_projection_num_newton_steps': 10, 'cross_entropy_method': 'fixed_point', 'cross_entropy_num_steps': 10, 'cross_entropy_lambda': 5.0, 'use_projections': True}
+2026-03-17 17:11:00,587 INFO    MainThread:134887 [wandb_run.py:_finish():2291] finishing run learning_projections/pjax/2elauu0f
+2026-03-17 17:11:00,587 INFO    MainThread:134887 [wandb_run.py:_atexit_cleanup():2490] got exitcode: 0
+2026-03-17 17:11:00,587 INFO    MainThread:134887 [wandb_run.py:_restore():2472] restore
+2026-03-17 17:11:00,588 INFO    MainThread:134887 [wandb_run.py:_restore():2478] restore done
+2026-03-17 17:11:02,374 INFO    MainThread:134887 [wandb_run.py:_footer_sync_info():3868] logging synced files

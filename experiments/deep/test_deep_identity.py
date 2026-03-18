@@ -15,16 +15,17 @@ class DeepMLP(nn.Module):
         super().__init__()
         layers = []
         # First layer
-        layers.append(pnn.Linear(in_features, hidden_features))
-        layers.append(pnn.ReLU(hidden_features))
+        layers.append(pnn.LinearLinf(in_features, hidden_features, bias=True, residual=False))
+        layers.append(pnn.LeakyReLU())
+
         
         # Hidden layers
         for _ in range(num_layers - 2):
-            layers.append(pnn.Linear(hidden_features, hidden_features))
-            layers.append(pnn.ReLU(hidden_features))
-            
+            layers.append(pnn.LinearLinf(hidden_features, hidden_features, bias=True, residual=True))
+            layers.append(pnn.LeakyReLU())
+
         # Final layer
-        layers.append(pnn.Linear(hidden_features, out_features))
+        layers.append(pnn.LinearLinf(hidden_features, out_features, bias=True, residual=False))
         self.network = nn.Sequential(*layers)
 
     def forward(self, x):
@@ -35,16 +36,16 @@ def test_identity():
     in_features = 8
     hidden_features = 16
     out_features = 8
-    num_layers = 3
+    num_layers = 5
     batch_size = 32
-    num_epochs = 100
-    lr = 1.0
+    num_epochs = 1000
+    lr = 0.001
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}", flush=True)
     
     model = DeepMLP(in_features, hidden_features, out_features, num_layers).to(device)
-    optimizer = optim.ProjectionSGD(model.parameters(), lr=lr)
+    optimizer = optim.ProjectionMuon(model.parameters(), lr=lr)
     
     # Simple identity dataset
     x_train = torch.randn(batch_size * 10, in_features).to(device)

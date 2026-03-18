@@ -1,0 +1,45 @@
+1602step [00:22, 71.71step/s, best=0.0692, val_acc=0.0623] 
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 180, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device,
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 141, in run
+    loss, proj_loss_val = step_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 98, in step_fn
+    logits  = model(x)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 56, in forward
+    x = self.hidden_layers[i](x)      # LinearBias
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/nn/modules.py", line 61, in forward
+    output = MatMulProjection.apply(input, weight_t, self.num_iters, self.alpha, self.g, self.omega, self.proj_cache, False, True)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/function.py", line 581, in apply
+    return super().apply(*args, **kwargs)  # type: ignore[misc]
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 180, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device,
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 141, in run
+    loss, proj_loss_val = step_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 98, in step_fn
+    logits  = model(x)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 56, in forward
+    x = self.hidden_layers[i](x)      # LinearBias
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/nn/modules.py", line 61, in forward
+    output = MatMulProjection.apply(input, weight_t, self.num_iters, self.alpha, self.g, self.omega, self.proj_cache, False, True)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/function.py", line 581, in apply
+    return super().apply(*args, **kwargs)  # type: ignore[misc]
+KeyboardInterrupt

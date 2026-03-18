@@ -1,0 +1,65 @@
+1686step [00:33, 49.70step/s, best=0.8933, val_acc=0.8920]
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 180, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device,
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 147, in run
+    wandb.log(log_dict, step=step)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 399, in wrapper
+    return func(self, *args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 457, in wrapper_fn
+    return func(self, *args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 444, in wrapper
+    return func(self, *args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 2038, in log
+    self._log(data=data, step=step, commit=commit)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 1749, in _log
+    self._partial_history_callback(data, step, commit)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 399, in wrapper
+    return func(self, *args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 1580, in _partial_history_callback
+    self._backend.interface.publish_partial_history(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/interface/interface.py", line 708, in publish_partial_history
+    self._publish_partial_history(partial_history)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/interface/interface_shared.py", line 93, in _publish_partial_history
+    self._publish(rec)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/interface/interface_sock.py", line 46, in _publish
+    self._asyncer.run(lambda: self._client.publish(request))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 137, in run
+    return future.result()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/concurrent/futures/_base.py", line 453, in result
+    self._condition.wait(timeout)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/threading.py", line 320, in wait
+    waiter.acquire()
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 180, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device,
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 147, in run
+    wandb.log(log_dict, step=step)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 399, in wrapper
+    return func(self, *args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 457, in wrapper_fn
+    return func(self, *args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 444, in wrapper
+    return func(self, *args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 2038, in log
+    self._log(data=data, step=step, commit=commit)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 1749, in _log
+    self._partial_history_callback(data, step, commit)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 399, in wrapper
+    return func(self, *args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/wandb_run.py", line 1580, in _partial_history_callback
+    self._backend.interface.publish_partial_history(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/interface/interface.py", line 708, in publish_partial_history
+    self._publish_partial_history(partial_history)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/interface/interface_shared.py", line 93, in _publish_partial_history
+    self._publish(rec)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/interface/interface_sock.py", line 46, in _publish
+    self._asyncer.run(lambda: self._client.publish(request))
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/wandb/sdk/lib/asyncio_manager.py", line 137, in run
+    return future.result()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/concurrent/futures/_base.py", line 453, in result
+    self._condition.wait(timeout)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/threading.py", line 320, in wait
+    waiter.acquire()
+KeyboardInterrupt

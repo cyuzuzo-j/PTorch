@@ -1,4 +1,5 @@
 import torch                    
+from . import config
                 
 class AlternatingProjections(torch.optim.Optimizer):
     """
@@ -8,7 +9,7 @@ class AlternatingProjections(torch.optim.Optimizer):
     to pass orthogonal project targets BACKWARDS through the computational graph.
     """
     def __init__(self, params, lr=1.0):
-        defaults = dict()
+        defaults = dict(lr=lr)
         super().__init__(params, defaults)
 
     @torch.no_grad()
@@ -18,19 +19,25 @@ class AlternatingProjections(torch.optim.Optimizer):
         
         Requires that `loss.backward(target)` has already been called.
         """
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None:
-                    # Update parameter to the newly projected state
-                    # NOTE: p.grad holds the PROJECTION TARGET, not the gradient
-                    p.copy_(p.grad)
-                    
-                    # Clear projection for next iteration
-                    p.grad = None
+        if config.use_projections:
+            for group in self.param_groups:
+                for p in group['params']:
+                    if p.grad is not None:
+                        # Update parameter to the newly projected state
+                        # NOTE: p.grad holds the PROJECTION TARGET, not the gradient
+                        p.copy_(p.grad)
+                        
+                        # Clear projection for next iteration
+                        p.grad = None
+        else:
+            for group in self.param_groups:
+                for p in group['params']:
+                    if p.grad is not None:
+                        p.data.add_(p.grad, alpha=-group.get('lr', 1.0))
 
 class ProjectionSGD(torch.optim.SGD):
     """
-    Projection-based optimizer wrapped around SGD.
+    Projection-bZZZased optimizer wrapped around SGD.
     Converts projection targets into pseudo-gradients (g = p - p_proj).
     Supports all SGD features including momentum and weight decay.
     
@@ -43,12 +50,13 @@ class ProjectionSGD(torch.optim.SGD):
     @torch.no_grad()
     def step(self, closure=None):
         # Convert projection targets (stored in p.grad) to pseudo-gradients
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None:
-                    # p.grad currently holds the projection target p_proj
-                    # We want the gradient g to be p - p_proj
-                    p.grad.copy_(p.data - p.grad)
+        if config.use_projections:
+            for group in self.param_groups:
+                for p in group['params']:
+                    if p.grad is not None:
+                        # p.grad currently holds the projection target p_proj
+                        # We want the gradient g to be p - p_proj
+                        p.grad.copy_(p.data - p.grad)
         
         # Now apply the standard SGD step using the pseudo-gradients
         return super().step(closure)
@@ -75,11 +83,12 @@ class ProjectionAdam(torch.optim.Adam):
     @torch.no_grad()
     def step(self, closure=None):
         # Convert projection targets (stored in p.grad) to pseudo-gradients
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None:
-                    # p.grad currently holds the projection target p_proj
-                    p.grad.copy_(p.data - p.grad)
+        if config.use_projections:
+            for group in self.param_groups:
+                for p in group['params']:
+                    if p.grad is not None:
+                        # p.grad currently holds the projection target p_proj
+                        p.grad.copy_(p.data - p.grad)
         
         # Now apply the standard Adam step using the pseudo-gradients
         return super().step(closure)
@@ -95,10 +104,11 @@ class ProjectionAdagrad(torch.optim.Adagrad):
     @torch.no_grad()
     def step(self, closure=None):
         # Convert projection targets (stored in p.grad) to pseudo-gradients
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.graProjectionAdadeltad is not None:
-                    p.grad.copy_(p.data - p.grad)
+        if config.use_projections:
+            for group in self.param_groups:
+                for p in group['params']:
+                    if p.grad is not None:
+                        p.grad.copy_(p.data - p.grad)
         
         return super().step(closure)
 
@@ -113,10 +123,11 @@ class ProjectionAdadelta(torch.optim.Adadelta):
     @torch.no_grad()
     def step(self, closure=None):
         # Convert projection targets (stored in p.grad) to pseudo-gradients
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None:
-                    p.grad.copy_(p.data - p.grad)
+        if config.use_projections:
+            for group in self.param_groups:
+                for p in group['params']:
+                    if p.grad is not None:
+                        p.grad.copy_(p.data - p.grad)
         
         return super().step(closure)
 
@@ -132,10 +143,11 @@ class ProjectionMuon(torch.optim.Muon):
     @torch.no_grad()
     def step(self, closure=None):
         # Convert projection targets (stored in p.grad) to pseudo-gradients
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None:
-                    p.grad.copy_(p.data - p.grad)
+        if config.use_projections:
+            for group in self.param_groups:
+                for p in group['params']:
+                    if p.grad is not None:
+                        p.grad.copy_(p.data - p.grad)
         
         return super().step(closure)
 

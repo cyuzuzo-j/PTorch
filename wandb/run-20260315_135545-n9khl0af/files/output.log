@@ -1,0 +1,30 @@
+Switch steps: {400}
+4201step [07:10,  9.76step/s, best=0.6322, val_acc=0.6223]
+
+Step 400: Switched use_projections to True
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/hybrid_benchmarks/bench_ptorch.py", line 235, in <module>
+    for batch_size in cfg["batch_sizes"]:
+  File "/home/cyuzuzo/thesisV5/experiments/hybrid_benchmarks/bench_ptorch.py", line 198, in run
+    x, y = next(train_iter)
+  File "/home/cyuzuzo/thesisV5/experiments/hybrid_benchmarks/bench_ptorch.py", line 146, in step_fn
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_tensor.py", line 625, in backward
+    torch.autograd.backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/__init__.py", line 354, in backward
+    _engine_run_backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/graph.py", line 841, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/hybrid_benchmarks/bench_ptorch.py", line 235, in <module>
+    for batch_size in cfg["batch_sizes"]:
+  File "/home/cyuzuzo/thesisV5/experiments/hybrid_benchmarks/bench_ptorch.py", line 198, in run
+    x, y = next(train_iter)
+  File "/home/cyuzuzo/thesisV5/experiments/hybrid_benchmarks/bench_ptorch.py", line 146, in step_fn
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/_tensor.py", line 625, in backward
+    torch.autograd.backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/__init__.py", line 354, in backward
+    _engine_run_backward(
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/autograd/graph.py", line 841, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+KeyboardInterrupt

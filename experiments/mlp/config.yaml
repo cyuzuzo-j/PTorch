@@ -6,7 +6,7 @@
 # ── Experiment identity ───────────────────────────
 experiment_name: mlp_benchmark   # shown in Aim as the experiment group
 random_seed: 43
-max_steps: 5000
+max_steps: 5_000
 num_runs: 2
 eval_every: 200
 patience: 10
@@ -17,15 +17,16 @@ batch_sizes: [8, 32, 128, 512]
 
 # ── Tasks (comment out to disable) ───────────────
 tasks:
-  - name: MNIST
-    in_features: 784        # 28 * 28
-    classes: 10
-    hidden: [128]      # freely define the MLP hidden layer sizes
-
   - name: CIFAR10
     in_features: 3072       # 3 * 32 * 32
     classes: 10
     hidden: [512]
+
+  - name: MNIST
+    in_features: 784        # 28 * 28
+    classes: 10
+    hidden: [256]      # freely define the MLP hidden layer sizes
+
 
 # ── Optimizers per framework ──────────────────────
 # pjax (new) — optim_static or optim classes
@@ -40,8 +41,8 @@ pjax_orr_optimizer_kwargs:
 
 # ptorch — ptorch.optim_static classes
 ptorch_optimizer: ProjectionMuon  # AlternatingProjections | AlternatingProjectionsMomentum | ProjectionSGD | ProjectionAdam | ProjectionAdagrad | ProjectionAdadelta
-ptorch_optimizer_kwargs: {lr: 0.01}
-ptorch_loss_projection: CrossEntropyProjection  # CrossEntropyProjection | HardMarginProjection | ProximalHingeMargin | SmoothSoftMargin
+ptorch_optimizer_kwargs: {lr: 0.001}
+ptorch_loss_projection: HardMarginProjection  # CrossEntropyProjection | HardMarginProjection | ProximalHingeMargin | SmoothSoftMargin
 
 # torch — any torch.optim class
 torch_optimizer: Adam             # Adam | SGD | AdamW | ...

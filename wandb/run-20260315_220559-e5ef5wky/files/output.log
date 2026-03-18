@@ -1,0 +1,61 @@
+0step [00:01, ?step/s]
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 178, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device,
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 119, in run
+    accs = [eval_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 119, in <listcomp>
+    accs = [eval_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 108, in eval_fn
+    return (model(x).argmax(dim=-1) == y).float().mean()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 55, in forward
+    x = self.hidden_layers[i](x)  # Simplex
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/nn/modules.py", line 106, in forward
+    outputs = [piece(x) for piece in self.pieces]
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/nn/modules.py", line 106, in <listcomp>
+    outputs = [piece(x) for piece in self.pieces]
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/nn/modules.py", line 62, in forward
+    augmented_input = torch.cat([input, ones], dim=-1)
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 178, in <module>
+    run(cfg, task_cfg, batch_size, run_number, device,
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 119, in run
+    accs = [eval_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 119, in <listcomp>
+    accs = [eval_fn(
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 108, in eval_fn
+    return (model(x).argmax(dim=-1) == y).float().mean()
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/experiments/mlp/bench_ptorch.py", line 55, in forward
+    x = self.hidden_layers[i](x)  # Simplex
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/nn/modules.py", line 106, in forward
+    outputs = [piece(x) for piece in self.pieces]
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/nn/modules.py", line 106, in <listcomp>
+    outputs = [piece(x) for piece in self.pieces]
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/cyuzuzo/thesisV5/frameworks/ptorch/nn/modules.py", line 62, in forward
+    augmented_input = torch.cat([input, ones], dim=-1)
+KeyboardInterrupt

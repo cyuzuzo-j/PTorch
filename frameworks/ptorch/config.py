@@ -1,4 +1,5 @@
 import threading
+import contextlib
 from typing import Any
 
 # default configuration
@@ -7,6 +8,7 @@ defaults = {
     "cross_entropy_method": "fixed_point",
     "cross_entropy_num_steps": 10,
     "cross_entropy_lambda": 5.0,
+    "use_projections": True,
 }
 
 
@@ -51,6 +53,17 @@ class Config:
         """Return a copy of the current configuration as a plain dict."""
         return dict(self._config)
 
+    @contextlib.contextmanager
+    def projections(self, enabled: bool):
+        """Context manager to toggle projection-based gradients."""
+        with self._lock:
+            prev = self._config.get("use_projections", True)
+            self._config["use_projections"] = enabled
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._config["use_projections"] = prev
 
 config = Config()
 

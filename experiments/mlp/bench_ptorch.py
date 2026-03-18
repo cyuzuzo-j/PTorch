@@ -11,7 +11,7 @@ import yaml
 import torch
 import torch.nn as tnn
 import torch.nn.functional as F
-from ptorch.nn.modules import LinearBias, ReLU, Simplex, ReLuInversion
+from ptorch.nn.modules import  Simplex, Linear, SumReLU, LinearLinf
 from ptorch.core.ops import CrossEntropyProjection, HardMarginProjection, ProximalHingeMargin, SmoothSoftMargin
 import ptorch.optim_static as ptorch_optim_static
 import ptorch.config as ptorch_config
@@ -44,11 +44,11 @@ class MLP(tnn.Module):
         last = in_features
         self.hidden_layers = tnn.ModuleList()
         for f in hidden:
-            self.hidden_layers.append(LinearBias(last, f, g=float('inf')))
-            self.hidden_layers.append(ReLuInversion())
+            self.hidden_layers.append(LinearLinf(last, f, g=float('inf'),bias=True, residual=True))
+            self.hidden_layers.append(SumReLU())
             last = f
         self.n_hidden = len(hidden)
-        self.out = LinearBias(last, classes, g=float('inf'))
+        self.out = LinearLinf(last, classes, g=float('inf'), bias=True, residual=False)
 
     def forward(self, x):
         x = x.reshape(x.shape[0], -1)
