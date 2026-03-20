@@ -5,23 +5,24 @@ experiment_name: "nlp_bench"
 
 # model
 # attention_type: one of [simplex, hardmax, softmax]
-attention_type: "softmax"
+attention_type: "simplex"
+attention_heads: 8      # use the same number of heads across torch and ptorch
 
 # tasks
 tasks:
   - name: "SST2"
     classes: 2
-    vocab_size: 10_000
-    embed_dim: 64
-    hidden_dim: [64] # for MLP model
+    vocab_size: 5_000
+    embed_dim: 128
+    hidden_dim: [512] # for MLP model
     max_seq_len: 64
 
-batch_sizes: [64]
+batch_sizes: [512]
 num_runs: 1
 random_seed: 42
 eval_every: 100
 max_steps: 50_000
-patience: 50
+patience: 500
 
 # optimizers
 torch_optimizer: "Adam"
@@ -37,3 +38,4 @@ pjax_orr_optimizer_kwargs:
 ptorch_optimizer: "ProjectionMuon"
 ptorch_optimizer_kwargs:
   lr: 0.001
+ptorch_norm: 2 # norm order for projection-based ptorch layers (e.g. 2, inf)
