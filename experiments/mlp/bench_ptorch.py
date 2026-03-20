@@ -11,7 +11,7 @@ import yaml
 import torch
 import torch.nn as tnn
 import torch.nn.functional as F
-from ptorch.nn.modules import  Simplex, Linear, SumReLU, LinearLinf
+from ptorch.nn.modules import   Linear, ReLU
 from ptorch.core.ops import CrossEntropyProjection, HardMarginProjection, ProximalHingeMargin, SmoothSoftMargin
 import ptorch.optim_static as ptorch_optim_static
 import ptorch.config as ptorch_config
@@ -19,7 +19,7 @@ from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 import tqdm, time
 import wandb
 
-FRAMEWORK = "ptorch_new_matmul_reluinv "
+FRAMEWORK = "ptorch"
 
 OPTIM_MODULES = vars(ptorch_optim_static)
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
@@ -39,16 +39,16 @@ LOSS_PROJECTIONS = {
 
 # ── Model ────────────────────────────────────────
 class MLP(tnn.Module):
-    def __init__(self, hidden, in_features, classes):
+    def __init__(self, hidden, in_features, classes, norm="l2"):
         super().__init__()
         last = in_features
         self.hidden_layers = tnn.ModuleList()
         for f in hidden:
-            self.hidden_layers.append(LinearLinf(last, f, g=float('inf'),bias=True, residual=True))
-            self.hidden_layers.append(SumReLU())
+            self.hidden_layers.append(Linear(last, f, g=float('inf'),bias=True, residual=False, norm=norm))
+            self.hidden_layers.append(ReLU(norm=norm))
             last = f
         self.n_hidden = len(hidden)
-        self.out = LinearLinf(last, classes, g=float('inf'), bias=True, residual=False)
+        self.out = Linear(last, classes, g=float('inf'), bias=True, residual=False, norm=norm)
 
     def forward(self, x):
         x = x.reshape(x.shape[0], -1)
@@ -61,15 +61,23 @@ class MLP(tnn.Module):
 # ── Training ─────────────────────────────────────
 def run(cfg, task_cfg, batch_size, run_number, device, loss_projection_cls=CrossEntropyProjection, log_loss_projection=False):
     seed = cfg["random_seed"]
-    torch.manual_seed(seed + run_number)
+    run_seed = seed + run_number
+    torch.manual_seed(run_seed)
+    norm = cfg.get("ptorch_norm", 2)
 
+    norm_str = str(norm).lower()
+    if norm_str in ("linf", "inf"):
+        model_norm = "linf"
+    elif norm_str in ("l2", "2"):
+        model_norm = "l2"
+    
     dataset_cls = DATASETS[task_cfg["name"]]
-    ds = dataset_cls(batch_size=batch_size, seed=seed)
+    ds = dataset_cls(batch_size=batch_size, seed=run_seed)
     train_iter = ds.train_iterator()
     val_loader  = ds.val_dataloader()
     test_loader = ds.test_dataloader()
 
-    model      = MLP(task_cfg["hidden"], task_cfg["in_features"], task_cfg["classes"]).to(device)
+    model      = MLP(task_cfg["hidden"], task_cfg["in_features"], task_cfg["classes"], norm=model_norm).to(device)
     opt_name   = cfg["ptorch_optimizer"]
     opt_kwargs = cfg.get("ptorch_optimizer_kwargs", {})
     optimizer  = OPTIM_MODULES[opt_name](model.parameters(), **opt_kwargs)
@@ -84,13 +92,16 @@ def run(cfg, task_cfg, batch_size, run_number, device, loss_projection_cls=Cross
         "optimizer": opt_name,
         **{f"opt_{k}": v for k, v in opt_kwargs.items()},
         "batch_size": batch_size,
-        "seed": seed,
+        "seed": run_seed,
+        "base_seed": seed,
         "run_number": run_number,
         "max_steps": cfg["max_steps"],
         "eval_every": cfg["eval_every"],
         "patience": cfg["patience"],
         "loss_projection": loss_proj_name,
         "log_loss_projection": log_loss_projection,
+        "ptorch_norm": norm,
+        "ptorch_model_norm": model_norm,
         **ptorch_config.snapshot(),
     })
 

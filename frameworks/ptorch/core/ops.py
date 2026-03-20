@@ -519,6 +519,34 @@ class Conversion(torch.autograd.Function):
         #grad = grad/ torch.norm(grad)
         return grad
 
+class ReLULInfinityProjection(torch.autograd.Function):
+    """
+    Sets the new input directly based on the target z,
+    projecting onto the ReLU graph using the L-infinity norm.
+    """
+    @staticmethod
+    def forward(ctx, x):
+        ctx.save_for_backward(x)
+        return torch.relu(x)
+
+    @staticmethod
+    def backward(ctx, z):
+        x, = ctx.saved_tensors
+
+        # Solution 1: project onto inactive branch (x <= 0, output = 0)
+        x_1 = torch.clamp(x, max=0)
+        # L-infinity distance: max(|x - x_1|, |z - 0|)
+        dist_1 = torch.max(torch.abs(x - x_1), torch.abs(z))
+
+        # Solution 2: project onto active branch (x > 0, output = x)
+        x_2 = torch.clamp((x + z) / 2.0, min=0)
+        # L-infinity distance: max(|x - x_2|, |z - x_2|)
+        dist_2 = torch.max(torch.abs(x - x_2), torch.abs(z - x_2))
+
+        # Select solution minimizing L-infinity distance
+        result = torch.where(dist_1 < dist_2, x_1, x_2)
+        return result
+    
 class ReLUProjection(torch.autograd.Function):
     """
     Sets the new input directly based on the target z.
