@@ -34,6 +34,7 @@ from frameworks.ptorch import config
 from frameworks.ptorch.nn.modules import RMSNorm, CausalSelfAttention, ReLUSquared, Conversion, Softcap
 from frameworks.ptorch.core.overrides import apply_overrides
 from frameworks.ptorch.optim_static import ProjectionAdam
+from frameworks.ptorch.nn.modules import Linear
 
 apply_overrides()
 
@@ -640,7 +641,6 @@ class GPT(nn.Module):
                 for i in range(num_layers)
             ]
         )
-        from frameworks.ptorch.nn.modules import Linear
         self.final_norm = RMSNorm()
         self.lm_head = None if tie_embeddings else Linear(model_dim, vocab_size, bias=False)
         if self.lm_head is not None:
