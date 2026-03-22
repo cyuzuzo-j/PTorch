@@ -23,23 +23,11 @@ from ..core.ops import (
 )
 from .. import config
 
-class Linear(nn.Linear):
-    """Linear (fully connected) layer with optional projection support.
-    
-    Applies a linear transformation to input data. Supports both L2 (Frobenius)
-    and L∞ (Chebyshev) projections for backward pass through the constraint.
+class Linear(nn.Module):
+    """Projection-only linear layer following the old main-style matmul path.
 
-    Args:
-        in_features:  number of input features.
-        out_features: number of output features.
-        bias:         if True (default), adds a learnable bias.
-        alpha:        L2 projection parameter (default 1.0).
-        g:            Z-slack weight in the L∞ projection (default 1.0).
-        omega:        output scale divisor (default 1.0).
-        num_iters:    Newton iterations inside the projection (default 5).
-        residual:     if True, forward computes ``(x - x @ W) / omega``
-                      and the residual isomorphism is applied in the projection.
-        norm:         projection norm type, 'l2' for Frobenius or 'linf' for Chebyshev (default 'l2').
+    Supports optional affine bias via input augmentation and optional residual
+    projection mode.
     """
     def __init__(
         self,
@@ -53,86 +41,90 @@ class Linear(nn.Linear):
         residual: bool = False,
         norm: str = 'l2',
     ):
-        # Never let nn.Linear create the bias; we create our own 2D version below.
-        super().__init__(in_features, out_features, bias=False)
+        super().__init__()
         self.alpha = alpha
         self.g = g
         self.omega = omega
-        self.num_iters = num_iters
+        self.num_iters = int(num_iters)
         self.use_bias = bias
-        self.proj_cache: dict = {}
         self.residual = residual
         self.norm = norm.lower()
-        
+        self.proj_cache: dict = {}
+
         if self.norm not in ('l2', 'linf'):
             raise ValueError(f"norm must be 'l2' or 'linf', got '{norm}'")
-        
+
+        in_aug = in_features + (1 if self.use_bias else 0)
+        self.weight = nn.Parameter(torch.empty(in_aug, out_features))
         nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
-        if self.residual:
-            with torch.no_grad():
-                identity = torch.eye(
-                    out_features,
-                    in_features,
-                    device=self.weight.device,
-                    dtype=self.weight.dtype,
-                )
-                self.weight.copy_(identity - self.weight)
-        
-        if self.use_bias:
-            self.bias = nn.Parameter(torch.zeros(1, out_features))
 
     def forward(self, input, norm=None):
-        norm = norm or self.norm
-        if config.use_projections:
-            weight_t = self.weight.T
-            if self.use_bias:
-                input = F.pad(input, (0, 1), value=1.0)
-                weight_t = torch.cat([weight_t, self.bias], dim=0)
-            
-            if self.residual:
-                in_dim = input.shape[-1]
-                out_dim = weight_t.shape[-1]
-                padded_dim = max(in_dim, out_dim)
+        norm = (norm or self.norm).lower()
+        if norm not in ('l2', 'linf'):
+            raise ValueError(f"norm must be 'l2' or 'linf', got '{norm}'")
 
-                if padded_dim > in_dim:
-                    input = F.pad(input, (0, padded_dim - in_dim), value=0.0)
-
-                if padded_dim != in_dim or padded_dim != out_dim:
-                    padded_weight_t = weight_t.new_zeros((padded_dim, padded_dim))
-                    padded_weight_t[:in_dim, :out_dim] = weight_t
-                    weight_t = padded_weight_t
-
-                if self.norm == 'linf':
-                    output = MatMulProjectionLinf.apply(
-                        input, weight_t,
-                        self.num_iters, self.g, self.omega,
-                        self.proj_cache, False, True,
-                    )
-                else:  # l2
-                    output = MatMulProjection.apply(
-                        input, weight_t,
-                        self.num_iters, self.alpha, self.g, self.omega,
-                        self.proj_cache, False, True,
-                    )
-                return output[..., :self.out_features]
-            
-            if norm == 'linf':
-                return MatMulProjectionLinf.apply(
-                    input, weight_t,
-                    self.num_iters, self.g, self.omega,
-                    self.proj_cache, False, self.residual,
-                )
-            else:  # l2
-                return MatMulProjection.apply(
-                    input, weight_t,
-                    self.num_iters, self.alpha, self.g, self.omega,
-                    self.proj_cache, False, self.residual,
-                )
-
-        output = F.linear(input, self.weight)
+        projected_input = input
         if self.use_bias:
-            output = output + self.bias
-        return output / self.omega
+            ones = torch.ones((*input.shape[:-1], 1), dtype=input.dtype, device=input.device)
+            projected_input = torch.cat([input, ones], dim=-1)
+
+        if norm == 'linf':
+            return MatMulProjectionLinf.apply(
+                projected_input,
+                self.weight,
+                self.num_iters,
+                self.g,
+                self.omega,
+                self.proj_cache,
+                False,
+                self.residual,
+            )
+
+        return MatMulProjection.apply(
+            projected_input,
+            self.weight,
+            self.num_iters,
+            self.alpha,
+            self.g,
+            self.omega,
+            self.proj_cache,
+            False,
+            self.residual,
+        )
+
+
+class LinearMain(nn.Module):
+    """Main-branch compatible projection layer (old LinearBias-style path)."""
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        alpha: float = 1.0,
+        g: float = 1.0,
+        num_iters: int = 1,
+    ):
+        super().__init__()
+        self.alpha = alpha
+        self.g = g
+        self.num_iters = num_iters
+        self.weight = nn.Parameter(torch.empty(in_features + 1, out_features))
+        self.proj_cache: dict = {}
+        nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
+
+    def forward(self, input):
+        ones = torch.ones((*input.shape[:-1], 1), dtype=input.dtype, device=input.device)
+        augmented_input = torch.cat([input, ones], dim=-1)
+        return MatMulProjection.apply(
+            augmented_input,
+            self.weight,
+            self.num_iters,
+            self.alpha,
+            self.g,
+            1.0,
+            self.proj_cache,
+            False,
+            False,
+        )
 
 
 class ReLU(nn.ReLU):

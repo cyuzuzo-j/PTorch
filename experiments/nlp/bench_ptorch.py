@@ -12,7 +12,7 @@ import torch
 torch.set_float32_matmul_precision('high')
 import torch.nn as tnn
 import torch.nn.functional as F
-from ptorch.nn.modules import Linear, ReLU, MultiHeadAttention, Conversion, Mean, SumReLU
+from ptorch.nn.modules import Linear, LinearMain, ReLU, MultiHeadAttention, Conversion, Mean, SumReLU
 from ptorch.core.ops import CrossEntropyProjection, HardMarginProjection
 import ptorch.optim_static as ptorch_optim_static
 import ptorch.config as ptorch_config
@@ -29,7 +29,7 @@ CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 
 # ── Model ────────────────────────────────────────
 class TextMLP(tnn.Module):
-    def __init__(self, vocab_size, embed_dim, hidden_dims, classes, norm="l2"):
+    def __init__(self, vocab_size, embed_dim, hidden_dims, classes, norm="l2", linear_cls=Linear):
         super().__init__()
         self.embedding = tnn.Embedding(vocab_size, embed_dim)
         self.conversion = Conversion()  # bridge right after embedding
@@ -38,10 +38,16 @@ class TextMLP(tnn.Module):
         self.hidden_layers = tnn.ModuleList()
         
         for f in hidden_dims:
-            self.hidden_layers.append(Linear(last, f, norm=norm))  # projection-based
-            self.hidden_layers.append(ReLU())              # projection-based
+            if linear_cls is Linear:
+                self.hidden_layers.append(linear_cls(last, f, norm=norm))  # projection-based
+            else:
+                self.hidden_layers.append(linear_cls(last, f))
+            self.hidden_layers.append(SumReLU())              # projection-based
             last = f
-        self.out = Linear(last, classes, norm=norm)
+        if linear_cls is Linear:
+            self.out = linear_cls(last, classes, norm=norm)
+        else:
+            self.out = linear_cls(last, classes)
 
     def forward(self, x):
         embedded = self.embedding(x)
@@ -54,12 +60,15 @@ class TextMLP(tnn.Module):
 
 
 class TinyAttention(tnn.Module):
-    def __init__(self, vocab_size, embed_dim, classes, attention_type='simplex', norm="l2", num_heads=1):
+    def __init__(self, vocab_size, embed_dim, classes, attention_type='simplex', norm="l2", num_heads=1, linear_cls=Linear):
         super().__init__()
         self.embedding = tnn.Embedding(vocab_size, embed_dim)
         self.conversion = Conversion()
         self.attention = MultiHeadAttention(embed_dim, embed_dim, heads=num_heads, attention_type=attention_type, norm=norm)
-        self.out = Linear(embed_dim, classes, norm=norm)
+        if linear_cls is Linear:
+            self.out = linear_cls(embed_dim, classes, norm=norm)
+        else:
+            self.out = linear_cls(embed_dim, classes)
         self.mean = Mean(dim=1)
         self.embed_dim = embed_dim
         
@@ -95,6 +104,17 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
     else:
         raise ValueError(f"Unsupported ptorch_norm '{norm}'. Use one of: 2, l2, inf, linf.")
 
+    linear_impl = str(cfg.get("ptorch_linear_impl", "projection")).lower()
+    if bool(cfg.get("ptorch_use_classic_linear", False)):
+        linear_impl = "classic"
+
+    if linear_impl == "classic":
+        linear_cls = LinearClassic
+    elif linear_impl == "main":
+        linear_cls = LinearMain
+    else:
+        linear_cls = Linear
+
     if task_cfg["name"] != "SST2":
         raise NotImplementedError(f"Task {task_cfg['name']} not supported yet.")
 
@@ -117,6 +137,7 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
             task_cfg["hidden_dim"], 
             task_cfg["classes"],
             norm=model_norm,
+            linear_cls=linear_cls,
         ).to(device)
     else:
         model = TinyAttention(
@@ -126,6 +147,7 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
             attention_type=cfg.get("attention_type", "simplex"),
             norm=model_norm,
             num_heads=num_heads,
+            linear_cls=linear_cls,
         ).to(device)
 
     opt_name   = cfg["ptorch_optimizer"]
@@ -153,13 +175,15 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
         "mlp_dropout": mlp_dropout,
         "ptorch_norm": norm,
         "ptorch_model_norm": model_norm,
+        "ptorch_linear_impl": linear_impl,
+        "ptorch_linear_class": linear_cls.__name__,
         **ptorch_config.snapshot(),
     })
 
     def step_fn(x, y):
         logits  = model(x)
         y_oh    = F.one_hot(y.long(), num_classes=logits.shape[-1]).float()
-        projected = HardMarginProjection.apply(logits, y_oh)
+        projected = CrossEntropyProjection.apply(logits, y_oh)
         optimizer.zero_grad()
         projected.sum().backward()
         loss = F.cross_entropy(logits.detach(), y.long())
