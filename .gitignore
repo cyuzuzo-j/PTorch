@@ -22,3 +22,21 @@ env/
 dataset/**/*.pt
 dataset/**/*.tar.gz
 experiments/**/dataset/
+
+# Local Python launcher/temp directories
+.python_prefix/
+.python_tmp/
+
+# Editor settings
+.vscode/
+
+# Weights & Biases local runs and logs
+wandb/
+
+# Local experiment debug artifacts
+experiments/attention/attention_debug/
+
+# LaTeX build intermediates
+*.aux
+*.fdb_latexmk
+*.fls

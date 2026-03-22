@@ -22,14 +22,14 @@ CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 
 # ── Models ───────────────────────────────────────
 class TextMLP(tnn.Module):
-    def __init__(self, vocab_size, embed_dim, hidden_dims, classes):
+    def __init__(self, vocab_size, embed_dim, hidden_dims, classes, dropout=0.0):
         super().__init__()
         self.embedding = tnn.Embedding(vocab_size, embed_dim)
         
         last = embed_dim
         layers = []
         for f in hidden_dims:
-            layers += [tnn.Linear(last, f), tnn.ReLU()]
+            layers += [tnn.Linear(last, f), tnn.ReLU(), tnn.Dropout(p=dropout)]
             last = f
         self.body = tnn.Sequential(*layers)
         self.out  = tnn.Linear(last, classes)
@@ -42,11 +42,11 @@ class TextMLP(tnn.Module):
         return self.out(self.body(pooled))
 
 class TinyAttention(tnn.Module):
-    def __init__(self, vocab_size, embed_dim, classes):
+    def __init__(self, vocab_size, embed_dim, classes, num_heads=1):
         super().__init__()
         self.embedding = tnn.Embedding(vocab_size, embed_dim)
         # Using PyTorch native MultiheadAttention
-        self.attention = tnn.MultiheadAttention(embed_dim=embed_dim, num_heads=1, batch_first=True)
+        self.attention = tnn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, batch_first=True)
         self.out = tnn.Linear(embed_dim, classes)
         self.embed_dim = embed_dim
         
@@ -64,7 +64,16 @@ class TinyAttention(tnn.Module):
 # ── Training ─────────────────────────────────────
 def run(cfg, task_cfg, batch_size, run_number, device, model_name):
     seed = cfg["random_seed"]
-    torch.manual_seed(seed + run_number)
+    run_seed = seed + run_number
+    torch.manual_seed(run_seed)
+    num_heads = int(cfg.get("attention_heads", 1))
+    mlp_dropout = float(cfg.get("mlp_dropout", 0.0))
+    if num_heads <= 0:
+        raise ValueError(f"attention_heads must be >= 1, got {num_heads}")
+    if task_cfg["embed_dim"] % num_heads != 0:
+        raise ValueError(
+            f"embed_dim ({task_cfg['embed_dim']}) must be divisible by attention_heads ({num_heads})"
+        )
 
     # Note: Only SST2 is supported in this benchmark so far.
     if task_cfg["name"] != "SST2":
@@ -74,7 +83,7 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
         batch_size=batch_size, 
         max_seq_len=task_cfg.get("max_seq_len", 64),
         vocab_size=task_cfg.get("vocab_size", 10000),
-        seed=seed
+        seed=run_seed
     )
     train_iter = ds.train_iterator()
     val_loader  = ds.val_dataloader()
@@ -85,20 +94,23 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
             vocab_size=ds.vocab.get_piece_size() if hasattr(ds.vocab, 'get_piece_size') else len(ds.vocab), 
             embed_dim=task_cfg["embed_dim"], 
             hidden_dims=task_cfg["hidden_dim"], 
-            classes=task_cfg["classes"]
+            classes=task_cfg["classes"],
+            dropout=mlp_dropout,
         ).to(device)
     else:
         model = TinyAttention(
             vocab_size=ds.vocab.get_piece_size() if hasattr(ds.vocab, 'get_piece_size') else len(ds.vocab),
             embed_dim=task_cfg["embed_dim"],
-            classes=task_cfg["classes"]
+            classes=task_cfg["classes"],
+            num_heads=num_heads,
         ).to(device)
         
     opt_name   = cfg["torch_optimizer"]
     opt_kwargs = cfg.get("torch_optimizer_kwargs", {})
     optimizer  = getattr(torch.optim, opt_name)(model.parameters(), **opt_kwargs)
 
-    run = wandb.init(project="pjax", name=f"{cfg['experiment_name']}_{model_name}")
+    run_name = f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}_{model_name}_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}"
+    run = wandb.init(project="pjax", name=run_name)
     wandb.config.update({
         "framework": f"{FRAMEWORK}_{model_name}",
         "task": task_cfg["name"],
@@ -107,11 +119,14 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
         "optimizer": opt_name,
         **{f"opt_{k}": v for k, v in opt_kwargs.items()},
         "batch_size": batch_size,
-        "seed": seed,
+        "seed": run_seed,
+        "base_seed": seed,
         "run_number": run_number,
         "max_steps": cfg["max_steps"],
         "eval_every": cfg["eval_every"],
         "patience": cfg["patience"],
+        "attention_heads": num_heads,
+        "mlp_dropout": mlp_dropout,
     })
 
     def step_fn(x, y):
