@@ -9,10 +9,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 import gc
 import yaml
 import torch
+torch.set_float32_matmul_precision('high')
 import torch.nn as tnn
 import torch.nn.functional as F
-from ptorch.nn.modules import LinearBias, ReLU, MultiHeadAttention, Conversion, Mean, Dropout
-from ptorch.core.ops import CrossEntropyProjection, SoftmaxProjection
+from ptorch.nn.modules import Linear, ReLU, MultiHeadAttention, Conversion, Mean, SumReLU
+from ptorch.core.ops import CrossEntropyProjection, HardMarginProjection
 import ptorch.optim_static as ptorch_optim_static
 import ptorch.config as ptorch_config
 from experiments.nlp.data import SST2DataModule
@@ -28,7 +29,7 @@ CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 
 # ── Model ────────────────────────────────────────
 class TextMLP(tnn.Module):
-    def __init__(self, vocab_size, embed_dim, hidden_dims, classes):
+    def __init__(self, vocab_size, embed_dim, hidden_dims, classes, norm="l2"):
         super().__init__()
         self.embedding = tnn.Embedding(vocab_size, embed_dim)
         self.conversion = Conversion()  # bridge right after embedding
@@ -37,30 +38,28 @@ class TextMLP(tnn.Module):
         self.hidden_layers = tnn.ModuleList()
         
         for f in hidden_dims:
-            self.hidden_layers.append(LinearBias(last, f))  # projection-based
-            self.hidden_layers.append(ReLU(f))               # projection-based
-            self.hidden_layers.append(Dropout(p=0.2))
+            self.hidden_layers.append(Linear(last, f, norm=norm))  # projection-based
+            self.hidden_layers.append(ReLU())              # projection-based
             last = f
-        self.out = LinearBias(last, classes)
+        self.out = Linear(last, classes, norm=norm)
 
     def forward(self, x):
         embedded = self.embedding(x)
         x = embedded.mean(dim=1)
         x = self.conversion(x)   # bridge: gradient → projection (only for embedding)
-        for i in range(0, len(self.hidden_layers), 3):
+        for i in range(0, len(self.hidden_layers), 2):
             x = self.hidden_layers[i](x)      # ptorch LinearBias
             x = self.hidden_layers[i + 1](x)  # ptorch ReLU
-            x = self.hidden_layers[i + 2](x)  # ptorch Dropout
         return self.out(x)
 
 
 class TinyAttention(tnn.Module):
-    def __init__(self, vocab_size, embed_dim, classes, attention_type='simplex'):
+    def __init__(self, vocab_size, embed_dim, classes, attention_type='simplex', norm="l2", num_heads=1):
         super().__init__()
         self.embedding = tnn.Embedding(vocab_size, embed_dim)
         self.conversion = Conversion()
-        self.attention = MultiHeadAttention(embed_dim, embed_dim, heads=10, attention_type=attention_type)
-        self.out = LinearBias(embed_dim, classes)
+        self.attention = MultiHeadAttention(embed_dim, embed_dim, heads=num_heads, attention_type=attention_type, norm=norm)
+        self.out = Linear(embed_dim, classes, norm=norm)
         self.mean = Mean(dim=1)
         self.embed_dim = embed_dim
         
@@ -79,7 +78,22 @@ class TinyAttention(tnn.Module):
 # ── Training ─────────────────────────────────────
 def run(cfg, task_cfg, batch_size, run_number, device, model_name):
     seed = cfg["random_seed"]
-    torch.manual_seed(seed + run_number)
+    run_seed = seed + run_number
+    torch.manual_seed(run_seed)
+
+    num_heads = int(cfg.get("attention_heads", 1))
+    mlp_dropout = float(cfg.get("mlp_dropout", 0.0))
+    if num_heads <= 0:
+        raise ValueError(f"attention_heads must be >= 1, got {num_heads}")
+
+    norm = cfg.get("ptorch_norm", 2)
+    norm_str = str(norm).lower()
+    if norm_str in ("linf", "inf"):
+        model_norm = "linf"
+    elif norm_str in ("l2", "2"):
+        model_norm = "l2"
+    else:
+        raise ValueError(f"Unsupported ptorch_norm '{norm}'. Use one of: 2, l2, inf, linf.")
 
     if task_cfg["name"] != "SST2":
         raise NotImplementedError(f"Task {task_cfg['name']} not supported yet.")
@@ -88,7 +102,7 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
         batch_size=batch_size, 
         max_seq_len=task_cfg.get("max_seq_len", 64),
         vocab_size=task_cfg.get("vocab_size", 10000),
-        seed=seed
+        seed=run_seed
     )
     train_iter = ds.train_iterator()
     val_loader  = ds.val_dataloader()
@@ -101,7 +115,8 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
             vocab_size, 
             task_cfg["embed_dim"], 
             task_cfg["hidden_dim"], 
-            task_cfg["classes"]
+            task_cfg["classes"],
+            norm=model_norm,
         ).to(device)
     else:
         model = TinyAttention(
@@ -109,6 +124,8 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
             task_cfg["embed_dim"],
             task_cfg["classes"],
             attention_type=cfg.get("attention_type", "simplex"),
+            norm=model_norm,
+            num_heads=num_heads,
         ).to(device)
 
     opt_name   = cfg["ptorch_optimizer"]
@@ -126,18 +143,23 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
         "optimizer": opt_name,
         **{f"opt_{k}": v for k, v in opt_kwargs.items()},
         "batch_size": batch_size,
-        "seed": seed,
+        "seed": run_seed,
+        "base_seed": seed,
         "run_number": run_number,
         "max_steps": cfg["max_steps"],
         "eval_every": cfg["eval_every"],
         "patience": cfg["patience"],
+        "attention_heads": num_heads,
+        "mlp_dropout": mlp_dropout,
+        "ptorch_norm": norm,
+        "ptorch_model_norm": model_norm,
         **ptorch_config.snapshot(),
     })
 
     def step_fn(x, y):
         logits  = model(x)
         y_oh    = F.one_hot(y.long(), num_classes=logits.shape[-1]).float()
-        projected = CrossEntropyProjection.apply(logits, y_oh)
+        projected = HardMarginProjection.apply(logits, y_oh)
         optimizer.zero_grad()
         projected.sum().backward()
         loss = F.cross_entropy(logits.detach(), y.long())
@@ -214,7 +236,7 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', choices=['mlp', 'attention'], default='attention', help='Model choice')
+    parser.add_argument('--model', choices=['mlp', 'attention'], default='mlp', help='Model choice')
     args = parser.parse_args()
     
     cfg    = yaml.safe_load(open(CFG_PATH))

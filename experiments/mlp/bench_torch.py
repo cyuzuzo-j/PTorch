@@ -40,10 +40,11 @@ class MLP(tnn.Module):
 # ── Training ─────────────────────────────────────
 def run(cfg, task_cfg, batch_size, run_number, device):
     seed = cfg["random_seed"]
-    torch.manual_seed(seed + run_number)
+    run_seed = seed + run_number
+    torch.manual_seed(run_seed)
 
     dataset_cls = DATASETS[task_cfg["name"]]
-    ds = dataset_cls(batch_size=batch_size, seed=seed)
+    ds = dataset_cls(batch_size=batch_size, seed=run_seed)
     train_iter = ds.train_iterator()
     val_loader  = ds.val_dataloader()
     test_loader = ds.test_dataloader()
@@ -53,7 +54,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     opt_kwargs = cfg.get("torch_optimizer_kwargs", {})
     optimizer  = getattr(torch.optim, opt_name)(model.parameters(), **opt_kwargs)
 
-    run = wandb.init(project="pjax", name=cfg["experiment_name"])
+    run_name = f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}"
+    run = wandb.init(project="pjax", name=run_name)
     wandb.config.update({
         "framework": FRAMEWORK,
         "task": task_cfg["name"],
@@ -61,7 +63,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
         "optimizer": opt_name,
         **{f"opt_{k}": v for k, v in opt_kwargs.items()},
         "batch_size": batch_size,
-        "seed": seed,
+        "seed": run_seed,
+        "base_seed": seed,
         "run_number": run_number,
         "max_steps": cfg["max_steps"],
         "eval_every": cfg["eval_every"],
