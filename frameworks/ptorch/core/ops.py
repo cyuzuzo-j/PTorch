@@ -573,7 +573,37 @@ class ReLUProjection(torch.autograd.Function):
         result = torch.where(dist_1 < dist_2, x_1, x_2)
         return result        
 
+class LogitSoftcapInversion(torch.autograd.Function):
+    """
+    Sets the new input target directly based on the target z.
+    Uses the exact mathematical inverse of the softcap function.
+    """
+    @staticmethod
+    def forward(ctx, x, logit_softcap):
+        # Save the softcap constant for the backward pass
+        ctx.logit_softcap = logit_softcap
+        
+        # We don't need to save 'x' because pure inversion only relies on 'z'
+        return logit_softcap * torch.tanh(x / logit_softcap)
 
+    @staticmethod
+    def backward(ctx, z):
+        # In Target Propagation, 'z' is the target output. 
+        # We must return 'x_target', the input that would produce 'z'.
+        C = ctx.logit_softcap
+        
+        # CRITICAL SAFETY STEP: 
+        # arctanh is only valid for inputs strictly between -1 and 1.
+        # If the network asks for a target 'z' that is outside the bounds of the softcap,
+        # we MUST clamp it slightly inside the bounds to avoid returning NaNs.
+        eps = 1e-6
+        z_clipped = torch.clamp(z, min=-C + eps, max=C - eps)
+        
+        # Direct mathematical inversion
+        x_target = C * torch.arctanh(z_clipped / C)
+        
+        # We return x_target for 'x', and None for 'logit_softcap' (as it's a fixed hyperparameter)
+        return x_target, None
 class LeakyReLUProjection(torch.autograd.Function):
     """
     Projection-aware LeakyReLU.
@@ -1188,3 +1218,138 @@ class AffineBatchNormProjection(torch.autograd.Function):
         
         # Return projected inputs. None for kwargs.
         return x_star, weight_star, beta_star, None, None
+
+
+@torch.compile(dynamic=True)
+def exact_rmsnorm_proj(x, z, eps=1e-5, num_steps=5):
+    """
+    Exact pointwise Newton projection onto the RMSNorm constraint graph.
+
+    Constraint: y = x / RMS(x),  where RMS(x) = sqrt(mean(x^2) + eps).
+
+    Given (x0, z0), finds (x*, y*) minimizing ||x* - x0||^2 + ||y* - z0||^2
+    subject to y* = x* / RMS(x*).
+
+    Parameterization: x* = a * u,  y* = u * sqrt(n) / len_u  where u is the
+    optimal direction and a = RMS(x*). The problem reduces to a 1D root-find
+    for the scalar 'a' per normalization group.
+
+    Returns both the pre-normalized x_star and the normalized y_star.
+    """
+    # Statistics over the feature dimension (last dim)
+    v_x = (x.square()).mean(dim=-1, keepdim=True)
+    v_z = (z.square()).mean(dim=-1, keepdim=True)
+    cov = (x * z).mean(dim=-1, keepdim=True)
+
+    # Initialize 'a' at the current RMS of x
+    a = torch.sqrt(v_x + eps)
+
+    # Newton's method: solve g(a) = a*S - a*v_x - cov = 0
+    for _ in range(num_steps):
+        S = torch.sqrt(a.square() * v_x + 2.0 * a * cov + v_z + eps)
+
+        g = a * S - a * v_x - cov
+
+        S_inv = 1.0 / (S + eps)
+        g_prime = S + a * (a * v_x + cov) * S_inv - v_x
+
+        step = g / (g_prime + 1e-8)
+        a = torch.relu(a - step)
+
+    # Reconstruct the projected variables
+    S_final = torch.sqrt(a.square() * v_x + 2.0 * a * cov + v_z + eps)
+
+    # y_star: the RMS-normalized output (has unit RMS by construction)
+    y_star = (a * x + z) / (S_final + eps)
+
+    # x_star: the pre-normalized input
+    x_star = a * y_star
+
+    return x_star, y_star
+
+
+class RMSNormProjection(torch.autograd.Function):
+    """
+    Projection onto the RMSNorm constraint graph.
+
+    Forward:  y = x / RMS(x)            (no gain)
+              y = weight * x / RMS(x)   (with gain)
+
+    Backward: exact Newton projection onto the nonlinear RMS constraint,
+              with gain handled analytically in the pre-gain space.
+    """
+    @staticmethod
+    def forward(ctx, x, weight=None, eps=1e-5, num_steps=5):
+        rms = torch.sqrt(x.square().mean(dim=-1, keepdim=True) + eps)
+        x_hat = x / rms
+
+        if weight is not None:
+            y = weight * x_hat
+        else:
+            y = x_hat
+
+        ctx.save_for_backward(x, weight)
+        ctx.eps = eps
+        ctx.num_steps = num_steps
+
+        return y
+
+    @staticmethod
+    def backward(ctx, z_target):
+        x, weight = ctx.saved_tensors
+        eps = ctx.eps
+
+        if weight is not None:
+            # Map target back to pre-gain space: z_shifted = z_target / weight
+            z_shifted = z_target / (weight + 1e-8)
+        else:
+            z_shifted = z_target
+
+        # Exact Newton projection for x
+        x_star, x_hat_star = exact_rmsnorm_proj(
+            x, z_shifted, eps=eps, num_steps=ctx.num_steps
+        )
+
+        if weight is not None:
+            # Analytical projection for gain:
+            # x_hat_star has unit RMS, so <x_hat_star, z_target> gives the
+            # optimal weight update direction per feature.
+            n = x.size(0)  # batch size for averaging proposals
+            weight_star = (weight + (x_hat_star * z_target).sum(dim=0)) / (1.0 + n)
+            return x_star, weight_star, None, None
+            
+class SquaredReLUProjection(torch.autograd.Function):
+    """
+    Exact Euclidean projection onto the Squared ReLU graph y = max(0, x)^2.
+    Uses fused Newton's method to resolve depressed cubic equation for the active branch.
+    """
+    @staticmethod
+    def forward(ctx, x):
+        ctx.save_for_backward(x)
+        return torch.square(torch.relu(x))
+
+    @staticmethod
+    def backward(ctx, z_target):
+        x, = ctx.saved_tensors
+        
+        # Branch 1: Inactive (x* <= 0) => y* = 0
+        x1 = torch.clamp(x, max=0)
+        dist1_sq = (x - x1)**2 + z_target**2
+
+        # Branch 2: Active (x* > 0) => y* = x*^2
+        # Solve Depressed Cubic: 2t^3 + (1 - 2*z_target)*t - x = 0
+        t = torch.clamp((x + z_target) / 2.0, min=1e-5)
+        for _ in range(5):
+            f = 2.0 * t**3 + (1.0 - 2.0 * z_target) * t - x
+            f_prime = 6.0 * t**2 + (1.0 - 2.0 * z_target)
+            step = f / (f_prime.abs() + 1e-6)
+            t = torch.relu(t - step) + 1e-6
+
+        x2 = t
+        y2 = x2**2
+        dist2_sq = (x - x2)**2 + (y2 - z_target)**2
+
+        # Select branch minimizing the distance
+        x_star = torch.where(dist1_sq < dist2_sq, x1, x2)
+        
+        return x_star
