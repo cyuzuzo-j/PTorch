@@ -18,3 +18,5 @@ config: {'_wandb': {}}
 2026-03-18 17:17:33,909 INFO    MainThread:703522 [wandb_run.py:_redirect():2465] Redirects installed.
 2026-03-18 17:17:33,921 INFO    MainThread:703522 [wandb_init.py:init():1082] run started, returning control to user process
 2026-03-18 17:17:33,921 INFO    MainThread:703522 [wandb_run.py:_config_callback():1403] config_cb None None {'framework': 'ptorch_new_matmul_reluinv ', 'task': 'CIFAR10', 'hidden': [512], 'optimizer': 'ProjectionMuon', 'opt_lr': 0.001, 'batch_size': 8, 'seed': 43, 'run_number': 1, 'max_steps': 5000, 'eval_every': 200, 'patience': 10, 'loss_projection': 'HardMarginProjection', 'log_loss_projection': True, 'bilinear_projection_num_newton_steps': 10, 'cross_entropy_method': 'fixed_point', 'cross_entropy_num_steps': 10, 'cross_entropy_lambda': 5.0, 'use_projections': True}
+2026-03-18 17:33:46,964 INFO    wandb-AsyncioManager-main:703522 [service_client.py:_forward_responses():134] Reached EOF.
+2026-03-18 17:33:47,043 INFO    wandb-AsyncioManager-main:703522 [mailbox.py:close():155] Closing mailbox, abandoning 1 handles.
