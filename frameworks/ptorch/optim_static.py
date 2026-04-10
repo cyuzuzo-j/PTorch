@@ -8,8 +8,8 @@ class AlternatingProjections(torch.optim.Optimizer):
     Instead of descending gradients, this exploits native PyTorch `autograd` 
     to pass orthogonal project targets BACKWARDS through the computational graph.
     """
-    def __init__(self, params, lr=1.0):
-        defaults = dict(lr=lr)
+    def __init__(self, params, lr=1.0, norm="l2"):
+        defaults = dict(lr=lr, norm=norm)
         super().__init__(params, defaults)
 
     @torch.no_grad()
@@ -150,4 +150,3 @@ class ProjectionMuon(torch.optim.Muon):
                         p.grad.copy_(p.data - p.grad)
         
         return super().step(closure)
-

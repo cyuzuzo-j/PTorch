@@ -3,6 +3,44 @@ import torch.nn.functional as F
 import warnings
 from .. import config
 import math
+
+def zeropower_via_newtonschulz5(G: torch.Tensor, steps: int = 5, eps: float = 1e-7) -> torch.Tensor:
+    is_1d = G.ndim == 1
+    if is_1d:
+        G = G.view(1, -1)
+    a, b, c = (3.4445, -4.7750, 2.0315)
+    X = G.bfloat16()
+    X /= X.norm() + eps
+    transposed = G.size(0) > G.size(1)
+    if transposed:
+        X = X.T
+    for _ in range(steps):
+        A = X @ X.T
+        B = b * A + c * A @ A
+        X = a * X + B @ X
+    out = X.T if transposed else X
+    if is_1d:
+        out = out.view(-1)
+    return out.to(G.dtype)
+
+def process_activation_target(A_det, A_proj):
+    if getattr(config, 'muon_activations', True):
+        orig_shape = A_det.shape
+        A_2d = A_det.reshape(-1, orig_shape[-1])
+        A_proj_2d = A_proj.reshape(-1, orig_shape[-1])
+        g = A_2d - A_proj_2d
+        
+        g_muon = zeropower_via_newtonschulz5(g)
+        lr = getattr(config, 'muon_activations_lr', 1.0)
+        
+        if getattr(config, 'muon_activations_scale', False):
+            scale = g.norm() / (g_muon.norm() + 1e-8)
+            g_muon = g_muon * scale
+            
+        A_proj_new = A_2d - lr * g_muon
+        return A_proj_new.reshape(orig_shape)
+    return A_proj
+
 # Suppress pin_memory warning when no accelerator is available
 warnings.filterwarnings("ignore", message=".*pin_memory.*")
 
@@ -26,7 +64,7 @@ class AverageGradient(torch.autograd.Function):
         return grad_input, None
         
 
-@torch.compile(dynamic=True)
+# @torch.compile(dynamic=True)
 def matmul_proj_linf(A, B, Z, eps_init=None, g=1.0, omega=1.0, num_steps=5, residual=False):
     """
     Exact independent bilinear projection for A @ B = Z using the L_infinity (Chebyshev) norm.
@@ -217,8 +255,8 @@ class MatMulProjectionLinf(torch.autograd.Function):
                 ctx.proj_cache['eps'] = eps_new
 
         # Note: the alpha scalar weighting is intentionally removed for L_inf
-        return A_proj, B_proj, None, None, None, None, None, None        
-@torch.compile(dynamic=True)
+        return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None        
+# @torch.compile(dynamic=True)
 def matmul_proj(A, B, Z, t_init=None, alpha=1.0, g=1.0, omega=1.0, num_steps=1, residual=False):
     """
     Exact independent bilinear projection for A @ B = Z (or A - A @ B = Z if residual=True).
@@ -375,9 +413,840 @@ class MatMulProjection(torch.autograd.Function):
                 ctx.proj_cache['t'] = t_new
 
         # Return Nones for proj_cache, pairwise, and residual 
-        return A_proj, B_proj, None, None, None, None, None, None, None
+        return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None, None
 
 
+class MatMulProjectionDTP(torch.autograd.Function):
+    """
+    Minimize || A_{new} - A_{old} ||_F^2 + alpha * || B_{new} - B_{old} ||_F^2 + g * || Z_{new} - Z_{old} ||_F^2
+    subject to A_{new} @ B_{new} = Z_{new} (or A_{new} - A_{new} @ B_{new} = Z_{new} if residual)
+    
+    Includes a Difference Target Propagation (DTP) style correction term:
+    Target_A = Proj(Z_target)_A + (A_orig - Proj(Z_orig)_A)
+    """
+    @staticmethod
+    def forward(ctx, A, B, num_steps, alpha, g, omega, proj_cache=None, pairwise=False, residual=True):
+        ctx.save_for_backward(A, B)
+        ctx.alpha = alpha
+        ctx.g = g
+        ctx.num_steps = num_steps
+        ctx.proj_cache = proj_cache  # Store reference to the mutable dictionary
+        ctx.omega = omega
+        ctx.pairwise = pairwise
+        ctx.residual = residual
+        
+        if residual:
+            return (A - A @ B) / omega
+        else:
+            return (A @ B) / omega
+
+    @staticmethod
+    def backward(ctx, Z_target):
+        A, B = ctx.saved_tensors
+        A_det = A.detach()
+        B_det = B.detach()
+        Z_det = Z_target.detach()
+
+        # Retrieve the cached t from previous runs if available and not pairwise
+        t_init = None
+        if not ctx.pairwise and ctx.proj_cache is not None:
+            t_init = ctx.proj_cache.get('t')
+
+        if not ctx.pairwise and (A_det.ndim > 2 or B_det.ndim > 2):
+            # .clone() breaks the view chain so torch.compile doesn't
+            # guard on the original 4D _base strides (which vary per layer)
+            A_2d = A_det.reshape(-1, A_det.shape[-1]).clone()
+            B_2d = B_det.reshape(-1, B_det.shape[-2], B_det.shape[-1]).mean(dim=0).clone()
+            
+            # 1. Calculate the original (unscaled) output Z_orig
+            if ctx.residual:
+                Z_orig_2d = A_2d - A_2d @ B_2d
+            else:
+                Z_orig_2d = A_2d @ B_2d
+                
+            # 2. Reconstruct A and B from the original output (Inverse mapping G(h_{i+1}))
+            # We pass t_init=None here so we don't corrupt the momentum state meant for the actual target
+            A_recon_2d, B_recon_2d, _, _ = matmul_proj(
+                A_2d, B_2d, Z_orig_2d, t_init=None, alpha=ctx.alpha, g=ctx.g, 
+                omega=ctx.omega, num_steps=ctx.num_steps, residual=ctx.residual
+            )
+            
+            # 3. Calculate DTP Calibration Offsets (h_i - G(h_{i+1}))
+            offset_A_2d = A_2d - A_recon_2d
+            offset_B_2d = B_2d - B_recon_2d
+
+            # 4. Project the actual target (G(t_{i+1}))
+            Z_target_2d = Z_det.reshape(-1, Z_det.shape[-1]).clone() * ctx.omega
+            t_init_2d = t_init.reshape(Z_target_2d.shape) if (t_init is not None and t_init.shape == Z_det.shape) else None
+            
+            A_proj_2d, B_proj_2d, _, t_new = matmul_proj(
+                A_2d, B_2d, Z_target_2d, t_init=t_init_2d, alpha=ctx.alpha, g=ctx.g, 
+                omega=ctx.omega, num_steps=ctx.num_steps, residual=ctx.residual
+            )
+            
+            # 5. Apply the DTP Correction
+            A_proj_2d = A_proj_2d + offset_A_2d
+            B_proj_2d = B_proj_2d + offset_B_2d
+            
+            # Reshape back to original dimensions
+            A_proj = A_proj_2d.reshape(A_det.shape)
+            B_proj = B_proj_2d.reshape(B_det.shape[-2], B_det.shape[-1]).expand(B_det.shape)
+            
+            if ctx.proj_cache is not None:
+                ctx.proj_cache['t'] = t_new.reshape(Z_det.shape)
+                
+        else:
+            # contiguous().clone() ensures no view _base for 2D inputs
+            A_clone = A_det.contiguous().clone()
+            B_clone = B_det.contiguous().clone()
+            
+            # 1. Calculate the original (unscaled) output Z_orig
+            if ctx.residual:
+                Z_orig = A_clone - A_clone @ B_clone
+            else:
+                Z_orig = A_clone @ B_clone
+                
+            # 2. Reconstruct A and B from the original output
+            A_recon, B_recon, _, _ = matmul_proj(
+                A_clone, B_clone, Z_orig, t_init=None, alpha=ctx.alpha, g=ctx.g, 
+                omega=ctx.omega, num_steps=ctx.num_steps, residual=ctx.residual
+            )
+            
+            # 3. Calculate DTP Calibration Offsets
+            offset_A = A_clone - A_recon
+            offset_B = B_clone - B_recon
+
+            # 4. Project the actual target
+            Z_target_scaled = Z_det.contiguous().clone() * ctx.omega
+            A_proj, B_proj, _, t_new = matmul_proj(
+                A_clone, B_clone, Z_target_scaled,
+                t_init=t_init, alpha=ctx.alpha, g=ctx.g, omega=ctx.omega, 
+                num_steps=ctx.num_steps, residual=ctx.residual
+            )
+            
+            # 5. Apply the DTP Correction
+            A_proj = A_proj + offset_A
+            B_proj = B_proj + offset_B
+
+            # Update the cache for the next iteration if not pairwise
+            if not ctx.pairwise and ctx.proj_cache is not None:
+                ctx.proj_cache['t'] = t_new
+
+        # Return Nones for num_steps, alpha, g, omega, proj_cache, pairwise, and residual 
+        return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None, None
+
+
+# @torch.compile(dynamic=True)
+def matmul_proj_l1(A, B, Z, eps_init=None, g=1.0, omega=1.0, num_steps=None, residual=False):
+    """
+    Exact independent bilinear projection for A @ B = Z using the L_1 norm.
+    
+    Analytically optimized. Unlike L_inf, L_1 projection promotes extreme sparsity. 
+    For any (m, n) pair, the optimal projection will modify exactly ONE feature 
+    dimension k* (or just update Z if the g-penalty is cheap enough). 
+    This allows us to solve it exactly in zero iterations.
+    """
+    M, K = A.size(-2), A.size(-1)
+    N = B.size(-1)
+
+    if residual:
+        I = torch.eye(B.size(-2), B.size(-1), device=B.device, dtype=B.dtype)
+        B_eff = I - B
+    else:
+        B_eff = B
+
+    # 1. Base pairwise projection & residual
+    P = A @ B_eff  # (..., M, N)
+    Z_target = Z * omega
+    Delta = Z_target - P  # (..., M, N)
+
+    # 2. Expand arrays to (..., M, N, K) to test all single-coordinate hypotheses
+    A_mnk = A.unsqueeze(-2).expand(*A.shape[:-2], M, N, K)
+    B_mnk = B_eff.transpose(-1, -2).unsqueeze(-3).expand(*B_eff.shape[:-2], M, N, K)
+    
+    # Target product c_k if dimension k were to absorb the entire delta
+    c = A_mnk * B_mnk + Delta.unsqueeze(-1)
+
+    # 3. Formulate the 4 geometric intersection candidates for the L1 diamond
+    eps_div = 1e-12 # Prevent zero-division on axes
+    
+    # Candidate 1: Vertex A
+    x1 = A_mnk
+    y1 = torch.where(A_mnk.abs() < eps_div, c / eps_div, c / A_mnk)
+    cost1 = torch.abs(y1 - B_mnk)
+
+    # Candidate 2: Vertex B
+    x2 = torch.where(B_mnk.abs() < eps_div, c / eps_div, c / B_mnk)
+    y2 = B_mnk
+    cost2 = torch.abs(x2 - A_mnk)
+
+    # Candidates 3 & 4: Flat Tangents (|x| = |y|)
+    sqrt_c = torch.sqrt(torch.abs(c))
+    x3 = torch.sign(c) * sqrt_c
+    y3 = sqrt_c
+    cost3 = torch.abs(x3 - A_mnk) + torch.abs(y3 - B_mnk)
+
+    x4 = -x3
+    y4 = -y3
+    cost4 = torch.abs(x4 - A_mnk) + torch.abs(y4 - B_mnk)
+
+    # 4. Find the global minimum cost out of the 4*K options + 1 Z-slack option
+    costs = torch.stack([cost1, cost2, cost3, cost4], dim=-1) # (..., M, N, K, 4)
+    costs_flat = costs.reshape(*costs.shape[:-2], K * 4)      # (..., M, N, K*4)
+    
+    Z_cost = ((g / omega) * torch.abs(Delta)).unsqueeze(-1)   # (..., M, N, 1)
+    all_costs = torch.cat([costs_flat, Z_cost], dim=-1)       # (..., M, N, K*4 + 1)
+    
+    best_idx = torch.argmin(all_costs, dim=-1)                # (..., M, N)
+
+    # 5. Extract the winning coordinates
+    K4 = K * 4
+    is_Z_update = (best_idx == K4)
+    
+    # Clamp to avoid gather out-of-bounds for the Z_update indices
+    safe_best_idx = torch.clamp(best_idx, max=K4 - 1).unsqueeze(-1)
+    safe_k_idx = torch.div(torch.clamp(best_idx, max=K4 - 1), 4, rounding_mode='floor').unsqueeze(-1)
+
+    x_cands = torch.stack([x1, x2, x3, x4], dim=-1).reshape(*costs.shape[:-2], K * 4)
+    y_cands = torch.stack([y1, y2, y3, y4], dim=-1).reshape(*costs.shape[:-2], K * 4)
+    
+    best_x = torch.gather(x_cands, -1, safe_best_idx).squeeze(-1) # (..., M, N)
+    best_y = torch.gather(y_cands, -1, safe_best_idx).squeeze(-1) # (..., M, N)
+
+    orig_A = torch.gather(A_mnk, -1, safe_k_idx).squeeze(-1)
+    orig_B = torch.gather(B_mnk, -1, safe_k_idx).squeeze(-1)
+
+    # Nullify deltas if Z took the penalty
+    delta_A = torch.where(is_Z_update, 0.0, best_x - orig_A)
+    delta_B = torch.where(is_Z_update, 0.0, best_y - orig_B)
+
+    # Scatter deltas back to their sparse feature dimension
+    dA = torch.zeros_like(A_mnk)
+    dA.scatter_(-1, safe_k_idx, delta_A.unsqueeze(-1))
+    
+    dB = torch.zeros_like(B_mnk)
+    dB.scatter_(-1, safe_k_idx, delta_B.unsqueeze(-1))
+
+    # 6. Consensus Reconstruction
+    A_proj = A + dA.mean(dim=-2) 
+    B_eff_proj = B_eff + dB.mean(dim=-3).transpose(-1, -2) 
+    
+    # If Z won the local optimization, it yields to P; otherwise it holds steady
+    Z_proj = torch.where(is_Z_update, P / omega, Z)
+
+    if residual:
+        B_proj = I - B_eff_proj
+    else:
+        B_proj = B_eff_proj
+        
+    # We return a zero tensor for eps_new to match the tuple signature, 
+    # as eps has no meaning in L_1's discrete argmin bounds.
+    return A_proj, B_proj, Z_proj, torch.zeros_like(P)
+
+class MatMulProjectionL1(torch.autograd.Function):
+    """
+    Minimize || A_{new} - A_{old} ||_1 + || B_{new} - B_{old} ||_1 + g * || Z_{new} - Z_{old} ||_1
+    subject to A_{new} @ B_{new} = Z_{new} (or A_{new} - A_{new} @ B_{new} = Z_{new} if residual)
+    """
+    @staticmethod
+    def forward(ctx, A, B, num_steps, g, omega, proj_cache=None, pairwise=False, residual=True):
+        ctx.save_for_backward(A, B)
+        ctx.g = g
+        ctx.num_steps = num_steps
+        ctx.proj_cache = proj_cache  
+        ctx.omega = omega
+        ctx.pairwise = pairwise
+        ctx.residual = residual
+        
+        if residual:
+            return (A - A @ B) / omega
+        else:
+            return (A @ B) / omega
+
+    @staticmethod
+    def backward(ctx, Z_target):
+        A, B = ctx.saved_tensors
+        A_det = A.detach()
+        B_det = B.detach()
+        Z_det = Z_target.detach()
+
+        eps_init = None
+        if not ctx.pairwise and ctx.proj_cache is not None:
+            eps_init = ctx.proj_cache.get('eps')
+
+        if not ctx.pairwise and (A_det.ndim > 2 or B_det.ndim > 2):
+            A_2d = A_det.reshape(-1, A_det.shape[-1]).clone()
+            Z_2d = Z_det.reshape(-1, Z_det.shape[-1]).clone() * ctx.omega
+            B_2d = B_det.reshape(-1, B_det.shape[-2], B_det.shape[-1]).mean(dim=0).clone()
+            
+            eps_init_2d = eps_init.reshape(Z_2d.shape) if (eps_init is not None and eps_init.shape == Z_det.shape) else None
+            
+            A_proj_2d, B_proj_2d, _, eps_new = matmul_proj_l1(
+                A_2d, B_2d, Z_2d, eps_init=eps_init_2d, g=ctx.g, 
+                omega=ctx.omega, num_steps=ctx.num_steps, residual=ctx.residual
+            )
+            
+            A_proj = A_proj_2d.reshape(A_det.shape)
+            B_proj = B_proj_2d.reshape(B_det.shape[-2], B_det.shape[-1]).expand(B_det.shape)
+            
+            if ctx.proj_cache is not None:
+                ctx.proj_cache['eps'] = eps_new.reshape(Z_det.shape)
+        else:
+            A_proj, B_proj, _, eps_new = matmul_proj_l1(
+                A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
+                eps_init=eps_init, g=ctx.g, omega=ctx.omega, 
+                num_steps=ctx.num_steps, residual=ctx.residual
+            )
+
+            if not ctx.pairwise and ctx.proj_cache is not None:
+                ctx.proj_cache['eps'] = eps_new
+
+        # Note: the alpha scalar weighting is intentionally removed for L_1
+        return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None
+
+
+# @torch.compile(dynamic=True)
+def matmul_proj_lp(A, B, Z, p, u_init=None, g=1.0, omega=1.0, num_steps=10, residual=False):
+    """
+    Exact independent bilinear projection for A @ B = Z using a general L_p norm (1 < p < inf).
+
+    Implements Algorithm §7 from the LP projection derivation:
+      - Joint Newton–Raphson root-finding over V = (x_i, w_i, u) per (m, n) pair
+      - O(K) per-iteration via Schur complement on the block-diagonal Jacobian
+      - Three numerical safeguards: clamped phi_q' (§6.3), Tikhonov (§6.4), Armijo (§6.5)
+
+    Args:
+        A:         Input activations       (..., M, K)
+        B:         Weight matrix            (..., K, N)   [or (K, N)]
+        Z:         Target output            (..., M, N)
+        p:         Norm exponent            (float, 1 < p < inf)
+        u_init:    Warm-start for dual variable u  (..., M, N) or None
+        g:         Penalty weight on Z-deviation
+        omega:     Output scale divisor
+        num_steps: Maximum Newton iterations
+        residual:  If True, constraint is A - A@B = Z
+
+    Returns:
+        A_proj, B_proj, Z_proj, u_state
+    """
+    q = p / (p - 1.0)       # Hölder conjugate
+    gamma_q = g ** q         # precomputed γ^q for the output penalty
+
+    if residual:
+        I = torch.eye(B.size(-2), B.size(-1), device=B.device, dtype=B.dtype)
+        B_eff = I - B
+    else:
+        B_eff = B
+
+    # Compute residual: how far the current (A, B, Z) is from feasibility
+    P = A @ B_eff                          # (..., M, N)
+    Z_target = Z * omega
+    r0 = Z_target - P                      # initial constraint violation per (m, n)
+
+    # ── Trivial check: if already feasible, skip ─────────────────────────
+    # (handled per-element via Newton converging in 0 steps naturally)
+
+    M, K = A.shape[-2], A.shape[-1]
+    N = B_eff.shape[-1]
+
+    # Working copies of x (A-features) and w (B_eff-features)
+    # Shape: (..., M, K, N) — one (x_i, w_i) pair per output element (m, n)
+    x = A.unsqueeze(-1).expand(*A.shape, N).clone()         # (..., M, K, N)
+    w = B_eff.unsqueeze(-3).expand(*A.shape[:-1], K, N).clone()  # (..., M, K, N)
+
+    # Dual variable u: one scalar per (m, n) pair
+    if u_init is not None and u_init.shape[-2:] == (M, N):
+        u = u_init.to(A.device).clone()
+    else:
+        u = torch.zeros(*A.shape[:-1], N, device=A.device, dtype=A.dtype)  # (..., M, N)
+
+    # Original values (constant)
+    x0 = A.unsqueeze(-1).expand_as(x)          # (..., M, K, N)
+    w0 = B_eff.unsqueeze(-3).expand_as(w)      # (..., M, K, N)
+    y0 = Z_target                               # (..., M, N)
+
+    # Safeguard parameters
+    eps_clamp = 1e-8     # §6.3: clamping threshold for phi_q' when p > 2
+    eps_det = 1e-6       # §6.4: Tikhonov trigger threshold
+    beta_ls = 0.5        # §6.5: Armijo backtracking factor
+    mu_ls = 1e-4         # §6.5: Armijo sufficient decrease parameter
+    max_ls = 8           # max backtracking steps
+
+    need_clamp = (p > 2.0)   # phi_q' blows up near zero only when q < 2
+
+    for _step in range(num_steps):
+        u_k = u.unsqueeze(-2)  # (..., M, 1, N)
+
+        # ── Residuals E_i, G_i, H ────────────────────────────────────────
+        # phi_q(z) = sign(z) * |z|^{q-1}
+        dx = x - x0          # (..., M, K, N)
+        dw = w - w0          # (..., M, K, N)
+
+        phi_q_dx = torch.sign(dx) * torch.abs(dx).pow(q - 1.0)
+        phi_q_dw = torch.sign(dw) * torch.abs(dw).pow(q - 1.0)
+        phi_q_w = torch.sign(w) * torch.abs(w).pow(q - 1.0)
+        phi_q_x = torch.sign(x) * torch.abs(x).pow(q - 1.0)
+
+        # Stationarity residuals (should be zero at solution)
+        E = dx - u_k * phi_q_w        # (..., M, K, N)
+        G = dw - u_k * phi_q_x        # (..., M, K, N)
+
+        # Constraint residual
+        xw_prod = (x * w).sum(dim=-2)  # (..., M, N)
+        y_from_u = y0 - u / gamma_q    # (..., M, N)
+        H = y0 - u / gamma_q - xw_prod  # (..., M, N)
+
+        # ── Convergence check (per element) ───────────────────────────────
+        # merit = sum(E^2 + G^2) + H^2
+        merit = (E * E + G * G).sum(dim=-2) + H * H   # (..., M, N)
+
+        # ── Jacobian blocks D_i, b_i, c_i ────────────────────────────────
+        # phi_q'(z) = (q-1) * |z|^{q-2}
+        if need_clamp:
+            # §6.3: Clamp |z| away from zero in the Jacobian only
+            abs_x_safe = torch.clamp(torch.abs(x), min=eps_clamp)
+            abs_w_safe = torch.clamp(torch.abs(w), min=eps_clamp)
+            phi_q_prime_x = (q - 1.0) * abs_x_safe.pow(q - 2.0)
+            phi_q_prime_w = (q - 1.0) * abs_w_safe.pow(q - 2.0)
+        else:
+            phi_q_prime_x = (q - 1.0) * torch.abs(x).pow(q - 2.0)
+            phi_q_prime_w = (q - 1.0) * torch.abs(w).pow(q - 2.0)
+
+        # D_i = [[1, -u*phi_q'(w_i)], [-u*phi_q'(x_i), 1]]
+        # det(D_i) = 1 - u^2 * phi_q'(x_i) * phi_q'(w_i)
+        off_diag_xw = u_k * phi_q_prime_x * phi_q_prime_w * u_k  # u^2 * phi_q'(x) * phi_q'(w)
+        det_D = 1.0 - off_diag_xw                                  # (..., M, K, N)
+
+        # §6.4: Tikhonov regularization for near-singular blocks
+        needs_reg = (torch.abs(det_D) < eps_det)
+        delta = torch.sqrt(torch.abs(off_diag_xw) + eps_det) - 1.0
+        delta = torch.clamp(delta, min=0.0)
+
+        # Apply shift: D_i -> D_i + delta_i * I_2
+        # New diagonal entries: 1 + delta
+        d11 = torch.where(needs_reg, 1.0 + delta, torch.ones_like(delta))
+        d22 = d11
+        d12 = -u_k * phi_q_prime_w   # (..., M, K, N)
+        d21 = -u_k * phi_q_prime_x   # (..., M, K, N)
+        det_D_reg = torch.where(needs_reg, d11 * d22 - d12 * d21, det_D)
+        inv_det = 1.0 / (det_D_reg + 1e-12)
+
+        # D_i^{-1} = (1/det) * [[d22, -d12], [-d21, d11]]
+        # b_i = [-phi_q(w_i), -phi_q(x_i)]
+        b1 = -phi_q_w   # (..., M, K, N)
+        b2 = -phi_q_x   # (..., M, K, N)
+
+        # c_i = [-w_i, -x_i]
+        c1 = -w          # (..., M, K, N)
+        c2 = -x          # (..., M, K, N)
+
+        # k = -1/gamma_q
+        k = -1.0 / gamma_q
+
+        # ── Schur complement accumulation ─────────────────────────────────
+        # Per-block: D_i^{-1} * [E_i, G_i]
+        inv_E = inv_det * (d22 * E - d12 * G)    # (..., M, K, N)
+        inv_G = inv_det * (-d21 * E + d11 * G)   # (..., M, K, N)
+
+        # Per-block: D_i^{-1} * b_i
+        inv_b1 = inv_det * (d22 * b1 - d12 * b2)  # (..., M, K, N)
+        inv_b2 = inv_det * (-d21 * b1 + d11 * b2) # (..., M, K, N)
+
+        # c_i^T D_i^{-1} b_i  (summed over K)
+        cT_inv_b = (c1 * inv_b1 + c2 * inv_b2).sum(dim=-2)   # (..., M, N)
+
+        # c_i^T D_i^{-1} [E_i, G_i]  (summed over K)
+        cT_inv_EG = (c1 * inv_E + c2 * inv_G).sum(dim=-2)    # (..., M, N)
+
+        # Schur complement S = k - sum_i c_i^T D_i^{-1} b_i
+        S = k - cT_inv_b   # (..., M, N)
+
+        # ── Multiplier update ─────────────────────────────────────────────
+        delta_u = (-H + cT_inv_EG) / (S + 1e-12)              # (..., M, N)
+
+        # ── Variable updates ──────────────────────────────────────────────
+        delta_u_k = delta_u.unsqueeze(-2)  # (..., M, 1, N)
+        delta_x = -(inv_E + inv_b1 * delta_u_k)  # (..., M, K, N)
+        delta_w = -(inv_G + inv_b2 * delta_u_k)  # (..., M, K, N)
+
+        # ── §6.5: Armijo backtracking line search ─────────────────────────
+        alpha_step = 1.0
+        for _ls in range(max_ls):
+            x_try = x + alpha_step * delta_x
+            w_try = w + alpha_step * delta_w
+            u_try = u + alpha_step * delta_u
+
+            # Recompute merit at trial point
+            dx_try = x_try - x0
+            dw_try = w_try - w0
+            u_try_k = u_try.unsqueeze(-2)
+
+            phi_q_w_try = torch.sign(w_try) * torch.abs(w_try).pow(q - 1.0)
+            phi_q_x_try = torch.sign(x_try) * torch.abs(x_try).pow(q - 1.0)
+
+            E_try = dx_try - u_try_k * phi_q_w_try
+            G_try = dw_try - u_try_k * phi_q_x_try
+            xw_try = (x_try * w_try).sum(dim=-2)
+            H_try = y0 - u_try / gamma_q - xw_try
+
+            merit_try = (E_try * E_try + G_try * G_try).sum(dim=-2) + H_try * H_try
+
+            # Accept if sufficient decrease (Armijo condition) on average
+            if (merit_try.mean() <= (1.0 - mu_ls * alpha_step) * merit.mean()):
+                break
+            alpha_step *= beta_ls
+
+        # Apply the accepted step
+        x = x + alpha_step * delta_x
+        w = w + alpha_step * delta_w
+        u = u + alpha_step * delta_u
+
+    # ── Consensus reconstruction ──────────────────────────────────────────
+    # Average proposals across output dimension (N) for A, across input dimension (M) for B
+    A_proj = x.mean(dim=-1)                    # (..., M, K) — average over N proposals
+    B_eff_proj = w.mean(dim=-3)                # (..., K, N) — average over M proposals
+    Z_proj = y0 - u / gamma_q                  # (..., M, N)
+    Z_proj = Z_proj / omega                    # un-scale
+
+    if residual:
+        B_proj = I - B_eff_proj
+    else:
+        B_proj = B_eff_proj
+
+    return A_proj, B_proj, Z_proj, u.detach()
+
+
+class MatMulProjectionLp(torch.autograd.Function):
+    """
+    Minimize sum|A-A0|^p + sum|B-B0|^p + g^p * |Z-Z0|^p
+    subject to A @ B = Z   (or A - A@B = Z if residual)
+
+    General L_p norm projection for 1 < p < inf.
+    """
+    @staticmethod
+    def forward(ctx, A, B, num_steps, p, g, omega, proj_cache=None, pairwise=False, residual=True):
+        ctx.save_for_backward(A, B)
+        ctx.p = p
+        ctx.g = g
+        ctx.num_steps = num_steps
+        ctx.proj_cache = proj_cache
+        ctx.omega = omega
+        ctx.pairwise = pairwise
+        ctx.residual = residual
+
+        if residual:
+            return (A - A @ B) / omega
+        else:
+            return (A @ B) / omega
+
+    @staticmethod
+    def backward(ctx, Z_target):
+        A, B = ctx.saved_tensors
+        A_det = A.detach()
+        B_det = B.detach()
+        Z_det = Z_target.detach()
+
+        u_init = None
+        if not ctx.pairwise and ctx.proj_cache is not None:
+            u_init = ctx.proj_cache.get('u_lp')
+
+        if not ctx.pairwise and (A_det.ndim > 2 or B_det.ndim > 2):
+            A_2d = A_det.reshape(-1, A_det.shape[-1]).clone()
+            Z_2d = Z_det.reshape(-1, Z_det.shape[-1]).clone() * ctx.omega
+            B_2d = B_det.reshape(-1, B_det.shape[-2], B_det.shape[-1]).mean(dim=0).clone()
+
+            u_init_2d = u_init.reshape(Z_2d.shape) if (u_init is not None and u_init.shape == Z_det.shape) else None
+
+            A_proj_2d, B_proj_2d, _, u_new = matmul_proj_lp(
+                A_2d, B_2d, Z_2d, p=ctx.p, u_init=u_init_2d, g=ctx.g,
+                omega=ctx.omega, num_steps=ctx.num_steps, residual=ctx.residual
+            )
+
+            A_proj = A_proj_2d.reshape(A_det.shape)
+            B_proj = B_proj_2d.reshape(B_det.shape[-2], B_det.shape[-1]).expand(B_det.shape)
+
+            if ctx.proj_cache is not None:
+                ctx.proj_cache['u_lp'] = u_new.reshape(Z_det.shape)
+        else:
+            A_proj, B_proj, _, u_new = matmul_proj_lp(
+                A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
+                p=ctx.p, u_init=u_init, g=ctx.g, omega=ctx.omega,
+                num_steps=ctx.num_steps, residual=ctx.residual
+            )
+
+            if not ctx.pairwise and ctx.proj_cache is not None:
+                ctx.proj_cache['u_lp'] = u_new
+
+        return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None, None
+
+
+class MatMulProjectionHybrid(torch.autograd.Function):
+    """
+    Hybrid matmul backward: real chain-rule gradients upstream + weight update.
+
+    This decouples two concerns:
+
+      • Upstream signal propagation (∂L/∂A):
+            Real chain-rule gradient ``Z_grad @ B^T``.  Flows backward without
+            attenuation, so all earlier layers receive a full-magnitude gradient
+            signal regardless of network depth.  No vanishing-target problem.
+
+      • Weight update (∂L/∂B):
+            When ``use_projections=True``  → returns a **projection target**
+                ``B - eta * (A^T @ Z_grad)``  so that ``AlternatingProjections``
+                (which does p.copy_(p.grad)) correctly updates the weight.
+            When ``use_projections=False`` → returns the **raw gradient**
+                ``A^T @ Z_grad``  for Muon/Adam/SGD to process normally. Muon's
+                Newton-Schulz step will auto-scale it before updating.
+
+    Args (forward):
+        A:          Input activations  (... , M, K)
+        B:          Weight matrix      (K, N)
+        omega:      Output scale divisor (default 1.0)
+        eta:        Step size for gradient→target conversion in projection mode
+                    (default 0.01). Ignored when use_projections=False.
+        residual:   If True use the residual output ``(A - A @ B) / omega``
+    """
+    @staticmethod
+    def forward(ctx, A, B, omega=1.0, eta=0.01, residual=False, num_steps=1, alpha=1.0, g=1.0, proj_cache=None, p=2.0):
+        ctx.save_for_backward(A, B)
+        ctx.omega = omega
+        ctx.eta = eta
+        ctx.residual = residual
+        ctx.num_steps = num_steps
+        ctx.alpha = alpha
+        ctx.g = g
+        ctx.proj_cache = proj_cache
+        ctx.p = p
+        if residual:
+            return (A - A @ B) / omega
+        return (A @ B) / omega
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        A, B = ctx.saved_tensors
+        A_det = A.detach()
+        B_det = B.detach()
+        
+        # Calculate the mathematical target output Z_target for the projection.
+        # Hybrid mode receives real gradients (grad_output), so we construct the target:
+        if ctx.residual:
+            Z_orig = (A_det - A_det @ B_det) / ctx.omega
+        else:
+            Z_orig = (A_det @ B_det) / ctx.omega
+        Z_det = Z_orig - ctx.eta * grad_output.detach()
+
+        # Scale grad back to the un-normalised space
+        Z_grad = grad_output.detach() * ctx.omega
+
+        # Flatten batch dims so matmuls are always 2-D
+        if A_det.ndim > 2:
+            A_2d = A_det.reshape(-1, A_det.shape[-1])
+        else:
+            A_2d = A_det
+        Z_grad_2d = Z_grad.reshape(-1, Z_grad.shape[-1]) if Z_grad.ndim > 2 else Z_grad
+
+        if ctx.residual:
+            IminusB = (torch.eye(B_det.size(0), device=B_det.device, dtype=B_det.dtype) - B_det)
+            grad_A = Z_grad @ IminusB.T
+        else:
+            # ── Real gradient upstream: ∂L/∂A = Z_grad @ B^T  ──────────────
+            # Full-magnitude chain-rule gradient — no vanishing across layers.
+            grad_A = Z_grad @ B_det.T
+
+        # ── Weight gradient: A^T @ Z_grad  ──────────────────────────────────
+        grad_B = A_2d.T @ Z_grad_2d
+
+        if config.use_projections:
+            # Projection mode: AlternatingProjections does p.copy_(p.grad),
+            # so we must return a TARGET, not a gradient.
+            t_init = None
+            if ctx.proj_cache is not None:
+                t_init = ctx.proj_cache.get('t')
+
+            if A_det.ndim > 2 or B_det.ndim > 2:
+                A_2d_proj = A_det.reshape(-1, A_det.shape[-1]).clone()
+                Z_2d_proj = Z_det.reshape(-1, Z_det.shape[-1]).clone() * ctx.omega
+                B_2d_proj = B_det.reshape(-1, B_det.shape[-2], B_det.shape[-1]).mean(dim=0).clone()
+                
+                t_init_2d = t_init.reshape(Z_2d_proj.shape) if (t_init is not None and t_init.shape == Z_det.shape) else None
+                
+                if config.projection_norm in ["inf", "linf", "l_inf", "infinity"]:
+                    _, B_proj_2d, _, t_new = matmul_proj_linf(
+                        A_2d_proj, B_2d_proj, Z_2d_proj, eps_init=t_init_2d, g=ctx.g, 
+                        omega=ctx.omega, num_steps=ctx.num_steps, residual=ctx.residual
+                    )
+                elif config.projection_norm in ["1", "l1", "l_1", "manhattan"]:
+                    _, B_proj_2d, _, t_new = matmul_proj_l1(
+                        A_2d_proj, B_2d_proj, Z_2d_proj, eps_init=t_init_2d, g=ctx.g, 
+                        omega=ctx.omega, num_steps=ctx.num_steps, residual=ctx.residual
+                    )
+                elif config.projection_norm in ["lp"] or isinstance(getattr(config, 'projection_p', None), (int, float)):
+                    _p = getattr(config, 'projection_p', ctx.p)
+                    _, B_proj_2d, _, t_new = matmul_proj_lp(
+                        A_2d_proj, B_2d_proj, Z_2d_proj, p=float(_p), u_init=t_init_2d, g=ctx.g, 
+                        omega=ctx.omega, num_steps=ctx.num_steps, residual=ctx.residual
+                    )
+                else:
+                    _, B_proj_2d, _, t_new = matmul_proj(
+                        A_2d_proj, B_2d_proj, Z_2d_proj, t_init=t_init_2d, alpha=ctx.alpha, g=ctx.g, 
+                        omega=ctx.omega, num_steps=ctx.num_steps, residual=ctx.residual
+                    )
+                
+                B_proj = B_proj_2d.reshape(B_det.shape[-2], B_det.shape[-1]).expand(B_det.shape)
+                if ctx.proj_cache is not None:
+                    ctx.proj_cache['t'] = t_new.reshape(Z_det.shape)
+            else:
+                # .contiguous().clone() ensures no view _base for 2D inputs
+                # that may come from transpose() or other view ops
+                if config.projection_norm in ["inf", "linf", "l_inf", "infinity"]:
+                    A_proj, B_proj, _, t_new = matmul_proj_linf(
+                        A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
+                        eps_init=t_init, g=ctx.g, omega=ctx.omega, 
+                        num_steps=ctx.num_steps, residual=ctx.residual
+                    )
+                elif config.projection_norm in ["1", "l1", "l_1", "manhattan"]:
+                    A_proj, B_proj, _, t_new = matmul_proj_l1(
+                        A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
+                        eps_init=t_init, g=ctx.g, omega=ctx.omega, 
+                        num_steps=ctx.num_steps, residual=ctx.residual
+                    )
+                elif config.projection_norm in ["lp"] or isinstance(getattr(config, 'projection_p', None), (int, float)):
+                    _p = getattr(config, 'projection_p', ctx.p)
+                    A_proj, B_proj, _, t_new = matmul_proj_lp(
+                        A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
+                        p=float(_p), u_init=t_init, g=ctx.g, omega=ctx.omega, 
+                        num_steps=ctx.num_steps, residual=ctx.residual
+                    )
+                else:
+                    A_proj, B_proj, _, t_new = matmul_proj(
+                        A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
+                        t_init=t_init, alpha=ctx.alpha, g=ctx.g, omega=ctx.omega, 
+                        num_steps=ctx.num_steps, residual=ctx.residual
+                    ) 
+                grad_B = B_proj
+                if ctx.proj_cache is not None:
+                    ctx.proj_cache['t'] = t_new
+
+        # Reshape grad_A back to original activation shape
+        grad_A = grad_A.reshape(A_det.shape)
+
+        # Nones for omega, eta, residual, num_steps, alpha, g, proj_cache, p
+        return grad_A, grad_B, None, None, None, None, None, None, None, None
+
+
+# @torch.compile(dynamic=True)
+def orthogonal_rotation_proj(R_0, x_0, y_0, alpha=1.0, gamma=1.0):
+    """
+    Exact independent projection for R @ x = y, where R is a valid rotation matrix in SO(n).
+    
+    Minimizes:
+        || R - R_0 ||_F^2 + alpha * || x - x_0 ||_2^2 + gamma * || y - y_0 ||_2^2
+        subject to R^T R = I, det(R) = 1, and R @ x = y
+        
+    Handles both single vectors and batched inputs. If batched, returns the shared 
+    optimal rotation R* and individual projected vectors x*, y*.
+    """
+    # Track original dimensionality to handle both (..., N) and (..., N, 1) vectors
+    is_1d = False
+    if x_0.ndim == R_0.ndim - 1:
+        x_0 = x_0.unsqueeze(-1)
+        y_0 = y_0.unsqueeze(-1)
+        is_1d = True
+    elif x_0.ndim >= R_0.ndim and x_0.shape[-1] == R_0.shape[-1]:
+        # Handle cases where x_0 is (..., D) but matches R_0 (D, D)
+        x_0 = x_0.unsqueeze(-1)
+        y_0 = y_0.unsqueeze(-1)
+        is_1d = True
+
+    # Weight coefficient for the Procrustes cross term
+    denom = alpha + gamma + 1e-8
+    w = (alpha * gamma) / denom
+
+    # 1. Construct the Procrustes Matrix (fused operations)
+    # If batched, we average over the outer products: M = R_0 + w * avg(y_i @ x_i^T)
+    outer = y_0 @ x_0.transpose(-2, -1)
+    if outer.ndim > R_0.ndim:
+        # Sum/Mean over all dimensions except the last two (which are D, D)
+        M_outer = outer.mean(dim=list(range(outer.ndim - 2)))
+    else:
+        M_outer = outer
+        
+    M = R_0 + w * M_outer
+
+    # 2. Find the Optimal Rotation (R*) via Batched SVD (or single)
+    U, S, Vh = torch.linalg.svd(M, full_matrices=False)
+    
+    # Compute determinant to check for reflections (we need pure rotations)
+    det_UVh = torch.linalg.det(U @ Vh)
+    
+    # Create the diagonal correction matrix S_corr to enforce det(R) = 1
+    ones = torch.ones_like(S[..., :-1])
+    diag = torch.cat([ones, det_UVh.unsqueeze(-1)], dim=-1)
+    S_corr = torch.diag_embed(diag)
+
+    # R_proj analytically extracts the closest valid rotation matrix
+    R_proj = U @ S_corr @ Vh
+
+    # 3. Find the Optimal Input Vector (x*)
+    # Analytically averages the input and inverse-rotated output based on weights
+    # Note: R_proj may be broadcasted if x_0/y_0 are batched
+    x_proj = (alpha / denom) * x_0 + (gamma / denom) * (R_proj.transpose(-2, -1) @ y_0)
+
+    # 4. Find the Optimal Output Vector (y*)
+    y_proj = R_proj @ x_proj
+
+    # Revert dimension expansion if necessary
+    if is_1d:
+        x_proj = x_proj.squeeze(-1)
+        y_proj = y_proj.squeeze(-1)
+
+    return R_proj, x_proj, y_proj
+
+
+# ─── autograd.Function wrappers ───────────────────────────────────────────────
+
+class OrthogonalRotationProjection(torch.autograd.Function):
+    """
+    Minimize || R_{new} - R_{old} ||_F^2 + alpha * || x_{new} - x_{old} ||_2^2 + gamma * || y_{new} - y_{old} ||_2^2
+    subject to R_{new}^T R_{new} = I, det(R_{new}) = 1, and R_{new} x_{new} = y_{new}.
+    """
+    @staticmethod
+    def forward(ctx, R, x, alpha=1.0, gamma=1.0):
+        ctx.save_for_backward(R, x)
+        ctx.alpha = alpha
+        ctx.gamma = gamma
+        
+        # Forward pass applies the rotation constraint
+        # Use torch.matmul to handle both single vectors and batched inputs
+        if x.shape[-1] == R.shape[-1]:
+            # Treat x as a vector (or batch of vectors) being rotated
+            # (..., D) -> (..., D, 1) then R @ x -> (..., D, 1) then squeeze -> (..., D)
+            return torch.matmul(R, x.unsqueeze(-1)).squeeze(-1)
+        else:
+            return R @ x
+
+    @staticmethod
+    def backward(ctx, y_target):
+        R, x = ctx.saved_tensors
+        
+        # Detach and clone contiguously to ensure we break the autograd view 
+        # chain properly before pushing to the compiled projection operator
+        R_det = R.detach().contiguous().clone()
+        x_det = x.detach().contiguous().clone()
+        y_det = y_target.detach().contiguous().clone()
+
+        # Execute the exact closed-form geometric projection
+        R_proj, x_proj, y_proj = orthogonal_rotation_proj(
+            R_det, x_det, y_det, 
+            alpha=ctx.alpha, 
+            gamma=ctx.gamma
+        )
+
+        # Return the modified/projected inputs hijacking standard gradients
+        # Nones correspond to the non-tensor hyperparameter inputs (alpha, gamma)
+        return R_proj, x_proj, None, None
+        
 class MSEProjection(torch.autograd.Function):
     """
     Minimize || predictions_{new} - predictions_{old} ||_2^2 + ||targets_{new} - targets_{old} ||_2^2 subject to 
@@ -604,6 +1473,7 @@ class LogitSoftcapInversion(torch.autograd.Function):
         
         # We return x_target for 'x', and None for 'logit_softcap' (as it's a fixed hyperparameter)
         return x_target, None
+        
 class LeakyReLUProjection(torch.autograd.Function):
     """
     Projection-aware LeakyReLU.
@@ -828,7 +1698,6 @@ class StepProjection(torch.autograd.Function):
         mid = (s - z_target) / (n + 1)
         
         return projected_inputs
-
 def simplex_op_pt(a):
     """Project onto probability simplex (forward operation). Batched version."""
     n = a.size(-1)
@@ -1089,7 +1958,7 @@ class DropoutProjection(torch.autograd.Function):
         return x_star, None, None
 
 
-@torch.compile(dynamic=True)
+# @torch.compile(dynamic=True)
 def exact_batchnorm_proj(x, z, eps=1e-5, num_steps=15):
     """
     Exact projection onto the non-linear BatchNorm constraint graph.
@@ -1138,7 +2007,7 @@ def exact_batchnorm_proj(x, z, eps=1e-5, num_steps=15):
     
     return x_star, y_star
 
-@torch.compile(dynamic=True)
+# @torch.compile(dynamic=True)
 def exact_batchnorm_proj(x, z, eps=1e-5, num_steps=5):
     """
     Exact pointwise Newton projection onto the non-linear BatchNorm constraint graph.
@@ -1220,7 +2089,7 @@ class AffineBatchNormProjection(torch.autograd.Function):
         return x_star, weight_star, beta_star, None, None
 
 
-@torch.compile(dynamic=True)
+# @torch.compile(dynamic=True)
 def exact_rmsnorm_proj(x, z, eps=1e-5, num_steps=5):
     """
     Exact pointwise Newton projection onto the RMSNorm constraint graph.

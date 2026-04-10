@@ -1,6 +1,6 @@
 import threading
 import contextlib
-from typing import Any
+from typing import Any, Optional
 
 # default configuration
 defaults = {
@@ -9,6 +9,13 @@ defaults = {
     "cross_entropy_num_steps": 10,
     "cross_entropy_lambda": 5.0,
     "use_projections": True,
+    "projection_alpha": 1.0,
+    "projection_g": 1.0,
+    "projection_norm": "inf",
+    "projection_p": 2.0,
+    "muon_activations": True,
+    "muon_activations_lr": 1.0,
+    "muon_activations_scale": False,
 }
 
 
@@ -54,16 +61,21 @@ class Config:
         return dict(self._config)
 
     @contextlib.contextmanager
-    def projections(self, enabled: bool):
+    def projections(self, enabled: bool, norm: Optional[str] = None):
         """Context manager to toggle projection-based gradients."""
         with self._lock:
-            prev = self._config.get("use_projections", True)
+            prev_enabled = self._config.get("use_projections", True)
+            prev_norm = self._config.get("projection_norm", "l2")
             self._config["use_projections"] = enabled
+            if norm is not None:
+                self._config["projection_norm"] = norm.lower()
         try:
             yield
         finally:
             with self._lock:
-                self._config["use_projections"] = prev
+                self._config["use_projections"] = prev_enabled
+                if norm is not None:
+                    self._config["projection_norm"] = prev_norm
 
 config = Config()
 

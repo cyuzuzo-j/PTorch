@@ -31,10 +31,8 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent.resolve()))
 from frameworks.ptorch import config
-from frameworks.ptorch.nn.modules import RMSNorm, CausalSelfAttention, ReLUSquared, Conversion, Softcap
+from frameworks.ptorch.nn.modules import LinearHybrid
 from frameworks.ptorch.core.overrides import apply_overrides
-from frameworks.ptorch.optim_static import ProjectionAdam
-from frameworks.ptorch.nn.modules import Linear
 
 apply_overrides()
 
@@ -43,24 +41,55 @@ class LossProjection(torch.autograd.Function):
     def forward(ctx, logits, targets, lmbda=5.0, num_steps=10):
         labels = F.one_hot(targets, num_classes=logits.size(-1)).float()
         ctx.save_for_backward(logits, labels)
-        ctx.lmbda = lmbda
-        ctx.num_steps = num_steps
         return F.cross_entropy(logits.float(), targets, reduction="mean")
 
     @staticmethod
     def backward(ctx, grad_output):
         logits, labels = ctx.saved_tensors
-        if config.use_projections:
-            lmbda = ctx.lmbda
-            steps = ctx.num_steps
-            x = logits.clone()
-            for _ in range(steps):
-                x = x + lmbda * (labels - F.softmax(x, dim=-1))
-            return x, None, None, None
-        else:
-            probs = F.softmax(logits.float(), dim=-1)
-            grad = (probs - labels) / logits.size(0)
-            return grad * grad_output, None, None, None
+        # Standard Cross Entropy Gradient
+        probs = F.softmax(logits.float(), dim=-1)
+        grad = (probs - labels) / logits.size(0)
+        return grad * grad_output, None, None, None
+
+class RMSNorm(nn.Module):
+    def __init__(self, eps: float = 1e-5):
+        super().__init__()
+        self.eps = eps
+    def forward(self, x: Tensor) -> Tensor:
+        return F.rms_norm(x, (x.size(-1),), eps=self.eps)
+
+class ReLUSquared(nn.Module):
+    def forward(self, input: Tensor) -> Tensor:
+        return torch.square(torch.relu(input))
+
+class Softcap(nn.Module):
+    def __init__(self, logit_softcap=30.0):
+        super().__init__()
+        self.logit_softcap = logit_softcap
+    def forward(self, x: Tensor) -> Tensor:
+        return self.logit_softcap * torch.tanh(x / self.logit_softcap)
+
+class Rotary(nn.Module):
+    def __init__(self, dim: int, base: float = 10000.0):
+        super().__init__()
+        inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim))
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
+        self._seq_len_cached = 0
+        self._cos_cached = None
+        self._sin_cached = None
+    def forward(self, seq_len: int, device: torch.device, dtype: torch.dtype) -> tuple[Tensor, Tensor]:
+        if self._cos_cached is None or self._seq_len_cached != seq_len or self._cos_cached.device != device:
+            t = torch.arange(seq_len, device=device, dtype=self.inv_freq.dtype)
+            freqs = torch.outer(t, self.inv_freq.to(device))
+            self._cos_cached = freqs.cos()[None, None, :, :]
+            self._sin_cached = freqs.sin()[None, None, :, :]
+            self._seq_len_cached = seq_len
+        return self._cos_cached.to(dtype=dtype), self._sin_cached.to(dtype=dtype)
+
+def apply_rotary_emb(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
+    half = x.size(-1) // 2
+    x1, x2 = x[..., :half], x[..., half:]
+    return torch.cat((x1 * cos + x2 * sin, x1 * (-sin) + x2 * cos), dim=-1)
 
 # -----------------------------
 # HYPERPARAMETERS
@@ -72,6 +101,7 @@ class LossProjection(torch.autograd.Function):
 # - 524,288 train tokens per step for 20,000 iterations with a ~10 minute cap
 
 class Hyperparameters:
+    
     # Data paths are shard globs produced by the existing preprocessing pipeline.
     data_path = os.environ.get("DATA_PATH", "./data/datasets/fineweb10B_sp1024")
     train_files = os.path.join(data_path, "fineweb_train_*.bin")
@@ -79,6 +109,7 @@ class Hyperparameters:
     tokenizer_path = os.environ.get("TOKENIZER_PATH", "./data/tokenizers/fineweb_1024_bpe.model")
     run_id = os.environ.get("RUN_ID", str(uuid.uuid4()))
     seed = int(os.environ.get("SEED", 1337))
+    use_hybrid = bool(int(os.environ.get("USE_HYBRID", "0")))
 
     # Validation cadence and batch size. Validation always uses the full fineweb_val split.
     val_batch_size = int(os.environ.get("VAL_BATCH_SIZE", 524_288))
@@ -136,6 +167,9 @@ class Hyperparameters:
 def zeropower_via_newtonschulz5(G: Tensor, steps: int = 10, eps: float = 1e-7) -> Tensor:
     # Orthogonalize a 2D update matrix with a fast Newton-Schulz iteration.
     # Muon uses this to normalize matrix-shaped gradients before applying them.
+    is_1d = G.ndim == 1
+    if is_1d:
+        G = G.view(1, -1)
     a, b, c = (3.4445, -4.7750, 2.0315)
     X = G.bfloat16()
     X /= X.norm() + eps
@@ -146,7 +180,10 @@ def zeropower_via_newtonschulz5(G: Tensor, steps: int = 10, eps: float = 1e-7) -
         A = X @ X.T
         B = b * A + c * A @ A
         X = a * X + B @ X
-    return X.T if transposed else X
+    out = X.T if transposed else X
+    if is_1d:
+        out = out.view(-1)
+    return out
 
 
 class Muon(torch.optim.Optimizer):
@@ -167,7 +204,9 @@ class Muon(torch.optim.Optimizer):
             for group in self.param_groups:
                 for p in group["params"]:
                     if p.grad is not None:
-                        p.grad.copy_(p.data - p.grad)
+                        is_target = getattr(p, "_is_target", not Hyperparameters.use_hybrid)
+                        if is_target:
+                            p.grad.copy_(p.data - p.grad)
 
         distributed = dist.is_available() and dist.is_initialized()
         world_size = dist.get_world_size() if distributed else 1
@@ -543,12 +582,95 @@ class DistributedTokenLoader:
 # TRANSFORMER MODULES
 # -----------------------------
 
+class CausalSelfAttention(nn.Module):
+    def __init__(self, dim: int, num_heads: int, num_kv_heads: int, rope_base: float, qk_gain_init: float, use_hybrid: bool = False):
+        super().__init__()
+        if dim % num_heads != 0:
+            raise ValueError("model_dim must be divisible by num_heads")
+        if num_heads % num_kv_heads != 0:
+            raise ValueError("num_heads must be divisible by num_kv_heads")
+        self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads
+        self.head_dim = dim // num_heads
+        if self.head_dim % 2 != 0:
+            raise ValueError("head_dim must be even for RoPE")
+        kv_dim = self.num_kv_heads * self.head_dim
+        
+        LC = CastedLinearHybrid if use_hybrid else CastedLinear
+        self.c_q = LC(dim, dim, bias=False)
+        self.c_k = LC(dim, kv_dim, bias=False)
+        self.c_v = LC(dim, kv_dim, bias=False)
+        self.proj = LC(dim, dim, bias=False)
+        
+        self.q_gain = nn.Parameter(torch.full((num_heads,), qk_gain_init, dtype=torch.float32))
+        self.rotary = Rotary(self.head_dim, base=rope_base)
+        self.q_norm = RMSNorm()
+        self.k_norm = RMSNorm()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        bsz, seqlen, dim = x.shape
+        q = self.c_q(x).reshape(bsz, seqlen, self.num_heads, self.head_dim).transpose(1, 2)
+        k = self.c_k(x).reshape(bsz, seqlen, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        v = self.c_v(x).reshape(bsz, seqlen, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+        
+        cos, sin = self.rotary(seqlen, x.device, q.dtype)
+        q = apply_rotary_emb(q, cos, sin)
+        k = apply_rotary_emb(k, cos, sin)
+        
+        q = q * self.q_gain.to(dtype=q.dtype)[None, :, None, None]
+        
+        if self.num_heads != self.num_kv_heads:
+            group_size = self.num_heads // self.num_kv_heads
+            k = k.unsqueeze(2).expand(-1, -1, group_size, -1, -1).reshape(bsz, self.num_heads, seqlen, self.head_dim)
+            v = v.unsqueeze(2).expand(-1, -1, group_size, -1, -1).reshape(bsz, self.num_heads, seqlen, self.head_dim)
+
+        scale = (self.head_dim ** 0.5)
+        qk = (q @ k.transpose(-2, -1)) / scale
+        
+        causal_mask = torch.triu(torch.full((seqlen, seqlen), float("-inf"), device=x.device, dtype=x.dtype), diagonal=1)
+        qk = qk + causal_mask[None, None, :, :]
+        
+        attention_weights = F.softmax(qk, dim=-1)
+            
+        y = attention_weights @ v
+        y = y.transpose(1, 2).contiguous().reshape(bsz, seqlen, dim)
+        return self.proj(y)
+
+
 class CastedLinear(nn.Linear):
     # Keep weights in fp32 for optimizer/state quality, cast at matmul time for bf16 compute.
     def forward(self, x: Tensor) -> Tensor:
         bias = self.bias.to(x.dtype) if self.bias is not None else None
         return F.linear(x, self.weight.to(x.dtype), bias)
 
+class CastedLinearHybrid(LinearHybrid):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.weight._is_target = True
+
+    def forward(self, input: Tensor) -> Tensor:
+        if self.use_bias:
+            ones = torch.ones((*input.shape[:-1], 1), dtype=input.dtype, device=input.device)
+            x = torch.cat([input, ones], dim=-1)
+        else:
+            x = input
+        
+        from frameworks.ptorch.core.ops import MatMulProjectionHybrid
+        return MatMulProjectionHybrid.apply(
+            x,
+            self.weight.to(x.dtype),
+            self.omega,
+            self.eta,
+            False,
+            1,
+            1.0,
+            1.0,
+            None,
+            self.p,
+        )
 
 def restore_low_dim_params_to_fp32(module: nn.Module) -> None:
     # Keep small/control parameters in fp32 even when the model body runs in bf16.
@@ -560,12 +682,13 @@ def restore_low_dim_params_to_fp32(module: nn.Module) -> None:
 
 class MLP(nn.Module):
     # relu^2 MLP from the original modded-nanogpt setup
-    def __init__(self, dim: int, mlp_mult: int):
+    def __init__(self, dim: int, mlp_mult: int, use_hybrid: bool = False):
         super().__init__()
         hidden = mlp_mult * dim
-        self.fc = CastedLinear(dim, hidden, bias=False)
+        LC = CastedLinearHybrid if use_hybrid else CastedLinear
+        self.fc = LC(dim, hidden, bias=False)
         self.act = ReLUSquared()
-        self.proj = CastedLinear(hidden, dim, bias=False)
+        self.proj = LC(hidden, dim, bias=False)
         self.proj._zero_init = True
 
     def forward(self, x: Tensor) -> Tensor:
@@ -581,12 +704,13 @@ class Block(nn.Module):
         mlp_mult: int,
         rope_base: float,
         qk_gain_init: float,
+        use_hybrid: bool = False,
     ):
         super().__init__()
         self.attn_norm = RMSNorm()
         self.mlp_norm = RMSNorm()
-        self.attn = CausalSelfAttention(dim, num_heads, num_kv_heads, rope_base, qk_gain_init)
-        self.mlp = MLP(dim, mlp_mult)
+        self.attn = CausalSelfAttention(dim, num_heads, num_kv_heads, rope_base, qk_gain_init, use_hybrid=use_hybrid)
+        self.mlp = MLP(dim, mlp_mult, use_hybrid=use_hybrid)
         self.attn_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.mlp_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.resid_mix = nn.Parameter(torch.stack((torch.ones(dim), torch.zeros(dim))).float())
@@ -614,15 +738,16 @@ class GPT(nn.Module):
         logit_softcap: float,
         rope_base: float,
         qk_gain_init: float,
+        use_hybrid: bool = False,
     ):
         super().__init__()
+        self.use_hybrid = use_hybrid
         if logit_softcap <= 0.0:
             raise ValueError(f"logit_softcap must be positive, got {logit_softcap}")
         self.tie_embeddings = tie_embeddings
         self.tied_embed_init_std = tied_embed_init_std
         self.logit_softcap = logit_softcap
         self.tok_emb = nn.Embedding(vocab_size, model_dim)
-        self.conversion = Conversion()
         self.initial_norm = RMSNorm()
         self.num_encoder_layers = num_layers // 2
         self.num_decoder_layers = num_layers - self.num_encoder_layers
@@ -637,14 +762,18 @@ class GPT(nn.Module):
                     mlp_mult,
                     rope_base,
                     qk_gain_init,
+                    use_hybrid=use_hybrid,
                 )
                 for i in range(num_layers)
             ]
         )
         self.final_norm = RMSNorm()
-        self.lm_head = None if tie_embeddings else Linear(model_dim, vocab_size, bias=False)
+        LC = LinearHybrid if use_hybrid else CastedLinear
+        self.lm_head = None if tie_embeddings else LC(model_dim, vocab_size, bias=False)
         if self.lm_head is not None:
             self.lm_head._zero_init = True
+            if use_hybrid:
+                self.lm_head.weight._is_target = True
         self._init_weights()
         self.softcap = Softcap(logit_softcap)
 
@@ -662,7 +791,6 @@ class GPT(nn.Module):
 
     def forward(self, input_ids: Tensor, target_ids: Tensor) -> Tensor:
         x = self.tok_emb(input_ids)
-        x = self.conversion(x)
         x = self.initial_norm(x)
         x0 = x
         skips: list[Tensor] = []
@@ -679,7 +807,7 @@ class GPT(nn.Module):
         x = self.final_norm(x).reshape(-1, x.size(-1))
         targets = target_ids.reshape(-1)
         if self.tie_embeddings:
-            if config.use_projections:
+            if config.use_projections and not self.use_hybrid:
                 from frameworks.ptorch.core.ops import MatMulProjection
                 logits_proj = MatMulProjection.apply(
                     x,
@@ -811,62 +939,25 @@ def main() -> None:
         logit_softcap=args.logit_softcap,
         rope_base=args.rope_base,
         qk_gain_init=args.qk_gain_init,
+        use_hybrid=args.use_hybrid,
     ).to(device).bfloat16()
     for module in base_model.modules():
-        if isinstance(module, CastedLinear):
+        if isinstance(module, (CastedLinear, CastedLinearHybrid)):
             module.float()
     restore_low_dim_params_to_fp32(base_model)
     compiled_model = torch.compile(base_model, dynamic=False, fullgraph=True)
     model: nn.Module = DDP(compiled_model, device_ids=[local_rank], broadcast_buffers=False) if distributed else compiled_model
 
-    # Optimizer split:
-    # - token embedding (Adam) uses EMBED_LR
-    # - untied lm_head (Adam) uses HEAD_LR
-    # - matrix params in transformer blocks use MATRIX_LR via Muon
-    # - vectors/scalars use SCALAR_LR via Adam
-    block_named_params = list(base_model.blocks.named_parameters())
-    matrix_params = [
-        p
-        for name, p in block_named_params
-        if p.ndim == 2 and not any(pattern in name for pattern in CONTROL_TENSOR_NAME_PATTERNS)
-    ]
-    scalar_params = [
-        p
-        for name, p in block_named_params
-        if p.ndim < 2 or any(pattern in name for pattern in CONTROL_TENSOR_NAME_PATTERNS)
-    ]
-    if base_model.skip_weights.numel() > 0:
-        scalar_params.append(base_model.skip_weights)
-    token_lr = args.tied_embed_lr if args.tie_embeddings else args.embed_lr
-    optimizer_tok = ProjectionAdam(
-        [{"params": [base_model.tok_emb.weight], "lr": token_lr, "base_lr": token_lr}],
-        betas=(args.beta1, args.beta2),
-        eps=args.adam_eps,
-        fused=True,
-    )
+    # Use Muon everywhere as requested
     optimizer_muon = Muon(
-        matrix_params,
+        base_model.parameters(),
         lr=args.matrix_lr,
         momentum=args.muon_momentum,
         backend_steps=args.muon_backend_steps,
     )
     for group in optimizer_muon.param_groups:
         group["base_lr"] = args.matrix_lr
-    optimizer_scalar = ProjectionAdam(
-        [{"params": scalar_params, "lr": args.scalar_lr, "base_lr": args.scalar_lr}],
-        betas=(args.beta1, args.beta2),
-        eps=args.adam_eps,
-        fused=True,
-    )
-    optimizers: list[torch.optim.Optimizer] = [optimizer_tok, optimizer_muon, optimizer_scalar]
-    if base_model.lm_head is not None:
-        optimizer_head = ProjectionAdam(
-            [{"params": [base_model.lm_head.weight], "lr": args.head_lr, "base_lr": args.head_lr}],
-            betas=(args.beta1, args.beta2),
-            eps=args.adam_eps,
-            fused=True,
-        )
-        optimizers.insert(1, optimizer_head)
+    optimizers: list[torch.optim.Optimizer] = [optimizer_muon]
 
     n_params = sum(p.numel() for p in base_model.parameters())
     log0(f"model_params:{n_params}")

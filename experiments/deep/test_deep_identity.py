@@ -5,7 +5,7 @@ import os
 
 # Add the project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-
+import ptorch.config as ptorch_config
 from frameworks.ptorch.nn import modules as pnn
 from frameworks.ptorch import optim_static as optim
 from frameworks.ptorch.core.ops import MSEProjection, Conversion
@@ -15,17 +15,16 @@ class DeepMLP(nn.Module):
         super().__init__()
         layers = []
         # First layer
-        layers.append(pnn.LinearLinf(in_features, hidden_features, bias=True, residual=False))
-        layers.append(pnn.LeakyReLU())
+        layers.append(pnn.Linear(in_features, hidden_features, bias=True, residual=False))
+        layers.append(pnn.ReLU())
 
         
         # Hidden layers
         for _ in range(num_layers - 2):
-            layers.append(pnn.LinearLinf(hidden_features, hidden_features, bias=True, residual=True))
-            layers.append(pnn.LeakyReLU())
+            layers.append(pnn.LinearOrth(hidden_features, hidden_features))
 
         # Final layer
-        layers.append(pnn.LinearLinf(hidden_features, out_features, bias=True, residual=False))
+        layers.append(pnn.Linear(hidden_features, out_features, bias=True, residual=False))
         self.network = nn.Sequential(*layers)
 
     def forward(self, x):
@@ -36,7 +35,7 @@ def test_identity():
     in_features = 8
     hidden_features = 16
     out_features = 8
-    num_layers = 5
+    num_layers = 20
     batch_size = 32
     num_epochs = 1000
     lr = 0.001
@@ -45,7 +44,7 @@ def test_identity():
     print(f"Using device: {device}", flush=True)
     
     model = DeepMLP(in_features, hidden_features, out_features, num_layers).to(device)
-    optimizer = optim.ProjectionMuon(model.parameters(), lr=lr)
+    optimizer = optim.ARADMMProjections(model.parameters())
     
     # Simple identity dataset
     x_train = torch.randn(batch_size * 10, in_features).to(device)
