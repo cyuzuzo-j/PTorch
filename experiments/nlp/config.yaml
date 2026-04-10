@@ -37,5 +37,6 @@ pjax_orr_optimizer_kwargs:
 ptorch_optimizer: "ProjectionMuon"
 ptorch_optimizer_kwargs:
   lr: 0.001
-ptorch_norm: inf # norm order for projection-based ptorch layers (e.g. 2, inf)
+  weight_decay: 0.1
+ptorch_norm: 2 # norm order for projection-based ptorch layers (e.g. 2, inf)
 ptorch_linear_impl: "projection" # one of: projection, main, classic

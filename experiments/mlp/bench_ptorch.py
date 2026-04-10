@@ -11,7 +11,7 @@ import yaml
 import torch
 import torch.nn as tnn
 import torch.nn.functional as F
-from ptorch.nn.modules import   Linear, ReLU
+from ptorch.nn.modules import LinearHybrid, ReLUHybrid, Linear as PLinear, ReLU as PReLU, _parse_norm
 from ptorch.core.ops import CrossEntropyProjection, HardMarginProjection, ProximalHingeMargin, SmoothSoftMargin
 import ptorch.optim_static as ptorch_optim_static
 import ptorch.config as ptorch_config
@@ -19,7 +19,7 @@ from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 import tqdm, time
 import wandb
 
-FRAMEWORK = "ptorch"
+FRAMEWORK = "ptorch_hybrid"
 
 OPTIM_MODULES = vars(ptorch_optim_static)
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
@@ -39,22 +39,29 @@ LOSS_PROJECTIONS = {
 
 # ── Model ────────────────────────────────────────
 class MLP(tnn.Module):
-    def __init__(self, hidden, in_features, classes, norm="l2"):
+    def __init__(self, hidden, in_features, classes, norm="l2", dtp=False, use_hybrid=True):
         super().__init__()
         last = in_features
         self.hidden_layers = tnn.ModuleList()
         for f in hidden:
-            self.hidden_layers.append(Linear(last, f, g=float('inf'),bias=True, residual=False, norm=norm))
-            self.hidden_layers.append(ReLU(norm=norm))
+            if use_hybrid:
+                self.hidden_layers.append(LinearHybrid(last, f, norm=norm))
+                self.hidden_layers.append(ReLUHybrid(norm=norm))
+            else:
+                self.hidden_layers.append(PLinear(last, f, norm=norm, dtp=dtp))
+                self.hidden_layers.append(PReLU(norm=norm if norm in ('l2', 'linf') else 'l2'))
             last = f
         self.n_hidden = len(hidden)
-        self.out = Linear(last, classes, g=float('inf'), bias=True, residual=False, norm=norm)
+        if use_hybrid:
+            self.out = LinearHybrid(last, classes, norm=norm)
+        else:
+            self.out = PLinear(last, classes, norm=norm, dtp=dtp)
 
     def forward(self, x):
         x = x.reshape(x.shape[0], -1)
         for i in range(0, len(self.hidden_layers), 2):
-            x = self.hidden_layers[i](x)      # LinearBias
-            x = self.hidden_layers[i + 1](x)  # Simplex
+            x = self.hidden_layers[i](x)
+            x = self.hidden_layers[i + 1](x)
         return self.out(x)
 
 
@@ -64,20 +71,27 @@ def run(cfg, task_cfg, batch_size, run_number, device, loss_projection_cls=Cross
     run_seed = seed + run_number
     torch.manual_seed(run_seed)
     norm = cfg.get("ptorch_norm", 2)
+    dtp = cfg.get("ptorch_dtp", False)
+    use_hybrid = cfg.get("ptorch_use_hybrid", True)
 
-    norm_str = str(norm).lower()
-    if norm_str in ("linf", "inf"):
-        model_norm = "linf"
-    elif norm_str in ("l2", "2"):
-        model_norm = "l2"
+    norm_type, p_val = _parse_norm(norm)
+    model_norm = norm_type
+    FRAMEWORK = "ptorch_hybrid" if use_hybrid else "ptorch"
     
+    # Set global config for the projection norm
+    if norm_type == 'lp':
+        ptorch_config.update("projection_norm", "lp")
+        ptorch_config.update("projection_p", p_val)
+    else:
+        ptorch_config.update("projection_norm", model_norm)
+        ptorch_config.update("projection_p", p_val)
     dataset_cls = DATASETS[task_cfg["name"]]
     ds = dataset_cls(batch_size=batch_size, seed=run_seed)
     train_iter = ds.train_iterator()
     val_loader  = ds.val_dataloader()
     test_loader = ds.test_dataloader()
 
-    model      = MLP(task_cfg["hidden"], task_cfg["in_features"], task_cfg["classes"], norm=model_norm).to(device)
+    model      = MLP(task_cfg["hidden"], task_cfg["in_features"], task_cfg["classes"], norm=norm, dtp=dtp, use_hybrid=use_hybrid).to(device)
     opt_name   = cfg["ptorch_optimizer"]
     opt_kwargs = cfg.get("ptorch_optimizer_kwargs", {})
     optimizer  = OPTIM_MODULES[opt_name](model.parameters(), **opt_kwargs)
@@ -101,20 +115,31 @@ def run(cfg, task_cfg, batch_size, run_number, device, loss_projection_cls=Cross
         "loss_projection": loss_proj_name,
         "log_loss_projection": log_loss_projection,
         "ptorch_norm": norm,
-        "ptorch_model_norm": model_norm,
+        "ptorch_norm_type": norm_type,
+        "ptorch_p": p_val,
+        "ptorch_dtp": dtp,
+        "ptorch_use_hybrid": use_hybrid,
         **ptorch_config.snapshot(),
     })
 
     def step_fn(x, y):
         logits  = model(x)
         y_oh    = F.one_hot(y.long(), num_classes=logits.shape[-1]).float()
-        projected = loss_projection_cls.apply(logits, y_oh)
-        proj_loss = projected.sum()
         optimizer.zero_grad()
-        proj_loss.backward()
-        loss = F.cross_entropy(logits.detach(), y.long())
+        if "hybrid" not in FRAMEWORK:
+            # Pure projection mode: loss layer returns an absolute TARGET
+            projected = loss_projection_cls.apply(logits, y_oh)
+            proj_loss = projected.sum()
+            proj_loss.backward()
+            loss = F.cross_entropy(logits.detach(), y.long())
+            proj_loss_val = float(proj_loss.detach())
+        else:
+            # Hybrid or regular gradient mode: standard backward gradients
+            loss = F.cross_entropy(logits, y.long())
+            loss.backward()
+            proj_loss_val = 0.0
         optimizer.step()
-        return loss, float(proj_loss.detach())
+        return loss, proj_loss_val
 
     def eval_fn(x, y):
         with torch.no_grad():
@@ -174,8 +199,6 @@ def run(cfg, task_cfg, batch_size, run_number, device, loss_projection_cls=Cross
     wandb.log({"test/test_acc": final_acc}, step=step)
     wandb.log({"total_training_time_s": total_time}, step=step)
     wandb.finish()
-    return final_acc, best_val_acc, best_step, total_time
-
 
 if __name__ == "__main__":
     cfg    = yaml.safe_load(open(CFG_PATH))
@@ -183,14 +206,23 @@ if __name__ == "__main__":
     print(f"Device: {device}")
 
     for batch_size in cfg["batch_sizes"]:
-        for task_cfg in cfg["tasks"]:
-            print(f"\n{'='*50}\n{FRAMEWORK} | {task_cfg['name']} | bs={batch_size}")
-            for run_number in range(1, cfg["num_runs"] + 1):
-                proj_name = cfg.get("ptorch_loss_projection", "CrossEntropyProjection")
-                proj_cls  = LOSS_PROJECTIONS[proj_name]
-                run(cfg, task_cfg, batch_size, run_number, device,
-                    loss_projection_cls=proj_cls,
-                    log_loss_projection=cfg.get("log_loss_projection", False))
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+        norm_sweep = cfg.get("ptorch_norm_sweep", [cfg.get("ptorch_norm", 2)])
+        for norm_val in norm_sweep:
+            for task_cfg in cfg["tasks"]:
+                norm_type, p_val = _parse_norm(norm_val)
+                norm_label = f"l{p_val}" if norm_type == 'lp' else norm_type
+                use_hybrid = cfg.get("ptorch_use_hybrid", True)
+                FRAMEWORK = "ptorch_hybrid" if use_hybrid else "ptorch"
+                print(f"\n{'='*50}\n{FRAMEWORK} | {task_cfg['name']} | bs={batch_size} | norm={norm_label}")
+                # Override the norm for this sweep iteration
+                sweep_cfg = dict(cfg)
+                sweep_cfg["ptorch_norm"] = norm_val
+                for run_number in range(1, cfg["num_runs"] + 1):
+                    proj_name = cfg.get("ptorch_loss_projection", "CrossEntropyProjection")
+                    proj_cls  = LOSS_PROJECTIONS[proj_name]
+                    run(sweep_cfg, task_cfg, batch_size, run_number, device,
+                        loss_projection_cls=proj_cls,
+                        log_loss_projection=cfg.get("log_loss_projection", False))
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()

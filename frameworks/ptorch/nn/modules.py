@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from ..core.ops import (
     MatMulProjection,
     MatMulProjectionLinf,
+    MatMulProjectionLp,
     ReLULInfinityProjection,
     SumReLUProjection,
     StepProjection,
@@ -21,14 +22,58 @@ from ..core.ops import (
     AddProjection,
     AffineBatchNormProjection,
     SquaredReLUProjection,
+    RMSNormProjection,
+    MatMulProjectionDTP,
+    CrossEntropyProjection,
+    OrthogonalRotationProjection,
+    MatMulProjectionHybrid,
 )
 from .. import config
+
+def _parse_norm(norm):
+    """Parse a norm string/value into (norm_type, p_value).
+    
+    Returns:
+        (norm_type, p): norm_type is 'l2', 'linf', 'l1', or 'lp'.
+                        p is the numeric exponent (only meaningful for 'lp').
+    """
+    if isinstance(norm, (int, float)):
+        p = float(norm)
+        if p == 1.0:
+            return 'l1', 1.0
+        elif p == 2.0:
+            return 'l2', 2.0
+        elif p == float('inf'):
+            return 'linf', float('inf')
+        else:
+            return 'lp', p
+    s = str(norm).lower().strip()
+    if s in ('l2', '2', 'l_2', 'euclidean'):
+        return 'l2', 2.0
+    if s in ('linf', 'inf', 'l_inf', 'infinity'):
+        return 'linf', float('inf')
+    if s in ('l1', '1', 'l_1', 'manhattan'):
+        return 'l1', 1.0
+    # Try parsing numeric LP norms like 'l1.5', 'l3', '1.5', '3.0'
+    cleaned = s.lstrip('l').lstrip('_')
+    try:
+        p = float(cleaned)
+        if p == 1.0:
+            return 'l1', 1.0
+        elif p == 2.0:
+            return 'l2', 2.0
+        elif p == float('inf'):
+            return 'linf', float('inf')
+        return 'lp', p
+    except ValueError:
+        raise ValueError(f"Unrecognised norm: '{norm}'. Use 'l2', 'linf', 'l1', or 'l<p>' (e.g. 'l1.5', 'l3').")
+
 
 class Linear(nn.Module):
     """Projection-only linear layer following the old main-style matmul path.
 
     Supports optional affine bias via input augmentation and optional residual
-    projection mode.
+    projection mode.  Accepts L2, Linf, L1, and general Lp norms.
     """
     def __init__(
         self,
@@ -40,7 +85,8 @@ class Linear(nn.Module):
         omega: float = 1.0,
         num_iters: int = 5,
         residual: bool = False,
-        norm: str = 'l2',
+        dtp: bool = False,
+        norm = 'l2',
     ):
         super().__init__()
         self.alpha = alpha
@@ -49,20 +95,19 @@ class Linear(nn.Module):
         self.num_iters = int(num_iters)
         self.use_bias = bias
         self.residual = residual
-        self.norm = norm.lower()
+        self.dtp = dtp
+        self.norm_type, self.p = _parse_norm(norm)
         self.proj_cache: dict = {}
-
-        if self.norm not in ('l2', 'linf'):
-            raise ValueError(f"norm must be 'l2' or 'linf', got '{norm}'")
 
         in_aug = in_features + (1 if self.use_bias else 0)
         self.weight = nn.Parameter(torch.empty(in_aug, out_features))
         nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
 
     def forward(self, input, norm=None):
-        norm = (norm or self.norm).lower()
-        if norm not in ('l2', 'linf'):
-            raise ValueError(f"norm must be 'l2' or 'linf', got '{norm}'")
+        if norm is not None:
+            norm_type, p = _parse_norm(norm)
+        else:
+            norm_type, p = self.norm_type, self.p
 
         if not config.use_projections:
             # Standard gradient path: extract weight and bias from augmented parameter
@@ -79,29 +124,53 @@ class Linear(nn.Module):
             ones = torch.ones((*input.shape[:-1], 1), dtype=input.dtype, device=input.device)
             projected_input = torch.cat([input, ones], dim=-1)
 
-        if norm == 'linf':
+        if norm_type == 'linf':
             return MatMulProjectionLinf.apply(
                 projected_input,
                 self.weight,
                 self.num_iters,
-                self.g,
+                self.g * config.projection_g,
                 self.omega,
                 self.proj_cache,
                 False,
                 self.residual,
             )
-
+        if norm_type == 'lp':
+            return MatMulProjectionLp.apply(
+                projected_input,
+                self.weight,
+                self.num_iters,
+                p,
+                self.g * config.projection_g,
+                self.omega,
+                self.proj_cache,
+                False,
+                self.residual,
+            )
+        if self.dtp:
+            return MatMulProjectionDTP.apply(
+            projected_input,
+            self.weight,
+            self.num_iters,
+            self.alpha * config.projection_alpha,
+            self.g * config.projection_g,
+            self.omega,
+            self.proj_cache,
+            False,
+            self.residual,
+            )                
         return MatMulProjection.apply(
             projected_input,
             self.weight,
             self.num_iters,
-            self.alpha,
-            self.g,
+            self.alpha * config.projection_alpha,
+            self.g * config.projection_g,
             self.omega,
             self.proj_cache,
             False,
             self.residual,
         )
+
 
 
 class LinearMain(nn.Module):
@@ -134,12 +203,100 @@ class LinearMain(nn.Module):
             augmented_input,
             self.weight,
             self.num_iters,
-            self.alpha,
-            self.g,
+            self.alpha * config.projection_alpha,
+            self.g * config.projection_g,
             1.0,
             self.proj_cache,
             False,
             False,
+        )
+
+
+class LinearOrth(nn.Module):
+    """Simplified linear layer using OrthogonalRotationProjection.
+    
+    This layer maintains a square weight matrix that is initialized to be 
+    orthogonal and updated using the closed-form Orthogonal Procrustes projection.
+    """
+    def __init__(self, dim: int, alpha: float = 1.0, gamma: float = 1.0):
+        super().__init__()
+        self.dim = dim
+        self.alpha = alpha
+        self.gamma = gamma
+        self.weight = nn.Parameter(torch.empty(dim, dim))
+        nn.init.orthogonal_(self.weight)
+        
+        # Ensure it starts as a pure rotation (det=1)
+        with torch.no_grad():
+            if torch.linalg.det(self.weight) < 0:
+                self.weight[0] *= -1
+
+    def forward(self, x):
+        if not config.use_projections:
+            # Standard path: y = x @ W.T
+            return F.linear(x, self.weight)
+        
+        # Projection path: y = R @ x (where R is the weight)
+        return OrthogonalRotationProjection.apply(self.weight, x, self.alpha, self.gamma)
+
+
+class LinearHybrid(nn.Module):
+    """Hybrid linear layer: real gradients upstream + standard weight gradient for ProjectionMuon.
+
+    This layer is the drop-in replacement for ``Linear`` when using the hybrid
+    gradient-projection approach:
+
+    * **Upstream**: returns the standard chain-rule gradient ``∂L/∂A = Z_grad @ B^T``.
+      Signal propagates through all layers at full magnitude — no vanishing-target problem.
+
+    * **Weights**: returns the standard gradient ``A^T @ Z_grad`` in ``p.grad``.
+      Feed parameters to ``ProjectionMuon`` (already in optim_static.py); Muon's
+      Newton-Schulz step auto-scales and orthogonalises the gradient before updating.
+
+    Args:
+        in_features:  Number of input features.
+        out_features: Number of output features.
+        bias:         If True, appends a bias via input augmentation (default True).
+        omega:        Output scale divisor, mirrors the ``Linear`` convention (default 1.0).
+        norm:         Projection norm — 'l2', 'linf', 'l1', or 'l<p>' (default 'l2').
+    """
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        bias: bool = True,
+        omega: float = 1.0,
+        eta: float = 0.01,
+        norm = 'l2',
+    ):
+        super().__init__()
+        self.omega = omega
+        self.use_bias = bias
+        self.eta = eta
+        self.norm_type, self.p = _parse_norm(norm)
+
+        in_aug = in_features + (1 if self.use_bias else 0)
+        self.weight = nn.Parameter(torch.empty(in_aug, out_features))
+        nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
+
+    def forward(self, input):
+        if self.use_bias:
+            ones = torch.ones((*input.shape[:-1], 1), dtype=input.dtype, device=input.device)
+            x = torch.cat([input, ones], dim=-1)
+        else:
+            x = input
+
+        return MatMulProjectionHybrid.apply(
+            x,
+            self.weight,
+            self.omega,
+            self.eta,
+            False,  # residual
+            1,      # num_steps
+            1.0,    # alpha
+            1.0,    # g
+            None,   # proj_cache
+            self.p, # p (norm exponent)
         )
 
 
@@ -157,6 +314,21 @@ class ReLU(nn.ReLU):
         if norm == 'linf':
             raise ValueError("L∞ projection for ReLU is not supported in gradient mode")
         return super().forward(input)
+
+class ReLUHybrid(nn.Module):
+    """
+    Standard gradient-backed ReLU for use in Hybrid networks.
+    Unaffected by the global `use_projections` state, allowing real gradients
+    to flow cleanly when the model is trained with hybrid projections.
+    """
+    def __init__(self, **kwargs):
+        super().__init__()
+        # kwargs (like norm) are ignored since Hybrid always propagates gradients natively
+
+    def forward(self, input):
+        # Natively uses fundamental PyTorch autograd gradients.
+        return F.relu(input)
+
 
 
 
@@ -358,8 +530,8 @@ class MultiHeadAttention(nn.Module):
             left,
             right,
             5,
-            self.query_layer.alpha,
-            1,
+            self.query_layer.alpha * config.projection_alpha,
+            1 * config.projection_g,
             omega,
             None,
             True,
@@ -418,13 +590,11 @@ class MultiHeadAttention(nn.Module):
             if config.use_projections:
                 qk = HardmaxProjection.apply(qk)
             else:
-                from ..core.ops import hardmax_op_pt
                 qk = hardmax_op_pt(qk)
         elif self.attention_type == 'simplex':
             if config.use_projections:
                 qk = SimplexProjection.apply(qk)
             else:
-                from ..core.ops import simplex_op_pt
                 qk = simplex_op_pt(qk)
         else:
             if config.use_projections:
@@ -485,7 +655,14 @@ class ReLUSquared(nn.Module):
         if config.use_projections:
             return SquaredReLUProjection.apply(input)
         return torch.square(torch.relu(input))
+class CrossEntropyLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
 
+    def forward(self, input, target):
+        if config.use_projections:
+            return CrossEntropyProjection.apply(input, target)
+        return F.cross_entropy(input, target)
 class Rotary(nn.Module):
     # Caches cos/sin tables per sequence length on the current device.
     def __init__(self, dim: int, base: float = 10000.0):
@@ -516,14 +693,14 @@ def apply_rotary_emb(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> t
     return torch.cat((x1 * cos + x2 * sin, x1 * (-sin) + x2 * cos), dim=-1)
 
 class RMSNorm(nn.Module):
-    def __init__(self, eps: float = 1e-5):
+    def __init__(self, dim: int, eps: float = 1e-5):
         super().__init__()
         self.eps = eps
+        self.weight = nn.Parameter(torch.ones(1, dim))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if config.use_projections:
-            from ..core.ops import RMSNormProjection
-            return RMSNormProjection.apply(x, None, self.eps, 5)
+            return RMSNormProjection.apply(x, self.weight, self.eps, 5)
         return F.rms_norm(x, (x.size(-1),), eps=self.eps)
 
 class CausalSelfAttention(nn.Module):
@@ -570,7 +747,7 @@ class CausalSelfAttention(nn.Module):
             return (left @ right) / omega
         # Using analytical alpha/g scaling of 1.0 for these internal matrices
         return MatMulProjection.apply(
-            left, right, 5, 1.0, 1.0, omega, None, True, False
+            left, right, 5, 1.0 * config.projection_alpha, 1.0 * config.projection_g, omega, None, True, False
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

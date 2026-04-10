@@ -156,7 +156,7 @@ def run(cfg, task_cfg, batch_size, run_number, device, alternating_freq, loss_pr
     with tqdm.tqdm(unit="step") as pbar:
         while True:
             if step % cfg["eval_every"] == 0:
-                with ptorch_config.config.projections(False): # Always evaluate purely forward without targets
+                with ptorch_config.config.projections(False):
                     model.eval()
                     accs = []
                     for x, y in val_loader:
