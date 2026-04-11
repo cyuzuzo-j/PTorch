@@ -4,7 +4,8 @@ import sys
 import os
 
 # Add the project root to sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../frameworks')))
 import ptorch.config as ptorch_config
 from frameworks.ptorch.nn import modules as pnn
 from frameworks.ptorch import optim_static as optim
@@ -21,7 +22,7 @@ class DeepMLP(nn.Module):
         
         # Hidden layers
         for _ in range(num_layers - 2):
-            layers.append(pnn.LinearOrth(hidden_features, hidden_features))
+            layers.append(pnn.Linear(hidden_features, hidden_features,bias=False, dtp=True, residual=False))
 
         # Final layer
         layers.append(pnn.Linear(hidden_features, out_features, bias=True, residual=False))
@@ -33,9 +34,9 @@ class DeepMLP(nn.Module):
 def test_identity():
     # Hyperparameters
     in_features = 8
-    hidden_features = 16
+    hidden_features = 8
     out_features = 8
-    num_layers = 20
+    num_layers = 5
     batch_size = 32
     num_epochs = 1000
     lr = 0.001
@@ -44,7 +45,7 @@ def test_identity():
     print(f"Using device: {device}", flush=True)
     
     model = DeepMLP(in_features, hidden_features, out_features, num_layers).to(device)
-    optimizer = optim.ARADMMProjections(model.parameters())
+    optimizer = optim.ProjectionMuon(model.parameters())
     
     # Simple identity dataset
     x_train = torch.randn(batch_size * 10, in_features).to(device)

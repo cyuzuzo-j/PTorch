@@ -737,10 +737,10 @@ class CausalSelfAttention(nn.Module):
         self.c_v = Linear(dim, kv_dim, bias=False, norm=norm)
         self.proj = Linear(dim, dim, bias=False, norm=norm)
         
-        self.q_gain = nn.Parameter(torch.full((num_heads,), qk_gain_init, dtype=torch.float32))
+        self.q_gain = nn.Parameter(torch.full((num_heads, 1), qk_gain_init, dtype=torch.float32))
         self.rotary = Rotary(self.head_dim, base=rope_base)
-        self.q_norm = RMSNorm()
-        self.k_norm = RMSNorm()
+        self.q_norm = RMSNorm(self.head_dim)
+        self.k_norm = RMSNorm(self.head_dim)
 
     def _project_pairwise_matmul(self, left, right, omega=1.0):
         if not config.use_projections:
@@ -763,7 +763,7 @@ class CausalSelfAttention(nn.Module):
         q = apply_rotary_emb(q, cos, sin)
         k = apply_rotary_emb(k, cos, sin)
         
-        q = q * self.q_gain.to(dtype=q.dtype)[None, :, None, None]
+        q = q * self.q_gain.to(dtype=q.dtype).view(1, self.num_heads, 1, 1)
         
         # Expand KV heads to match Q heads for attention: (B, heads, S, D)
         if self.num_heads != self.num_kv_heads:

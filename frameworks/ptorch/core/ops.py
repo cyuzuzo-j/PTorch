@@ -1094,6 +1094,7 @@ class MatMulProjectionHybrid(torch.autograd.Function):
                     )
                 
                 B_proj = B_proj_2d.reshape(B_det.shape[-2], B_det.shape[-1]).expand(B_det.shape)
+                grad_B = B_proj
                 if ctx.proj_cache is not None:
                     ctx.proj_cache['t'] = t_new.reshape(Z_det.shape)
             else:
@@ -1123,7 +1124,7 @@ class MatMulProjectionHybrid(torch.autograd.Function):
                         A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
                         t_init=t_init, alpha=ctx.alpha, g=ctx.g, omega=ctx.omega, 
                         num_steps=ctx.num_steps, residual=ctx.residual
-                    ) 
+                    )
                 grad_B = B_proj
                 if ctx.proj_cache is not None:
                     ctx.proj_cache['t'] = t_new
