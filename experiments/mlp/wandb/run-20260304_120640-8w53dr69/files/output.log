@@ -1,7 +1,0 @@
-0step [00:00, ?step/s]/home/cyuzuzo/.pyenv/versions/3.10.19/lib/python3.10/site-packages/torch/utils/data/dataloader.py:668: UserWarning: 'pin_memory' argument is set as true but no accelerator is found, then device pinned memory won't be used.
-  warnings.warn(warn_msg)
-0step [00:00, ?step/s, best=0.0000, val_acc=0.0675]/home/cyuzuzo/thesisV5/experiments/mlp/bench_torch.py:114: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
-Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:836.)
-  wandb.log({"train/loss": float(loss)}, step=step)
-5000step [00:43, 114.47step/s, best=0.8798, val_acc=0.8795]
-Test Acc: 0.8952  Time: 43.7s

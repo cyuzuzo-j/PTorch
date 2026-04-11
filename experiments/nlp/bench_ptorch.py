@@ -12,7 +12,7 @@ import torch
 torch.set_float32_matmul_precision('high')
 import torch.nn as tnn
 import torch.nn.functional as F
-from ptorch.nn.modules import Linear, LinearMain, ReLU, MultiHeadAttention, Conversion, Mean, SumReLU, RMSNorm, ReLUSquared, CausalSelfAttention
+from ptorch.nn.modules import Linear, LinearMain, ReLU, MultiHeadAttention, Conversion, Mean, SumReLU, RMSNorm, ReLUSquared, CausalSelfAttention, Softcap
 from ptorch.core.ops import CrossEntropyProjection, HardMarginProjection
 import ptorch.optim_static as ptorch_optim_static
 import ptorch.config as ptorch_config
@@ -196,16 +196,16 @@ class GPTBlock(tnn.Module):
         # Using num_kv_heads = num_heads, rope_base = 10000.0, qk_gain_init = 1.5
         self.attn = CausalSelfAttention(dim, num_heads, num_heads, 10000.0, 1.5, norm=norm)
         self.mlp = GPTMLP(dim, mlp_mult, norm=norm, linear_cls=linear_cls)
-        self.attn_scale = tnn.Parameter(torch.ones(dim, dtype=torch.float32))
-        self.mlp_scale = tnn.Parameter(torch.ones(dim, dtype=torch.float32))
+        self.attn_scale = tnn.Parameter(torch.ones(1, dim, dtype=torch.float32))
+        self.mlp_scale = tnn.Parameter(torch.ones(1, dim, dtype=torch.float32))
         self.resid_mix = tnn.Parameter(torch.stack((torch.ones(dim), torch.zeros(dim))).float())
 
     def forward(self, x, x0):
         mix = self.resid_mix.to(dtype=x.dtype)
         x = torch.add(torch.mul(mix[0][None, None, :], x), torch.mul(mix[1][None, None, :], x0))
         attn_out = self.attn(self.attn_norm(x))
-        x = torch.add(x, torch.mul(self.attn_scale.to(dtype=x.dtype)[None, None, :], attn_out))
-        x = torch.add(x, torch.mul(self.mlp_scale.to(dtype=x.dtype)[None, None, :], self.mlp(self.mlp_norm(x))))
+        x = torch.add(x, torch.mul(self.attn_scale.to(dtype=x.dtype), attn_out))
+        x = torch.add(x, torch.mul(self.mlp_scale.to(dtype=x.dtype), self.mlp(self.mlp_norm(x))))
         return x
 
 class TinyGPT(tnn.Module):
@@ -514,7 +514,7 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', choices=['mlp', 'attention', 'gpt'], default='attention', help='Model choice')
+    parser.add_argument('--model', choices=['mlp', 'attention', 'gpt'], default='gpt', help='Model choice')
     args = parser.parse_args()
     
     cfg    = yaml.safe_load(open(CFG_PATH))

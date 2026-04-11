@@ -40,8 +40,8 @@ class MNISTAttention_PTorch(nn.Module):
         
         self.embedding = Linear(self.patch_dim, emb_dim)
 
-        self.cls_token = nn.Parameter(torch.randn(1, 1, emb_dim))
-        self.pos_embedding = nn.Parameter(torch.randn(1, self.num_patches + 1, emb_dim))
+        self.cls_token = nn.Parameter(torch.randn(1, emb_dim))
+        self.pos_embedding = nn.Parameter(torch.randn(self.num_patches + 1, emb_dim))
 
         #self.norm1 = BatchNorm(emb_dim)
         
@@ -66,10 +66,10 @@ class MNISTAttention_PTorch(nn.Module):
         # Project patches
         tokens = self.embedding(patches)
 
-        cls_tokens = self.cls_token.expand(B, -1, -1)
+        cls_tokens = self.cls_token.unsqueeze(0).expand(B, -1, -1)
         tokens = torch.cat([cls_tokens, tokens], dim=1)
 
-        tokens = tokens + self.pos_embedding
+        tokens = tokens + self.pos_embedding.unsqueeze(0)
 
         #x_norm = self.norm1(tokens)
         
