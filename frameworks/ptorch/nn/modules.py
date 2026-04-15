@@ -69,11 +69,97 @@ def _parse_norm(norm):
         raise ValueError(f"Unrecognised norm: '{norm}'. Use 'l2', 'linf', 'l1', or 'l<p>' (e.g. 'l1.5', 'l3').")
 
 
+class LinearLinf(nn.Linear):
+    """Linear layer that uses the L∞ (Chebyshev) matmul projection.
+
+    Drop-in replacement for :class:`Linear` that switches the backward
+    projection from the Frobenius (L2) norm to the L∞ (Chebyshev) norm.
+    See ``MatMulProjectionLinf`` in ``ops.py`` for the mathematical details.
+
+    Args:
+        in_features:  number of input features.
+        out_features: number of output features.
+        bias:         if True (default), adds a learnable bias.
+        g:            Z-slack weight in the L∞ projection (default 1.0).
+        omega:        output scale divisor, same role as in Linear (default 1.0).
+        num_iters:    Newton iterations inside the L∞ projection (default 5).
+        residual:     if True, forward computes ``(x - x @ W) / omega``
+                      and the residual isomorphism is applied in the projection.
+    """
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        bias: bool = True,
+        g: float = 1.0,
+        omega: float = 1.0,
+        num_iters: int = 5,
+        residual: bool = True,
+    ):
+        super().__init__(in_features, out_features, bias=False)
+        self.g = g
+        self.omega = omega
+        self.num_iters = num_iters
+        self.use_bias = bias
+        self.residual = residual
+        self.proj_cache: dict = {}
+
+        nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
+        if self.residual:
+            with torch.no_grad():
+                identity = torch.eye(
+                    out_features, in_features,
+                    device=self.weight.device,
+                    dtype=self.weight.dtype,
+                )
+                self.weight.copy_(identity - self.weight)
+
+        if self.use_bias:
+            self.bias = nn.Parameter(torch.zeros(1, out_features))
+
+    def forward(self, input):
+        if config.use_projections:
+            weight_t = self.weight.T
+            if self.use_bias:
+                input = F.pad(input, (0, 1), value=1.0)
+                weight_t = torch.cat([weight_t, self.bias], dim=0)
+            if self.residual:
+                in_dim = input.shape[-1]
+                out_dim = weight_t.shape[-1]
+                padded_dim = max(in_dim, out_dim)
+
+                if padded_dim > in_dim:
+                    input = F.pad(input, (0, padded_dim - in_dim), value=0.0)
+
+                if padded_dim != in_dim or padded_dim != out_dim:
+                    padded_weight_t = weight_t.new_zeros((padded_dim, padded_dim))
+                    padded_weight_t[:in_dim, :out_dim] = weight_t
+                    weight_t = padded_weight_t
+
+                output = MatMulProjectionLinf.apply(
+                    input, weight_t,
+                    self.num_iters, self.g, self.omega,
+                    self.proj_cache, False, True,
+                )
+                return output[..., :self.out_features]
+
+            return MatMulProjectionLinf.apply(
+                input, weight_t,
+                self.num_iters, self.g, self.omega,
+                self.proj_cache, False, self.residual,
+            )
+
+        output = F.linear(input, self.weight)
+        if self.use_bias:
+            output = output + self.bias
+        return output / self.omega
+
 class Linear(nn.Module):
     """Projection-only linear layer following the old main-style matmul path.
 
     Supports optional affine bias via input augmentation and optional residual
-    projection mode.  Accepts L2, Linf, L1, and general Lp norms.
+    projection mode. Accepts L2, Linf, L1, and general Lp norms.
+    Fixed to include mathematically correct residual padding and initialization.
     """
     def __init__(
         self,
@@ -89,6 +175,8 @@ class Linear(nn.Module):
         norm = 'l2',
     ):
         super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
         self.alpha = alpha
         self.g = g
         self.omega = omega
@@ -96,12 +184,29 @@ class Linear(nn.Module):
         self.use_bias = bias
         self.residual = residual
         self.dtp = dtp
-        self.norm_type, self.p = _parse_norm(norm)
+        self.norm_type, self.p = _parse_norm(norm) # Assumes _parse_norm is in scope
         self.proj_cache: dict = {}
 
-        in_aug = in_features + (1 if self.use_bias else 0)
-        self.weight = nn.Parameter(torch.empty(in_aug, out_features))
+        # Separate parameters to ensure optimizers (e.g., AdamW) can exclude bias from weight decay
+        self.weight = nn.Parameter(torch.empty(out_features, in_features))
+        if self.use_bias:
+            self.bias = nn.Parameter(torch.zeros(1, out_features))
+        else:
+            self.register_parameter('bias', None)
+
+        # 1. Correct Initialization Variance:
+        # Now matches nn.Linear shape (out_features, in_features) natively
         nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
+        
+        # 2. Residual Identity mapping
+        if self.residual:
+            with torch.no_grad():
+                identity = torch.eye(
+                    out_features, in_features, 
+                    device=self.weight.device, 
+                    dtype=self.weight.dtype
+                )
+                self.weight.copy_(identity - self.weight)
 
     def forward(self, input, norm=None):
         if norm is not None:
@@ -109,109 +214,68 @@ class Linear(nn.Module):
         else:
             norm_type, p = self.norm_type, self.p
 
-        if not config.use_projections:
-            # Standard gradient path: extract weight and bias from augmented parameter
-            if self.use_bias:
-                W = self.weight[:-1, :]  # (in_features, out_features)
-                b = self.weight[-1, :]   # (out_features,)
-            else:
-                W = self.weight
-                b = None
-            return F.linear(input, W.T, b)
+        if not config.use_projections: # Assumes config is in scope
+            # Standard gradient path
+            b = self.bias.squeeze(0) if self.use_bias else None
+            output = F.linear(input, self.weight, b)
+            return output / self.omega
 
+        # Speed/Memory Efficiency: Use F.pad instead of torch.cat for input bias augmentation
         projected_input = input
+        weight_matrix = self.weight.T
+
         if self.use_bias:
-            ones = torch.ones((*input.shape[:-1], 1), dtype=input.dtype, device=input.device)
-            projected_input = torch.cat([input, ones], dim=-1)
+            projected_input = F.pad(input, (0, 1), value=1.0)
+            weight_matrix = torch.cat([weight_matrix, self.bias], dim=0)
 
+        # Mathematically Correct Residual Padding
+        if self.residual:
+            in_dim = projected_input.shape[-1]
+            out_dim = weight_matrix.shape[-1]
+            padded_dim = max(in_dim, out_dim)
+
+            if padded_dim > in_dim:
+                projected_input = F.pad(projected_input, (0, padded_dim - in_dim), value=0.0)
+
+            if padded_dim != in_dim or padded_dim != out_dim:
+                padded_weight = weight_matrix.new_zeros((padded_dim, padded_dim))
+                padded_weight[:in_dim, :out_dim] = weight_matrix
+                weight_matrix = padded_weight
+
+        # Dispatch to the correct projection function
         if norm_type == 'linf':
-            return MatMulProjectionLinf.apply(
-                projected_input,
-                self.weight,
-                self.num_iters,
-                self.g * config.projection_g,
-                self.omega,
-                self.proj_cache,
-                False,
-                self.residual,
+            output = MatMulProjectionLinf.apply(
+                projected_input, weight_matrix, self.num_iters,
+                self.g, self.omega, # Aligned with LinearLinf (ignores config.projection_g)
+                self.proj_cache, False, self.residual,
             )
-        if norm_type == 'lp':
-            return MatMulProjectionLp.apply(
-                projected_input,
-                self.weight,
-                self.num_iters,
-                p,
-                self.g * config.projection_g,
-                self.omega,
-                self.proj_cache,
-                False,
-                self.residual,
+        elif norm_type == 'lp':
+            output = MatMulProjectionLp.apply(
+                projected_input, weight_matrix, self.num_iters, p,
+                self.g * config.projection_g, self.omega,
+                self.proj_cache, False, self.residual,
             )
-        if self.dtp:
-            return MatMulProjectionDTP.apply(
-            projected_input,
-            self.weight,
-            self.num_iters,
-            self.alpha * config.projection_alpha,
-            self.g * config.projection_g,
-            self.omega,
-            self.proj_cache,
-            False,
-            self.residual,
+        elif self.dtp:
+            output = MatMulProjectionDTP.apply(
+                projected_input, weight_matrix, self.num_iters,
+                self.alpha * config.projection_alpha,
+                self.g * config.projection_g, self.omega,
+                self.proj_cache, False, self.residual,
             )                
-        return MatMulProjection.apply(
-            projected_input,
-            self.weight,
-            self.num_iters,
-            self.alpha * config.projection_alpha,
-            self.g * config.projection_g,
-            self.omega,
-            self.proj_cache,
-            False,
-            self.residual,
-        )
+        else:
+            output = MatMulProjection.apply(
+                projected_input, weight_matrix, self.num_iters,
+                self.alpha * config.projection_alpha,
+                self.g * config.projection_g, self.omega,
+                self.proj_cache, False, self.residual,
+            )
 
-
-
-class LinearMain(nn.Module):
-    """Main-branch compatible projection layer (old LinearBias-style path)."""
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-        alpha: float = 1.0,
-        g: float = 1.0,
-        num_iters: int = 1,
-    ):
-        super().__init__()
-        self.alpha = alpha
-        self.g = g
-        self.num_iters = num_iters
-        self.weight = nn.Parameter(torch.empty(in_features + 1, out_features))
-        self.proj_cache: dict = {}
-        nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
-
-    def forward(self, input):
-        if not config.use_projections:
-            W = self.weight[:-1, :]  # (in_features, out_features)
-            b = self.weight[-1, :]   # (out_features,)
-            return F.linear(input, W.T, b)
-
-        ones = torch.ones((*input.shape[:-1], 1), dtype=input.dtype, device=input.device)
-        augmented_input = torch.cat([input, ones], dim=-1)
-        return MatMulProjection.apply(
-            augmented_input,
-            self.weight,
-            self.num_iters,
-            self.alpha * config.projection_alpha,
-            self.g * config.projection_g,
-            1.0,
-            self.proj_cache,
-            False,
-            False,
-        )
-
-
+        # Slice back to correct output dimension if padding occurred
+        if self.residual:
+            return output[..., :self.out_features]
+            
+        return output
+        
 class LinearOrth(nn.Module):
     """Simplified linear layer using OrthogonalRotationProjection.
     
