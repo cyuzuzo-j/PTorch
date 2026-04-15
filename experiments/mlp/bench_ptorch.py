@@ -48,7 +48,7 @@ class MLP(tnn.Module):
                 self.hidden_layers.append(LinearHybrid(last, f, norm=norm))
                 self.hidden_layers.append(ReLUHybrid(norm=norm))
             else:
-                self.hidden_layers.append(PLinear(last, f, norm=norm, dtp=dtp))
+                self.hidden_layers.append(PLinear(last, f, norm=norm, dtp=dtp, residual=False))
                 self.hidden_layers.append(PReLU(norm=norm if norm in ('l2', 'linf') else 'l2'))
             last = f
         self.n_hidden = len(hidden)
