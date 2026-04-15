@@ -10,16 +10,17 @@ max_steps: 500000
 num_runs: 1
 eval_every: 50
 patience: 10000
-log_loss_projection: true         # log the projected loss (CrossEntropyProjection output) to W&B
-ptorch_norm: linf  # l2 | linf"]
-ptorch_use_hybrid: False
-ptorch_use_boolean: False
-ptorch_use_fused_relu: False
+ptorch_norm: 2  # l2 | linf"]
 # ── Batch sizes to sweep ─────────────────────────
 batch_sizes: [8, 128, 512]
 
 # ── Tasks (comment out to disable) ───────────────
 tasks:
+  - name: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [128]
+
   - name: CIFAR10
     in_features: 3072
     classes: 10
