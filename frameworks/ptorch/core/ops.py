@@ -3,26 +3,65 @@ import torch.nn.functional as F
 import warnings
 from .. import config
 import math
+from itertools import repeat
 
-def zeropower_via_newtonschulz5(G: torch.Tensor, steps: int = 5, eps: float = 1e-7) -> torch.Tensor:
+
+# Precomputed optimal coefficients from Polar Express (degree=5)
+# Paper: "The Polar Express: Optimal Matrix Sign Methods and Their Application to the Muon Algorithm"
+_POLAR_COEFFS = [
+    (8.28721201814563, -23.595886519098837, 17.300387312530933),
+    (4.107059111542203, -2.9478499167379106, 0.5448431082926601),
+    (3.9486908534822946, -2.908902115962949, 0.5518191394370137),
+    (3.3184196573706015, -2.488488024314874, 0.51004894012372),
+    (2.300652019954817, -1.6689039845747493, 0.4188073119525673),
+    (1.891301407787398, -1.2679958271945868, 0.37680408948524835),
+    (1.8750014808534479, -1.2500016453999487, 0.3750001645474248),
+    (1.875, -1.25, 0.375)
+]
+
+# Apply safety factor for numerical stability in bfloat16 (Section 3.4 & Appendix G)
+_POLAR_COEFFS = [
+    (a / 1.01, b / 1.01**3, c / 1.01**5) for a, b, c in _POLAR_COEFFS[:-1]
+] + [_POLAR_COEFFS[-1]]
+
+def zeropower_via_polarexpress(G: torch.Tensor, steps: int = 5, eps: float = 1e-2) -> torch.Tensor:
+    """
+    Computes the polar factor using the optimal Polar Express polynomial method.
+    Acts as a drop-in replacement for the static Newton-Schulz5 / Jordan method.
+    """
     is_1d = G.ndim == 1
     if is_1d:
         G = G.view(1, -1)
-    a, b, c = (3.4445, -4.7750, 2.0315)
+        
     X = G.bfloat16()
-    X /= X.norm() + eps
-    transposed = G.size(0) > G.size(1)
+    
+    # As per paper recommendation: use a larger eps (1e-2) to avoid conditioning issues
+    X = X / (X.norm(dim=(-2, -1), keepdim=True) + eps)
+    
+    # Transpose if rows > cols to save FLOPs in matrix multiplications
+    transposed = X.size(-2) > X.size(-1)
     if transposed:
-        X = X.T
-    for _ in range(steps):
-        A = X @ X.T
+        X = X.mT
+        
+    # Build sequence of coefficients for requested number of steps
+    hs = _POLAR_COEFFS[:steps]
+    if steps > len(_POLAR_COEFFS):
+        hs += list(repeat(_POLAR_COEFFS[-1], steps - len(_POLAR_COEFFS)))
+        
+    # Iterate dynamically shifting polynomials
+    for a, b, c in hs:
+        A = X @ X.mT
         B = b * A + c * A @ A
         X = a * X + B @ X
-    out = X.T if transposed else X
+        
+    out = X.mT if transposed else X
+    
     if is_1d:
         out = out.view(-1)
+        
     return out.to(G.dtype)
 
+torch.compile
 def process_activation_target(A_det, A_proj):
     if getattr(config, 'muon_activations', True):
         orig_shape = A_det.shape
@@ -30,7 +69,7 @@ def process_activation_target(A_det, A_proj):
         A_proj_2d = A_proj.reshape(-1, orig_shape[-1])
         g = A_2d - A_proj_2d
         
-        g_muon = zeropower_via_newtonschulz5(g)
+        g_muon = zeropower_via_polarexpress(g)
         lr = getattr(config, 'muon_activations_lr', 1.0)
         
         if getattr(config, 'muon_activations_scale', False):
@@ -41,8 +80,6 @@ def process_activation_target(A_det, A_proj):
         return A_proj_new.reshape(orig_shape)
     return A_proj
 
-# Suppress pin_memory warning when no accelerator is available
-warnings.filterwarnings("ignore", message=".*pin_memory.*")
 
 class AverageGradient(torch.autograd.Function):
     @staticmethod
@@ -64,7 +101,7 @@ class AverageGradient(torch.autograd.Function):
         return grad_input, None
         
 
-# @torch.compile(dynamic=True)
+@torch.compile(dynamic=True)
 def matmul_proj_linf(A, B, Z, eps_init=None, g=1.0, omega=1.0, num_steps=5, residual=False):
     """
     Exact independent bilinear projection for A @ B = Z using the L_infinity (Chebyshev) norm.
@@ -256,7 +293,8 @@ class MatMulProjectionLinf(torch.autograd.Function):
 
         # Note: the alpha scalar weighting is intentionally removed for L_inf
         return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None        
-# @torch.compile(dynamic=True)
+
+torch.compile(dynamic=True)
 def matmul_proj(A, B, Z, t_init=None, alpha=1.0, g=1.0, omega=1.0, num_steps=1, residual=False):
     """
     Exact independent bilinear projection for A @ B = Z (or A - A @ B = Z if residual=True).
@@ -705,281 +743,7 @@ class MatMulProjectionL1(torch.autograd.Function):
         return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None
 
 
-# @torch.compile(dynamic=True)
-def matmul_proj_lp(A, B, Z, p, u_init=None, g=1.0, omega=1.0, num_steps=10, residual=False):
-    """
-    Exact independent bilinear projection for A @ B = Z using a general L_p norm (1 < p < inf).
-
-    Implements Algorithm §7 from the LP projection derivation:
-      - Joint Newton–Raphson root-finding over V = (x_i, w_i, u) per (m, n) pair
-      - O(K) per-iteration via Schur complement on the block-diagonal Jacobian
-      - Three numerical safeguards: clamped phi_q' (§6.3), Tikhonov (§6.4), Armijo (§6.5)
-
-    Args:
-        A:         Input activations       (..., M, K)
-        B:         Weight matrix            (..., K, N)   [or (K, N)]
-        Z:         Target output            (..., M, N)
-        p:         Norm exponent            (float, 1 < p < inf)
-        u_init:    Warm-start for dual variable u  (..., M, N) or None
-        g:         Penalty weight on Z-deviation
-        omega:     Output scale divisor
-        num_steps: Maximum Newton iterations
-        residual:  If True, constraint is A - A@B = Z
-
-    Returns:
-        A_proj, B_proj, Z_proj, u_state
-    """
-    q = p / (p - 1.0)       # Hölder conjugate
-    gamma_q = g ** q         # precomputed γ^q for the output penalty
-
-    if residual:
-        I = torch.eye(B.size(-2), B.size(-1), device=B.device, dtype=B.dtype)
-        B_eff = I - B
-    else:
-        B_eff = B
-
-    # Compute residual: how far the current (A, B, Z) is from feasibility
-    P = A @ B_eff                          # (..., M, N)
-    Z_target = Z * omega
-    r0 = Z_target - P                      # initial constraint violation per (m, n)
-
-    # ── Trivial check: if already feasible, skip ─────────────────────────
-    # (handled per-element via Newton converging in 0 steps naturally)
-
-    M, K = A.shape[-2], A.shape[-1]
-    N = B_eff.shape[-1]
-
-    # Working copies of x (A-features) and w (B_eff-features)
-    # Shape: (..., M, K, N) — one (x_i, w_i) pair per output element (m, n)
-    x = A.unsqueeze(-1).expand(*A.shape, N).clone()         # (..., M, K, N)
-    w = B_eff.unsqueeze(-3).expand(*A.shape[:-1], K, N).clone()  # (..., M, K, N)
-
-    # Dual variable u: one scalar per (m, n) pair
-    if u_init is not None and u_init.shape[-2:] == (M, N):
-        u = u_init.to(A.device).clone()
-    else:
-        u = torch.zeros(*A.shape[:-1], N, device=A.device, dtype=A.dtype)  # (..., M, N)
-
-    # Original values (constant)
-    x0 = A.unsqueeze(-1).expand_as(x)          # (..., M, K, N)
-    w0 = B_eff.unsqueeze(-3).expand_as(w)      # (..., M, K, N)
-    y0 = Z_target                               # (..., M, N)
-
-    # Safeguard parameters
-    eps_clamp = 1e-8     # §6.3: clamping threshold for phi_q' when p > 2
-    eps_det = 1e-6       # §6.4: Tikhonov trigger threshold
-    beta_ls = 0.5        # §6.5: Armijo backtracking factor
-    mu_ls = 1e-4         # §6.5: Armijo sufficient decrease parameter
-    max_ls = 8           # max backtracking steps
-
-    need_clamp = (p > 2.0)   # phi_q' blows up near zero only when q < 2
-
-    for _step in range(num_steps):
-        u_k = u.unsqueeze(-2)  # (..., M, 1, N)
-
-        # ── Residuals E_i, G_i, H ────────────────────────────────────────
-        # phi_q(z) = sign(z) * |z|^{q-1}
-        dx = x - x0          # (..., M, K, N)
-        dw = w - w0          # (..., M, K, N)
-
-        phi_q_dx = torch.sign(dx) * torch.abs(dx).pow(q - 1.0)
-        phi_q_dw = torch.sign(dw) * torch.abs(dw).pow(q - 1.0)
-        phi_q_w = torch.sign(w) * torch.abs(w).pow(q - 1.0)
-        phi_q_x = torch.sign(x) * torch.abs(x).pow(q - 1.0)
-
-        # Stationarity residuals (should be zero at solution)
-        E = dx - u_k * phi_q_w        # (..., M, K, N)
-        G = dw - u_k * phi_q_x        # (..., M, K, N)
-
-        # Constraint residual
-        xw_prod = (x * w).sum(dim=-2)  # (..., M, N)
-        y_from_u = y0 - u / gamma_q    # (..., M, N)
-        H = y0 - u / gamma_q - xw_prod  # (..., M, N)
-
-        # ── Convergence check (per element) ───────────────────────────────
-        # merit = sum(E^2 + G^2) + H^2
-        merit = (E * E + G * G).sum(dim=-2) + H * H   # (..., M, N)
-
-        # ── Jacobian blocks D_i, b_i, c_i ────────────────────────────────
-        # phi_q'(z) = (q-1) * |z|^{q-2}
-        if need_clamp:
-            # §6.3: Clamp |z| away from zero in the Jacobian only
-            abs_x_safe = torch.clamp(torch.abs(x), min=eps_clamp)
-            abs_w_safe = torch.clamp(torch.abs(w), min=eps_clamp)
-            phi_q_prime_x = (q - 1.0) * abs_x_safe.pow(q - 2.0)
-            phi_q_prime_w = (q - 1.0) * abs_w_safe.pow(q - 2.0)
-        else:
-            phi_q_prime_x = (q - 1.0) * torch.abs(x).pow(q - 2.0)
-            phi_q_prime_w = (q - 1.0) * torch.abs(w).pow(q - 2.0)
-
-        # D_i = [[1, -u*phi_q'(w_i)], [-u*phi_q'(x_i), 1]]
-        # det(D_i) = 1 - u^2 * phi_q'(x_i) * phi_q'(w_i)
-        off_diag_xw = u_k * phi_q_prime_x * phi_q_prime_w * u_k  # u^2 * phi_q'(x) * phi_q'(w)
-        det_D = 1.0 - off_diag_xw                                  # (..., M, K, N)
-
-        # §6.4: Tikhonov regularization for near-singular blocks
-        needs_reg = (torch.abs(det_D) < eps_det)
-        delta = torch.sqrt(torch.abs(off_diag_xw) + eps_det) - 1.0
-        delta = torch.clamp(delta, min=0.0)
-
-        # Apply shift: D_i -> D_i + delta_i * I_2
-        # New diagonal entries: 1 + delta
-        d11 = torch.where(needs_reg, 1.0 + delta, torch.ones_like(delta))
-        d22 = d11
-        d12 = -u_k * phi_q_prime_w   # (..., M, K, N)
-        d21 = -u_k * phi_q_prime_x   # (..., M, K, N)
-        det_D_reg = torch.where(needs_reg, d11 * d22 - d12 * d21, det_D)
-        inv_det = 1.0 / (det_D_reg + 1e-12)
-
-        # D_i^{-1} = (1/det) * [[d22, -d12], [-d21, d11]]
-        # b_i = [-phi_q(w_i), -phi_q(x_i)]
-        b1 = -phi_q_w   # (..., M, K, N)
-        b2 = -phi_q_x   # (..., M, K, N)
-
-        # c_i = [-w_i, -x_i]
-        c1 = -w          # (..., M, K, N)
-        c2 = -x          # (..., M, K, N)
-
-        # k = -1/gamma_q
-        k = -1.0 / gamma_q
-
-        # ── Schur complement accumulation ─────────────────────────────────
-        # Per-block: D_i^{-1} * [E_i, G_i]
-        inv_E = inv_det * (d22 * E - d12 * G)    # (..., M, K, N)
-        inv_G = inv_det * (-d21 * E + d11 * G)   # (..., M, K, N)
-
-        # Per-block: D_i^{-1} * b_i
-        inv_b1 = inv_det * (d22 * b1 - d12 * b2)  # (..., M, K, N)
-        inv_b2 = inv_det * (-d21 * b1 + d11 * b2) # (..., M, K, N)
-
-        # c_i^T D_i^{-1} b_i  (summed over K)
-        cT_inv_b = (c1 * inv_b1 + c2 * inv_b2).sum(dim=-2)   # (..., M, N)
-
-        # c_i^T D_i^{-1} [E_i, G_i]  (summed over K)
-        cT_inv_EG = (c1 * inv_E + c2 * inv_G).sum(dim=-2)    # (..., M, N)
-
-        # Schur complement S = k - sum_i c_i^T D_i^{-1} b_i
-        S = k - cT_inv_b   # (..., M, N)
-
-        # ── Multiplier update ─────────────────────────────────────────────
-        delta_u = (-H + cT_inv_EG) / (S + 1e-12)              # (..., M, N)
-
-        # ── Variable updates ──────────────────────────────────────────────
-        delta_u_k = delta_u.unsqueeze(-2)  # (..., M, 1, N)
-        delta_x = -(inv_E + inv_b1 * delta_u_k)  # (..., M, K, N)
-        delta_w = -(inv_G + inv_b2 * delta_u_k)  # (..., M, K, N)
-
-        # ── §6.5: Armijo backtracking line search ─────────────────────────
-        alpha_step = 1.0
-        for _ls in range(max_ls):
-            x_try = x + alpha_step * delta_x
-            w_try = w + alpha_step * delta_w
-            u_try = u + alpha_step * delta_u
-
-            # Recompute merit at trial point
-            dx_try = x_try - x0
-            dw_try = w_try - w0
-            u_try_k = u_try.unsqueeze(-2)
-
-            phi_q_w_try = torch.sign(w_try) * torch.abs(w_try).pow(q - 1.0)
-            phi_q_x_try = torch.sign(x_try) * torch.abs(x_try).pow(q - 1.0)
-
-            E_try = dx_try - u_try_k * phi_q_w_try
-            G_try = dw_try - u_try_k * phi_q_x_try
-            xw_try = (x_try * w_try).sum(dim=-2)
-            H_try = y0 - u_try / gamma_q - xw_try
-
-            merit_try = (E_try * E_try + G_try * G_try).sum(dim=-2) + H_try * H_try
-
-            # Accept if sufficient decrease (Armijo condition) on average
-            if (merit_try.mean() <= (1.0 - mu_ls * alpha_step) * merit.mean()):
-                break
-            alpha_step *= beta_ls
-
-        # Apply the accepted step
-        x = x + alpha_step * delta_x
-        w = w + alpha_step * delta_w
-        u = u + alpha_step * delta_u
-
-    # ── Consensus reconstruction ──────────────────────────────────────────
-    # Average proposals across output dimension (N) for A, across input dimension (M) for B
-    A_proj = x.mean(dim=-1)                    # (..., M, K) — average over N proposals
-    B_eff_proj = w.mean(dim=-3)                # (..., K, N) — average over M proposals
-    Z_proj = y0 - u / gamma_q                  # (..., M, N)
-    Z_proj = Z_proj / omega                    # un-scale
-
-    if residual:
-        B_proj = I - B_eff_proj
-    else:
-        B_proj = B_eff_proj
-
-    return A_proj, B_proj, Z_proj, u.detach()
-
-
-class MatMulProjectionLp(torch.autograd.Function):
-    """
-    Minimize sum|A-A0|^p + sum|B-B0|^p + g^p * |Z-Z0|^p
-    subject to A @ B = Z   (or A - A@B = Z if residual)
-
-    General L_p norm projection for 1 < p < inf.
-    """
-    @staticmethod
-    def forward(ctx, A, B, num_steps, p, g, omega, proj_cache=None, pairwise=False, residual=True):
-        ctx.save_for_backward(A, B)
-        ctx.p = p
-        ctx.g = g
-        ctx.num_steps = num_steps
-        ctx.proj_cache = proj_cache
-        ctx.omega = omega
-        ctx.pairwise = pairwise
-        ctx.residual = residual
-
-        if residual:
-            return (A - A @ B) / omega
-        else:
-            return (A @ B) / omega
-
-    @staticmethod
-    def backward(ctx, Z_target):
-        A, B = ctx.saved_tensors
-        A_det = A.detach()
-        B_det = B.detach()
-        Z_det = Z_target.detach()
-
-        u_init = None
-        if not ctx.pairwise and ctx.proj_cache is not None:
-            u_init = ctx.proj_cache.get('u_lp')
-
-        if not ctx.pairwise and (A_det.ndim > 2 or B_det.ndim > 2):
-            A_2d = A_det.reshape(-1, A_det.shape[-1]).clone()
-            Z_2d = Z_det.reshape(-1, Z_det.shape[-1]).clone() * ctx.omega
-            B_2d = B_det.reshape(-1, B_det.shape[-2], B_det.shape[-1]).mean(dim=0).clone()
-
-            u_init_2d = u_init.reshape(Z_2d.shape) if (u_init is not None and u_init.shape == Z_det.shape) else None
-
-            A_proj_2d, B_proj_2d, _, u_new = matmul_proj_lp(
-                A_2d, B_2d, Z_2d, p=ctx.p, u_init=u_init_2d, g=ctx.g,
-                omega=ctx.omega, num_steps=ctx.num_steps, residual=ctx.residual
-            )
-
-            A_proj = A_proj_2d.reshape(A_det.shape)
-            B_proj = B_proj_2d.reshape(B_det.shape[-2], B_det.shape[-1]).expand(B_det.shape)
-
-            if ctx.proj_cache is not None:
-                ctx.proj_cache['u_lp'] = u_new.reshape(Z_det.shape)
-        else:
-            A_proj, B_proj, _, u_new = matmul_proj_lp(
-                A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
-                p=ctx.p, u_init=u_init, g=ctx.g, omega=ctx.omega,
-                num_steps=ctx.num_steps, residual=ctx.residual
-            )
-
-            if not ctx.pairwise and ctx.proj_cache is not None:
-                ctx.proj_cache['u_lp'] = u_new
-
-        return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None, None
-
-
+torch.compile(dynamic=True)
 class MatMulProjectionHybrid(torch.autograd.Function):
     """
     Hybrid matmul backward: real chain-rule gradients upstream + weight update.
@@ -1083,18 +847,8 @@ class MatMulProjectionHybrid(torch.autograd.Function):
                     )
                 elif config.projection_norm in ["lp"] or isinstance(getattr(config, 'projection_p', None), (int, float)):
                     _p = getattr(config, 'projection_p', ctx.p)
-                    _, B_proj_2d, _, t_new = matmul_proj_lp(
-                        A_2d_proj, B_2d_proj, Z_2d_proj, p=float(_p), u_init=t_init_2d, g=ctx.g, 
-                        omega=ctx.omega, num_steps=ctx.num_steps, residual=ctx.residual
-                    )
-                else:
-                    _, B_proj_2d, _, t_new = matmul_proj(
-                        A_2d_proj, B_2d_proj, Z_2d_proj, t_init=t_init_2d, alpha=ctx.alpha, g=ctx.g, 
-                        omega=ctx.omega, num_steps=ctx.num_steps, residual=ctx.residual
-                    )
                 
                 B_proj = B_proj_2d.reshape(B_det.shape[-2], B_det.shape[-1]).expand(B_det.shape)
-                grad_B = B_proj
                 if ctx.proj_cache is not None:
                     ctx.proj_cache['t'] = t_new.reshape(Z_det.shape)
             else:
@@ -1124,7 +878,7 @@ class MatMulProjectionHybrid(torch.autograd.Function):
                         A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
                         t_init=t_init, alpha=ctx.alpha, g=ctx.g, omega=ctx.omega, 
                         num_steps=ctx.num_steps, residual=ctx.residual
-                    )
+                    ) 
                 grad_B = B_proj
                 if ctx.proj_cache is not None:
                     ctx.proj_cache['t'] = t_new
@@ -1415,7 +1169,7 @@ class ReLULInfinityProjection(torch.autograd.Function):
 
         # Select solution minimizing L-infinity distance
         result = torch.where(dist_1 < dist_2, x_1, x_2)
-        return result
+        return process_activation_target(x, result)
     
 class ReLUProjection(torch.autograd.Function):
     """
@@ -1441,7 +1195,7 @@ class ReLUProjection(torch.autograd.Function):
 
         # Select solution minimizing distance
         result = torch.where(dist_1 < dist_2, x_1, x_2)
-        return result        
+        return process_activation_target(x, result)        
 
 class LogitSoftcapInversion(torch.autograd.Function):
     """
@@ -1908,7 +1662,7 @@ class LayerNormProjection(torch.autograd.Function):
         x_star = sigma_0 * y_star + mu_0
         
         # Return projected input
-        # Note: Return None for 'eps' as it requires no gradient/projection
+        # Note: Return None for the 'eps' argument as it requires no gradient/projection
         return x_star, None
 
 
@@ -1968,7 +1722,9 @@ def exact_batchnorm_proj(x, z, eps=1e-5, num_steps=15):
     """
     # 1. Compute centered statistics over the batch dimension (dim=0)
     mu_x = x.mean(dim=0, keepdim=True)
+    var_x = x.var(dim=0, keepdim=True, unbiased=False)
     mu_z = z.mean(dim=0, keepdim=True)
+    var_z = z.var(dim=0, keepdim=True, unbiased=False)
 
     x_c = x - mu_x
     z_c = z - mu_z
@@ -1979,7 +1735,7 @@ def exact_batchnorm_proj(x, z, eps=1e-5, num_steps=15):
 
     # 2. Initialize 'a' (the optimal standard deviation scale for x*)
     # The standard deviation of the input x is a mathematically ideal starting point
-    a = torch.sqrt(v_x + eps)
+    a = torch.sqrt(var_x + eps)
 
     # 3. Newton's Method to find the root of the quartic derivative
     for _ in range(num_steps):
@@ -2107,12 +1863,13 @@ def exact_rmsnorm_proj(x, z, eps=1e-5, num_steps=5):
     Returns both the pre-normalized x_star and the normalized y_star.
     """
     # Statistics over the feature dimension (last dim)
-    v_x = (x.square()).mean(dim=-1, keepdim=True)
-    v_z = (z.square()).mean(dim=-1, keepdim=True)
+    v_x = (x.square()).mean(dim=-1, keepdim=True) + eps
+    v_z = (z.square()).mean(dim=-1, keepdim=True) + eps
     cov = (x * z).mean(dim=-1, keepdim=True)
 
-    # Initialize 'a' at the current RMS of x
-    a = torch.sqrt(v_x + eps)
+    # Initialize 'a' (the optimal standard deviation scale for x*)
+    # The standard deviation of the input x is a mathematically ideal starting point
+    a = torch.sqrt(v_x)
 
     # Newton's method: solve g(a) = a*S - a*v_x - cov = 0
     for _ in range(num_steps):
@@ -2223,3 +1980,190 @@ class SquaredReLUProjection(torch.autograd.Function):
         x_star = torch.where(dist1_sq < dist2_sq, x1, x2)
         
         return x_star
+
+
+# ─── ℓ∞ ReLU Bilinear Projection ─────────────────────────────────────────────
+# @torch.compile(dynamic=True) 
+import torch
+
+@torch.compile(dynamic=True)
+def _abs_bilinear_newton(x, w, mode, constant, gamma_sq, eps_init=None, num_steps=5):
+    """
+    Safeguarded Newton solver for the ABS bilinear ℓ∞ projection.
+    Uses the mass function F(eps) = R(eps) + eps/gamma_sq - constant = 0,
+    where R(eps) is the maximum possible change in the dot product.
+    """
+    if eps_init is not None:
+        eps = eps_init
+    else:
+        # First-order Taylor approximation: eps * (sum(|x| + |w|) + 1/gamma_sq) = constant
+        deriv_0 = x.abs().sum(dim=-1) + w.abs().sum(dim=-1) + (1.0 / gamma_sq)
+        eps = constant / (deriv_0 + 1e-8)
+
+    damping = 1e-5
+    inv_gamma_sq = 1.0 / gamma_sq 
+
+    # For Newton, we need a differentiable function.
+    # But since we're in a torch.compile block (potentially), we can use autograd 
+    # if eps requires grad, or just analytical derivatives. 
+    # Analytical R(eps) for max change: 
+    # R(eps) = sum( eps*(|x_i| + |w_i|) + eps^2 )
+    
+    abs_x = x.abs()
+    abs_w = w.abs()
+    n = x.size(-1)
+
+    for _ in range(num_steps):
+        # F(eps) = n * eps^2 + eps * (sum(|x| + |w|) + 1/gamma_sq) - constant
+        # F'(eps) = 2 * n * eps + sum(|x| + |w|) + 1/gamma_sq
+        
+        sum_abs = abs_x.sum(dim=-1) + abs_w.sum(dim=-1)
+        F_val = n * eps**2 + eps * (sum_abs + inv_gamma_sq) - constant
+        F_prime = 2 * n * eps + sum_abs + inv_gamma_sq
+        
+        step = F_val / (F_prime + damping)
+        eps = torch.clamp(eps - step, min=0.0)
+
+    return eps
+    
+@torch.compile(dynamic=True) 
+def abs_bilinear_proj_linf(x, w, y, eps_init=None, gamma=1.0, num_steps=5):
+    """
+    Project (x, w, y) onto the manifold y = |w^T x| using ℓ∞ metric.
+    """
+    gamma_sq = gamma ** 2
+    
+    # Pre-activation dot product D = w^T x
+    D = (w * x).sum(dim=-1)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # BRANCH ANCHORING (Symmetry via Sign Flip)
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Determine which branch of the absolute value we are currently on
+    S = torch.where(D >= 0, 1.0, -1.0)
+    S_ext = S.unsqueeze(-1)
+    
+    # Current absolute dot product
+    D_abs = D * S
+    
+    # The valid manifold strictly requires y >= 0. If target y is negative, 
+    # the absolute closest point on the manifold is exactly 0.
+    T = torch.clamp(y, min=0.0)
+
+    # Pre-compute branch-adjusted coefficients
+    a = (x + S_ext * w).abs()
+    b = (x - S_ext * w).abs()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # NEWTON PROJECTION
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Case UP: D_abs < T (Need to push magnitude up)
+    case_up = D_abs < T
+    gap_up = torch.where(case_up, T - D_abs, 0.0)
+    eps_up = _abs_bilinear_newton(
+        x, w, mode='up', constant=gap_up, gamma_sq=gamma_sq,
+        eps_init=eps_init, num_steps=num_steps
+    )
+
+    # Case DOWN: D_abs >= T (Need to push magnitude down)
+    case_down = D_abs >= T
+    gap_down = torch.where(case_down, D_abs - T, 0.0)
+    eps_down = _abs_bilinear_newton(
+        x, w, mode='down', constant=gap_down, gamma_sq=gamma_sq,
+        eps_init=eps_init, num_steps=num_steps
+    )
+
+    eps_star = torch.where(case_up, eps_up, eps_down)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # RECONSTRUCTION
+    # ═══════════════════════════════════════════════════════════════════════════
+    eps_2d = eps_star.unsqueeze(-1)
+
+    s_plus = (x + S_ext * w).sign()
+    s_minus = (x - S_ext * w).sign()
+
+    # UP mode masks
+    cond_up = (2.0 * eps_2d >= (b - a))
+    dx_up = torch.where(cond_up, eps_2d * s_plus, -eps_2d * s_minus)
+    dw_up = torch.where(cond_up, eps_2d * s_plus, eps_2d * s_minus)
+
+    # DOWN mode masks
+    cond_down = (2.0 * eps_2d >= (a - b))
+    dx_down = torch.where(cond_down, eps_2d * s_minus, -eps_2d * s_plus)
+    dw_down = torch.where(cond_down, -eps_2d * s_minus, -eps_2d * s_plus)
+
+    # Route based on case
+    case_up_2d = case_up.unsqueeze(-1)
+    dx = torch.where(case_up_2d, dx_up, dx_down)
+    dw_tilde = torch.where(case_up_2d, dw_up, dw_down)
+
+    # Apply updates. For w, we must multiply the sign back in!
+    x_proj = x + dx
+    w_proj = w + (S_ext * dw_tilde)
+
+    # Reconstruct y_proj. If the original y was negative, the distance paid 
+    # to move it to 0 is already factored in, and now we move it from T (0.0).
+    y_proj_up = T - eps_star / gamma_sq
+    y_proj_down = T + eps_star / gamma_sq
+    y_proj = torch.where(case_up, y_proj_up, y_proj_down)
+
+    return x_proj, w_proj, y_proj, eps_star
+
+class AbsBilinearProjectionLinf(torch.autograd.Function):
+    """
+    Fused ℓ∞ projection for y = |w^T x|.
+
+    Combines the bilinear constraint and Absolute Value activation into a single
+    projection step.
+
+    Forward:  y = |x @ W| / omega
+    Backward: projects (x, W, z_target) onto the joint ABS-bilinear manifold.
+    """
+    
+    @staticmethod
+    def forward(ctx, x, W, num_iters, gamma, omega, proj_cache=None):
+        # We assume W is (in_features, out_features) for consistency with matmul path
+        z = F.linear(x, W.T)
+        y = torch.abs(z) / omega
+        
+        ctx.save_for_backward(x, W, torch.tensor(gamma))
+        ctx.num_iters = num_iters
+        ctx.omega = omega
+        return y
+
+    @staticmethod
+    def backward(ctx, y_target):
+        x, W, gamma = ctx.saved_tensors
+        num_iters = ctx.num_iters
+        omega = ctx.omega
+
+        # Downstream y_target is (B, out)
+        # We need to project each output dimension independently (or as a batch)
+        # abs_bilinear_proj_linf expects w to be same shape as x for a single output.
+        # Here x is (B, in), W is (in, out), y_target is (B, out).
+        
+        # We can vectorize by treating each 'out' as a separate bilinear task.
+        # x_rep: (B, out, in), W_rep: (B, out, in), y_target_rep: (B, out)
+        B, D_in = x.shape
+        D_out = W.shape[1]
+        
+        x_rep = x.unsqueeze(1).expand(-1, D_out, -1)     # (B, D_out, D_in)
+        W_rep = W.T.unsqueeze(0).expand(B, -1, -1)       # (B, D_out, D_in)
+        
+        # Scale target back to the manifold space: y_proj = y_target * omega
+        y_scaled = y_target * omega
+        
+        x_proj, w_proj, _, _ = abs_bilinear_proj_linf(
+            x_rep, W_rep, y_scaled, gamma=gamma.item(), num_steps=num_iters
+        )
+        
+        # x_proj is (B, out, in). We must aggregate the error for x?
+        # In ptorch, we usually return (x_proj - x) as the gradient.
+        # But this is a fused layer, so we return the projected values.
+        # Note: If multiple outputs affect same x, we take the mean/sum of projected values?
+        # Standard ptorch practice: projected x is the return value.
+        x_star = x_proj.mean(dim=1)  # (B, in)
+        W_star = w_proj.mean(dim=0).T  # (in, out)
+        
+        return x_star, W_star, None, None, None, None
