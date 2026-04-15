@@ -1,0 +1,46 @@
+class BooleanLinfProjection(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, weight, gamma_sq=1.0):
+        x_bool = torch.sign(input + 1e-7)
+        w_bool = torch.sign(weight + 1e-7)
+        out = F.linear(x_bool, w_bool)
+        ctx.save_for_backward(input, weight, x_bool, w_bool, out)
+        ctx.gamma_sq = gamma_sq
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        input, weight, x_bool, w_bool, current_out = ctx.saved_tensors
+        z_tgt = grad_output
+        delta = z_tgt - current_out
+        
+        x_exp = x_bool.unsqueeze(1)
+        w_exp = w_bool.unsqueeze(0)
+        
+        is_mismatch = (x_exp != w_exp).float()
+        is_match = (x_exp == w_exp).float()
+        
+        delta_pos = (delta > 0).float().unsqueeze(-1)
+        delta_neg = (delta < 0).float().unsqueeze(-1)
+        
+        active_mask = delta_pos * is_mismatch + delta_neg * is_match
+        
+        num_active = active_mask.sum(dim=-1)
+        safe_active = torch.clamp(num_active, min=1.0)
+        
+        epsilon = torch.abs(delta) / (safe_active + (1.0 / ctx.gamma_sq))
+        epsilon_clamped = torch.clamp(epsilon, max=1.0)
+        
+        push_dir = torch.sign(delta).unsqueeze(-1)
+        update_magnitude = epsilon_clamped.unsqueeze(-1) * active_mask
+        
+        x_push = push_dir * update_magnitude * w_exp
+        w_push = push_dir * update_magnitude * x_exp
+        
+        x_push_mean = x_push.mean(dim=1)
+        w_push_mean = w_push.mean(dim=0)
+        
+        grad_input = input + x_push_mean
+        grad_weight = weight + w_push_mean
+        
+        return grad_input, grad_weight, None
