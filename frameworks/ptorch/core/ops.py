@@ -61,7 +61,7 @@ def zeropower_via_polarexpress(G: torch.Tensor, steps: int = 5, eps: float = 1e-
         
     return out.to(G.dtype)
 
-torch.compile
+@torch.compile()
 def process_activation_target(A_det, A_proj):
     if getattr(config, 'muon_activations', True):
         orig_shape = A_det.shape
@@ -101,7 +101,7 @@ class AverageGradient(torch.autograd.Function):
         return grad_input, None
         
 
-@torch.compile(dynamic=True)
+@torch.compile()
 def matmul_proj_linf(A, B, Z, eps_init=None, g=1.0, omega=1.0, num_steps=5, residual=False):
     """
     Exact independent bilinear projection for A @ B = Z using the L_infinity (Chebyshev) norm.
@@ -294,7 +294,7 @@ class MatMulProjectionLinf(torch.autograd.Function):
         # Note: the alpha scalar weighting is intentionally removed for L_inf
         return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None        
 
-torch.compile(dynamic=True)
+@torch.compile()
 def matmul_proj(A, B, Z, t_init=None, alpha=1.0, g=1.0, omega=1.0, num_steps=1, residual=False):
     """
     Exact independent bilinear projection for A @ B = Z (or A - A @ B = Z if residual=True).
@@ -574,7 +574,7 @@ class MatMulProjectionDTP(torch.autograd.Function):
         return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None, None
 
 
-# @torch.compile(dynamic=True)
+@torch.compile()
 def matmul_proj_l1(A, B, Z, eps_init=None, g=1.0, omega=1.0, num_steps=None, residual=False):
     """
     Exact independent bilinear projection for A @ B = Z using the L_1 norm.
@@ -743,7 +743,7 @@ class MatMulProjectionL1(torch.autograd.Function):
         return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None
 
 
-torch.compile(dynamic=True)
+@torch.compile()
 class MatMulProjectionHybrid(torch.autograd.Function):
     """
     Hybrid matmul backward: real chain-rule gradients upstream + weight update.
@@ -890,7 +890,7 @@ class MatMulProjectionHybrid(torch.autograd.Function):
         return grad_A, grad_B, None, None, None, None, None, None, None, None
 
 
-# @torch.compile(dynamic=True)
+@torch.compile()
 def orthogonal_rotation_proj(R_0, x_0, y_0, alpha=1.0, gamma=1.0):
     """
     Exact independent projection for R @ x = y, where R is a valid rotation matrix in SO(n).

@@ -57,7 +57,7 @@ def _parse_norm(norm):
     except ValueError:
         raise ValueError(f"Unrecognised norm: '{norm}'. Use 'l2', 'linf', 'l1', or 'l<p>' (e.g. 'l1.5', 'l3').")
 
-FRAMEWORK = "ptorch"
+FRAMEWORK = "ptorch_final_final_final"
 
 OPTIM_MODULES = vars(ptorch_optim_static)
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
@@ -83,7 +83,7 @@ class MLP(tnn.Module):
         self.hidden_layers = tnn.ModuleList()
         for f in hidden:
             self.hidden_layers.append(PLinear(last, f, norm=norm, dtp=dtp, residual=False))
-            self.hidden_layers.append(PReLU(norm=norm if norm in ('l2', 'linf') else 'l2'))
+            self.hidden_layers.append(SumReLU())
             last = f
         self.n_hidden = len(hidden)
         self.out = PLinear(last, classes, norm=norm, dtp=dtp)
@@ -236,7 +236,6 @@ if __name__ == "__main__":
             for task_cfg in cfg["tasks"]:
                 norm_type, p_val = _parse_norm(norm_val)
                 norm_label = f"l{p_val}" if norm_type == 'lp' else norm_type
-                FRAMEWORK = "ptorch"
                 print(f"\n{'='*50}\n{FRAMEWORK} | {task_cfg['name']} | bs={batch_size} | norm={norm_label}")
                 # Override the norm for this sweep iteration
                 sweep_cfg = dict(cfg)

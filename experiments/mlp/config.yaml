@@ -4,15 +4,15 @@
 ##################################################
 
 # ── Experiment identity ───────────────────────────
-experiment_name: mlp_benchmark_norms
+experiment_name: mlp
 random_seed: 43
-max_steps: 500000
-num_runs: 1
-eval_every: 50
-patience: 10000
-ptorch_norm: 2  # l2 | linf"]
+max_steps: 50_000
+num_runs: 3
+eval_every: 200
+patience: 10
+ptorch_norm_sweep: ["linf"]  # l2 | linf"
 # ── Batch sizes to sweep ─────────────────────────
-batch_sizes: [8, 128, 512]
+batch_sizes: [8, 32, 128, 512]
 
 # ── Tasks (comment out to disable) ───────────────
 tasks:
@@ -24,7 +24,7 @@ tasks:
   - name: CIFAR10
     in_features: 3072
     classes: 10
-    hidden: [512]
+    hidden: [256]
 
 
 # ── Optimizers per framework ──────────────────────
@@ -44,6 +44,6 @@ ptorch_optimizer_kwargs: {lr: 0.001}
 ptorch_loss_projection: CrossEntropyProjection  # CrossEntropyProjection | HardMarginProjection | ProximalHingeMargin | SmoothSoftMargin
 
 # torch — any torch.optim class
-torch_optimizer: SGD             # Adam | SGD | AdamW | ...
+torch_optimizer: Adam           # Adam | SGD | AdamW | ...
 torch_optimizer_kwargs:
-  lr: 0.01
+  lr: 0.001

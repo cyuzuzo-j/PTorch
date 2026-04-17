@@ -59,6 +59,7 @@ class MLPBase:
         self.classes = classes
 
     def build(self):
+        nn = self._nn
         # create a simple object that mimics the original Module API used by the scripts
         class MLP(nn.Module):
             def __init__(self, hidden, in_features, classes):
@@ -106,7 +107,7 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
         OPTIM_MODULES.update({**vars(optim_static)})
     OPTIM_MODULES.update({**vars(optim)})
 
-    FRAMEWORK = impl_name
+    FRAMEWORK = impl_name +"final"
 
     seed = cfg.get("random_seed", 0)
 
@@ -130,6 +131,40 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
     opt_kwargs = cfg.get(f"{impl_name}_optimizer_kwargs") or cfg.get("pjax_optimizer_kwargs") or cfg.get("pjax_orr_optimizer_kwargs") or {}
     optimizer = OPTIM_MODULES[opt_name](**opt_kwargs)
 
+    # fall back cross_entropy implementation if missing
+    if cross_entropy is None:
+        def cross_entropy(pred, y_oh):
+            return -jnp.sum(y_oh * jax.nn.log_softmax(pred), axis=-1)
+
+    @jax.jit
+    def step_fn(params, x, y):
+        def apply_fn(p):
+            pred = model.apply(p, x)
+            y_oh = jax.nn.one_hot(y, pred.shape[-1])
+            return (cross_entropy or (lambda a, b: a))(pred, y_oh)
+        loss = jnp.mean(apply_fn(params))
+        res = optimizer.update(apply_fn, params)
+        if isinstance(res, (tuple, list)):
+            new_params = res[0]
+        else:
+            new_params = res
+        return new_params, loss
+
+    @jax.jit
+    def eval_fn(params, x, y):
+        pred = model.apply(params, x)
+        if hasattr(pred, 'value'):
+            pred = pred.value
+        return jnp.mean(jnp.argmax(pred, axis=-1) == y)
+
+    # Compile step
+    print("Compiling...")
+    dummy_x, dummy_y = next(train_iter)
+    _ = step_fn(params, jnp.array(dummy_x), jnp.array(dummy_y))
+    dummy_val_x, dummy_val_y = next(iter(val_loader))
+    _ = eval_fn(params, jnp.array(dummy_val_x), jnp.array(dummy_val_y))
+    print("Compilation done.")
+
     run_name = f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}"
     run = wandb.init(project="pjax", name=run_name)
     wandb.config.update({
@@ -144,13 +179,8 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
         "max_steps": cfg["max_steps"],
         "eval_every": cfg["eval_every"],
         "patience": cfg["patience"],
-        **(impl['config'].snapshot() if hasattr(impl['config'], 'snapshot') else {}),
     })
 
-    # fall back cross_entropy implementation if missing
-    if cross_entropy is None:
-        def cross_entropy(pred, y_oh):
-            return -jnp.sum(y_oh * jax.nn.log_softmax(pred), axis=-1)
 
     @jax.jit
     def step_fn(params, x, y):
@@ -215,7 +245,7 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--impl', choices=['pjax', 'pjax_orr'], default=os.environ.get('PJAX_IMPL', 'pjax'))
+    p.add_argument('--impl', choices=['pjax', 'pjax_orr'], default=os.environ.get('PJAX_IMPL', 'pjax_orr'))
     args = p.parse_args()
     cfg = yaml.safe_load(open(CFG_PATH))
     base_key = jax.random.key(cfg["random_seed"])

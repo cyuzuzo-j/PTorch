@@ -20,7 +20,7 @@ class Linear(nn.Module):
         alpha: float = 1.0,
         g: float = 1.0,
         omega: float = 1.0,
-        num_iters: int = 5,
+        num_iters: int = 1,
         residual: bool = False,
         dtp: bool = False,
         norm = 'l2',
