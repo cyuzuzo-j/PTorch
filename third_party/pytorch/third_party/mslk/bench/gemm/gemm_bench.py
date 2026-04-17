@@ -1,0 +1,843 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+import itertools
+import os
+import sys
+
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from typing import Any, Optional
+
+import click
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+import pandas as pd
+import seaborn as sns
+import torch
+
+import triton  # @manual=//triton:triton
+
+from mslk.bench.common.utils import BenchOptions, profiler
+from mslk.bench.gemm.gemm_ops import ComputeDtype, GemmOpBase, GemmType, get_gemm_ops
+from tabulate import tabulate
+
+
+# Compute theoretical roofline values in TFLOPS for GPU and dtype combinations.
+COMPUTE_ROOFLINE_TFLOPS: dict[str, dict[ComputeDtype, float]] = {
+    "NVIDIA H100": {
+        ComputeDtype.FP8: 1979.0,
+        ComputeDtype.BF16: 989.0,
+        ComputeDtype.TF32: 494.5,
+        ComputeDtype.FP32: 67.0,  # non-tensorcore
+    },
+    "NVIDIA B200": {
+        ComputeDtype.FP4: 9000.0,
+        ComputeDtype.FP8: 4500.0,
+        ComputeDtype.BF16: 2250.0,
+        ComputeDtype.TF32: 1100.0,
+        ComputeDtype.FP32: 75.0,  # non-tensorcore
+    },
+    "NVIDIA GB200": {
+        ComputeDtype.FP4: 10000.0,
+        ComputeDtype.FP8: 5000.0,
+        ComputeDtype.BF16: 2500.0,
+        ComputeDtype.TF32: 1250.0,
+        ComputeDtype.FP32: 80.0,  # non-tensorcore
+    },
+}
+
+
+def get_compute_roofline_tflops(compute_dtype: ComputeDtype) -> float | None:
+    gpu_rooflines = COMPUTE_ROOFLINE_TFLOPS.get(torch.cuda.get_device_name())
+    if gpu_rooflines is None:
+        return None
+    return gpu_rooflines.get(compute_dtype)
+
+
+shape_registry = {}
+
+
+def register_shapes(name):
+    def decorator(op):
+        shape_registry[name] = op
+        return op
+
+    return decorator
+
+
+def generate_group_tensor(G, M):
+    """
+    Generate a tensor with G elements whose integer elements sum to A.
+
+    Args:
+        G (int): Number of elements in the tensor.
+        M (int): Sum of the elements in the tensor.
+
+    Returns:
+        torch.Tensor: A tensor with G elements whose integer elements sum to M.
+    """
+
+    # First, we generate a random tensor with G elements
+    random_tensor = torch.rand(G)
+    # Then, we normalize this tensor so it sums up to 1
+    normalized_tensor = random_tensor / random_tensor.sum()
+    # Finally, we multiply this tensor by M and round to the nearest integer
+    output_tensor = torch.round(normalized_tensor * M).to(torch.int64)
+    # Adjust the last element to ensure the sum is exactly M
+    output_tensor[-1] += max(0, M - output_tensor.sum())
+    return output_tensor.tolist()
+
+
+def set_amd_env_vars() -> None:
+    print("Setting environment variables for AMD GPU performance")
+    os.environ["DISABLE_ADDMM_HIP_LT"] = "0"
+    os.environ["HIP_FORCE_DEV_KERNARG"] = "1"
+    os.environ["PYTORCH_TUNABLEOP_VERBOSE"] = "0"
+    os.environ["PYTORCH_TUNABLEOP_ENABLED"] = "1"
+    os.environ["PYTORCH_TUNABLEOP_TUNING"] = "1"
+    os.environ["PYTORCH_TUNABLEOP_FILENAME"] = "hipblas_tuning_pt_llama.csv"
+    os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS"] = "30"
+    os.environ["PYTORCH_TUNABLEOP_MAX_WARMUP_DURATION_MS"] = "30"
+
+
+@register_shapes("llama3_70b")
+def llama3_70b_shapes() -> list[tuple[int, int, int]]:
+    shapes = []
+    for M in [1, 16, 32, 64, 96, 128]:
+        shapes += [
+            (M, 1280, 8192),
+            (M, 8192, 1024),
+            (M, 7168, 8192),
+            (M, 8192, 3584),
+        ]
+    return shapes
+
+
+@register_shapes("llama3_405b")
+def llama3_405b_shapes() -> list[tuple[int, int, int]]:
+    shapes = []
+    for M in [1, 16, 32, 64, 96, 128]:
+        shapes += [
+            (M, 13312, 6656),
+            (M, 13312, 16384),
+            (M, 16384, 6656),
+            (M, 16384, 16384),
+        ]
+    return shapes
+
+
+@register_shapes("llama4")
+def llama4_shapes() -> list[tuple[int, int, int]]:
+    shapes = []
+    for M in [1, 16, 32, 64, 96, 128]:
+        shapes += [
+            (M, 896, 5120),
+            (M, 5120, 640),
+            (M, 2048, 5120),
+            (M, 5120, 1024),
+        ]
+    return shapes
+
+
+@register_shapes("ldm")
+def ldm_shapes() -> list[tuple[int, int, int]]:
+    return [
+        (1536, 3584, 3584),
+        (8192, 9728, 3584),
+        (8192, 3584, 9728),
+        (8192, 3584, 3584),
+        (4096, 3584, 3584),
+        (768, 3584, 3584),
+        (4096, 9728, 3584),
+        (4096, 3584, 9728),
+        (7200, 3584, 3584),
+        (7200, 9728, 3584),
+        (7200, 3584, 9728),
+        (3600, 3584, 3584),
+        (3600, 9728, 3584),
+        (3600, 3584, 9728),
+        (1536, 4096, 4096),
+        (3600, 4096, 4096),
+        (3600, 11008, 4096),
+        (3600, 4096, 11008),
+        (4096, 4096, 4096),
+        (4096, 11008, 4096),
+        (4096, 4096, 11008),
+        (32768, 128, 8192),
+        (32768, 8192, 1024),
+        (32768, 8192, 3072),
+        (32768, 3072, 8192),
+        (32768, 1024, 8192),
+    ]
+
+
+class ShapeMode(Enum):
+    REGULAR = "regular"  # (M, N, K)
+    GROUPED = "grouped"  # G, (M, N, K)
+    GROUPED_TOTAL_M = "grouped_total_m"  # G, (TotalM, N, K)
+    GROUPED_TOTAL_K = "grouped_total_k"  # G, (M, N, TotalK)
+
+
+@dataclass
+class Metrics:
+    op: str
+    M: Any = 0
+    N: Any = 0
+    K: Any = 0
+    groups: Optional[int] = None
+    shape_mode: ShapeMode = ShapeMode.REGULAR
+
+    sim: float = 0.0
+    ms: float = 0.0
+    tflops: float = 0.0
+    gbps: float = 0.0
+    mem_bw_util: float = 0.0
+    compute_util: float = 0.0
+
+    @staticmethod
+    def header(shape_mode: ShapeMode = ShapeMode.REGULAR) -> str:
+        is_grouped = shape_mode in (
+            ShapeMode.GROUPED,
+            ShapeMode.GROUPED_TOTAL_M,
+            ShapeMode.GROUPED_TOTAL_K,
+        )
+        if shape_mode == ShapeMode.GROUPED_TOTAL_M:
+            shape_col = "(TotalM, N, K)"
+        elif shape_mode == ShapeMode.GROUPED_TOTAL_K:
+            shape_col = "(M, N, TotalK)"
+        else:
+            shape_col = "(M, N, K)"
+
+        group_col = f"{'G':<6}" if is_grouped else ""
+        header = (
+            f"{'OpName':<30} {group_col} {shape_col:<25} "
+            f"{'Sim':<10} {'Ms':<10} {'TFLOPS':<10} "
+            f"{'GB/s':<10} {'Mem BW Util %':<14} {'Compute Util %':<10}"
+        )
+        divider = "-" * len(header)
+        return f"GEMM Bench\n{divider}\n{header}\n{divider}"
+
+    def __str__(self) -> str:
+        is_grouped = self.shape_mode in (
+            ShapeMode.GROUPED,
+            ShapeMode.GROUPED_TOTAL_M,
+            ShapeMode.GROUPED_TOTAL_K,
+        )
+        if self.shape_mode == ShapeMode.GROUPED_TOTAL_M:
+            total_m = sum(self.M) if isinstance(self.M, list) else self.M
+            shape = f"({total_m}, {self.N}, {self.K})"
+        elif self.shape_mode == ShapeMode.GROUPED_TOTAL_K:
+            total_k = sum(self.K) if isinstance(self.K, list) else self.K
+            shape = f"({self.M}, {self.N}, {total_k})"
+        else:
+            shape = f"({self.M}, {self.N}, {self.K})"
+
+        group_col = f"{self.groups:<6}" if is_grouped else ""
+        compute_util_str = (
+            f"{self.compute_util:<10.2f}" if self.compute_util > 0 else "N/A"
+        )
+        return (
+            f"{self.op:<30} {group_col} {shape:<25} "
+            f"{self.sim:<10.3f} {self.ms:<10.3f} "
+            f"{self.tflops:<10.2f} {self.gbps:<10.2f} "
+            f"{self.mem_bw_util:<14.2f} {compute_util_str}"
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "M": self.M,
+            "N": self.N,
+            "K": self.K,
+            f"{self.op}_sim": self.sim,
+            f"{self.op}_ms": self.ms,
+            f"{self.op}_tflops": self.tflops,
+            f"{self.op}_gb/s": self.gbps,
+            f"{self.op}_mem_bw_util": self.mem_bw_util,
+            f"{self.op}_compute_util": self.compute_util,
+        }
+        if self.groups is not None:
+            result["groups"] = self.groups
+        return result
+
+
+def benchmark_grouped(
+    gemm_ops: list[GemmOpBase],
+    m: list[int],
+    n: list[int],
+    k: list[int],
+    mem_bw_roofline_gbps: float,
+    opts: BenchOptions,
+    bench_quantize: bool = False,
+    shape_mode: ShapeMode = ShapeMode.GROUPED,
+) -> list[Metrics]:
+    num_groups = len(m)
+    # Create input tensors.
+    A = []
+    B = []
+    for i in range(num_groups):
+        A.append(torch.randn(m[i], k[i], device="cuda", dtype=torch.bfloat16))
+        B.append(torch.randn(n[i], k[i], device="cuda", dtype=torch.bfloat16))
+    # Compute baseline output for correctness checking.
+    out_ref = []
+    for i in range(num_groups):
+        out_ref.append(torch.matmul(A[i], B[i].t()))
+    # Keep track of results.
+    # Only log all shapes in a group if they are unique.
+    log_m = m[0] if len(np.unique(m)) == 1 else m
+    log_n = n[0] if len(np.unique(n)) == 1 else n
+    log_k = k[0] if len(np.unique(k)) == 1 else k
+    results: list[Metrics] = []
+    # Benchmark each operator.
+    for gemm_op in gemm_ops:
+        # Build progress message based on shape mode.
+        if shape_mode == ShapeMode.GROUPED_TOTAL_M:
+            total_m = sum(m)
+            shape_str = f"(G={num_groups}, TotalM={total_m}, N={log_n}, K={log_k})"
+        elif shape_mode == ShapeMode.GROUPED_TOTAL_K:
+            total_k = sum(k)
+            shape_str = f"(G={num_groups}, M={log_m}, N={log_n}, TotalK={total_k})"
+        else:
+            shape_str = f"(G={num_groups}, M={log_m}, N={log_n}, K={log_k})"
+        print(f"Benchmarking {gemm_op.name} with {shape_str}")
+        metrics = Metrics(
+            op=gemm_op.name,
+            M=log_m,
+            N=log_n,
+            K=log_k,
+            groups=num_groups,
+            shape_mode=shape_mode,
+        )
+        # Set fast accum mode if applicable.
+        if hasattr(gemm_op, "fast_accum"):
+            gemm_op.fast_accum = opts.fast_accum
+        if hasattr(gemm_op, "torch_compile"):
+            gemm_op.torch_compile = opts.torch_compile
+
+        # Get compute roofline for this op's compute dtype.
+        compute_roofline_tflops = get_compute_roofline_tflops(gemm_op.compute_dtype)
+
+        try:
+            # Get the quantized tensors for this operator.
+            preprocessed_args = gemm_op.preprocess(A, B)
+            quantized_vals = gemm_op.quantize(*preprocessed_args)
+            # Compute the output given quantized values.
+            output = gemm_op.compute(*quantized_vals)
+        except Exception as e:
+            print(f"GEMM op {gemm_op.name} failed to run due to error: {e}.")
+            continue
+        # Some kernels may pad output, just take the first m values of each row.
+        if isinstance(output, torch.Tensor) and output.ndim == 2:
+            # Output is stacked and needs to be split.
+            output = torch.split(output, m, dim=0)
+        else:
+            # Otherwise output may be padded or require unbinding.
+            output = [o[: m[i]] for i, o in enumerate(output)]
+        # Compare the quantize op output to reference as a sanity check.
+        for i in range(num_groups):
+            if m[i] > 0:
+                metrics.sim += float(
+                    torch.mean(torch.pow(output[i] - out_ref[i], 2)).item()
+                )
+        for _ in range(opts.num_iters):
+            # Now perform benchmark.
+            if bench_quantize:
+                # Benchmark both quantize and compute.
+                with profiler(enabled=opts.trace, with_stack=True):
+                    ms_runtime = gemm_op.benchmark(
+                        *preprocessed_args,
+                        opts=opts,
+                        bench_quantize=True,
+                    )
+            else:
+                with profiler(enabled=opts.trace, with_stack=True):
+                    ms_runtime = gemm_op.benchmark(
+                        *quantized_vals,
+                        opts=opts,
+                        bench_quantize=False,
+                    )
+
+            for i in range(num_groups):
+                output_multiplier = 2 if "fuse_scatter_add" in gemm_op.name else 1
+                if m[i] > 0:
+                    tflops = 2 * m[i] * n[i] * k[i] / (ms_runtime / 1e3) / 1e12
+                    gbps = (
+                        (
+                            m[i] * k[i] * quantized_vals[0][0].element_size()
+                            + n[i] * k[i] * quantized_vals[1][0].element_size()
+                            + output_multiplier * m[i] * n[i] * output[0].element_size()
+                        )
+                        / (ms_runtime / 1e3)
+                        / 1e9
+                    )
+                    metrics.gbps += gbps
+                    metrics.tflops += tflops
+                    metrics.mem_bw_util += (gbps / mem_bw_roofline_gbps) * 100
+                    if compute_roofline_tflops is not None:
+                        metrics.compute_util += (tflops / compute_roofline_tflops) * 100
+            metrics.ms += ms_runtime
+        metrics.ms /= opts.num_iters
+        metrics.tflops /= opts.num_iters
+        metrics.gbps /= opts.num_iters
+        metrics.mem_bw_util /= opts.num_iters
+        metrics.compute_util /= opts.num_iters
+
+        results.append(metrics)
+
+    return results
+
+
+def benchmark(
+    gemm_ops: list[GemmOpBase],
+    m: int,
+    n: int,
+    k: int,
+    mem_bw_roofline_gbps: float,
+    opts: BenchOptions,
+    bench_quantize: bool = False,
+    shape_mode: ShapeMode = ShapeMode.REGULAR,
+) -> list[Metrics]:
+    # Create input tensors.
+    A = torch.randn(m, k, device="cuda", dtype=torch.bfloat16)
+    B = torch.randn(n, k, device="cuda", dtype=torch.bfloat16)
+
+    # Compute baseline output for correctness checking.
+    out_ref = torch.matmul(A, torch.transpose(B, -2, -1))
+    # Keep track of results.
+    results: list[Metrics] = []
+    # Benchmark each operator.
+    for gemm_op in gemm_ops:
+        shape_str = f"(M={m}, N={n}, K={k})"
+        print(f"Benchmarking {gemm_op.name} with {shape_str}")
+        metrics = Metrics(op=gemm_op.name, M=m, N=n, K=k, shape_mode=shape_mode)
+        # Set fast accum mode if applicable.
+        if hasattr(gemm_op, "fast_accum"):
+            gemm_op.fast_accum = opts.fast_accum
+        if hasattr(gemm_op, "torch_compile"):
+            gemm_op.torch_compile = opts.torch_compile
+
+        # Get compute roofline for this op's compute dtype.
+        compute_roofline_tflops = get_compute_roofline_tflops(gemm_op.compute_dtype)
+
+        try:
+            # Preprocess data if needed.
+            preprocessed_args = gemm_op.preprocess(A, B)
+            # Get the quantized tensors for this operator.
+            quantized_vals = gemm_op.quantize(*preprocessed_args)
+            # Compute the output given quantized values.
+            output = gemm_op.compute(*quantized_vals)
+        except Exception as e:
+            print(f"GEMM op {gemm_op.name} failed to run due to error: {e}.")
+            continue
+        # Compare the quantize op output to reference as a sanity check.
+        # TODO(shikaili): This calculation is incorrect for scatter add fusion.
+        metrics.sim = torch.mean(torch.pow(output - out_ref, 2)).item()
+
+        for _ in range(opts.num_iters):
+            # Now perform benchmark.
+            if bench_quantize:
+                # Benchmark both quantize and compute.
+                with profiler(enabled=opts.trace, with_stack=True):
+                    ms_runtime = gemm_op.benchmark(
+                        *preprocessed_args,
+                        opts=opts,
+                        bench_quantize=True,
+                    )
+            else:
+                with profiler(enabled=opts.trace, with_stack=True):
+                    ms_runtime = gemm_op.benchmark(
+                        *quantized_vals,
+                        opts=opts,
+                        bench_quantize=False,
+                    )
+
+            tflops = 2 * m * n * k / (ms_runtime / 1e3) / 1e12
+            metrics.tflops += tflops
+            gbps = (
+                (
+                    quantized_vals[0].numel() * quantized_vals[0].element_size()
+                    + quantized_vals[1].numel() * quantized_vals[1].element_size()
+                    + output.numel() * output.element_size()
+                )
+                / (ms_runtime / 1e3)
+                / 1e9
+            )
+            metrics.gbps += gbps
+            metrics.mem_bw_util += (gbps / mem_bw_roofline_gbps) * 100
+            if compute_roofline_tflops is not None:
+                metrics.compute_util += (tflops / compute_roofline_tflops) * 100
+            metrics.ms += ms_runtime
+        metrics.ms /= opts.num_iters
+        metrics.tflops /= opts.num_iters
+        metrics.gbps /= opts.num_iters
+        metrics.mem_bw_util /= opts.num_iters
+        metrics.compute_util /= opts.num_iters
+
+        results.append(metrics)
+
+    return results
+
+
+def plot_benchmark(results: list[Metrics], output_dir: str) -> None:
+    """Create a barplot visualizing the TFLOPS of each kernel."""
+    # Reprocess into new dataframe with proper graph format.
+    data = []
+    # Extract measurements for each shape.
+    for metric in results:
+        mnk = f"{metric.M}, {metric.N}, {metric.K}"
+        data.append({"MNK": mnk, "kernel": metric.op, "TFLOPS": metric.tflops})
+
+    # Create a barplot using seaborn.
+    df = pd.DataFrame(data)
+    plot = plt.figure()
+    plt.xticks(rotation=30)
+    plt.yscale("log")
+    ax = sns.barplot(x="MNK", y="TFLOPS", hue="kernel", data=df)
+    ax.tick_params(axis="x", labelsize=3)
+    img_fn = os.path.join(output_dir, "gemm_ops_benchmark.png")
+    plot.savefig(img_fn, dpi=300)
+    print(f"Plot saved to {img_fn}")
+
+
+def collect_kernels_to_profile(
+    kernels: Optional[list[str]], is_grouped: bool
+) -> list[GemmOpBase]:
+    gemm_type = GemmType.GROUPED if is_grouped else GemmType.REGULAR
+    gemm_ops = [
+        op
+        for op in get_gemm_ops()
+        if op.supported and gemm_type in op.supported_gemm_types
+    ]
+    if kernels is None:
+        return gemm_ops
+    return [op for op in gemm_ops if op.name in kernels]
+
+
+def print_kernels(kernels: Optional[list[str]]) -> list[GemmOpBase]:
+    data = sorted(
+        (
+            op.name,
+            ",".join(accelerator.name for accelerator in op.supported_accelerators),
+        )
+        for op in get_gemm_ops()
+    )
+    print(tabulate(data, headers=["Name", "Accelerators"], tablefmt="orgtbl"))
+
+
+@click.command()
+@click.option(
+    "--output-dir",
+    default="/tmp",
+    help="Directory to save plots and csvs to",
+)
+@click.option(
+    "--num-iters",
+    default=1,
+    type=int,
+    help="Number of iterations to repeat each benchmark.",
+)
+@click.option(
+    "--export-csv",
+    is_flag=True,
+    help="Export results to a CSV file.",
+)
+@click.option(
+    "--plot",
+    is_flag=True,
+    help="Create a plot of the benchmark measurements.",
+)
+@click.option(
+    "--enable-amd-env-vars",
+    is_flag=True,
+    help="Enable a set of environment variables for AMD GPU performance",
+)
+@click.option(
+    "--bench-quantize",
+    is_flag=True,
+    help="If set, include quantization cost in benchmark.",
+)
+@click.option(
+    "--kernels",
+    default=None,
+    help="Comma separated list of kernels to benchmark. Defaults to all kernels.",
+)
+@click.option(
+    "--M",
+    default=None,
+    help="Comma separated list of M values to benchmark.",
+)
+@click.option(
+    "--N",
+    default=None,
+    help="Comma separated list of N values to benchmark",
+)
+@click.option(
+    "--K",
+    default=None,
+    help="Comma separated list of K values to benchmark.",
+)
+@click.option(
+    "--pair-NK",
+    is_flag=True,
+    help="If set, instead of benchmarking cartesian product of N * K, benchmark consecutive NK pairs together.",
+)
+@click.option(
+    "--grouped",
+    is_flag=True,
+    help="If set, do grouped gemm. In this mode, M, N, and K are interpreted "
+    "as the size of groups. The length of each must be the same.",
+)
+@click.option(
+    "--groups",
+    default=None,
+    help="If set with grouped mode, repeat MNK shapes this many times. Comma separated list of groups to benchmark",
+)
+@click.option(
+    "--total-K",
+    default=None,
+    help="If set, adjusts the K values to sum to this number. "
+    "This can help simulate real grouped workloads in backward wgrad. "
+    "Comma separated list of total-K values to benchmark.",
+)
+@click.option(
+    "--total-M",
+    default=None,
+    help="If set, adjusts the M values to sum to this number. "
+    "This can help simulate real grouped workloads."
+    "Comma separated list of total-M values to benchmark.",
+)
+@click.option(
+    "--no-cuda-graph",
+    is_flag=True,
+    help="If set, do not use cuda graph for benchmarking.",
+)
+@click.option(
+    "--use-rotating-buffer-bench",
+    is_flag=True,
+    help="If set, use rotating buffer to benchmark.",
+)
+@click.option(
+    "--shapes",
+    default=None,
+    help=f"Specific model shapes to use, options: {", ".join(shape_registry.keys())}.",
+)
+@click.option(
+    "--trace",
+    is_flag=True,
+    help="If set, produce a performance trace of the benchmark.",
+)
+@click.option(
+    "--disable-fast-accum",
+    is_flag=True,
+    help="If set, disable fast accumulation for FP8 implementations.",
+)
+@click.option(
+    "--torch-compile",
+    is_flag=True,
+    help="If set, torch.compile will be used for scaled_mm backed ops.",
+)
+@click.option(
+    "--rep",
+    default=200,
+    type=int,
+    help="Repetition time in ms (int) for triton.testing.do_bench",
+)
+def invoke_main(
+    output_dir: str,
+    num_iters: int,
+    export_csv: bool,
+    plot: bool,
+    enable_amd_env_vars: bool,
+    bench_quantize: bool,
+    kernels: Optional[str],
+    m: Optional[str],
+    n: Optional[str],
+    k: Optional[str],
+    pair_nk: bool,
+    grouped: bool,
+    groups: Optional[str],
+    total_k: Optional[str],
+    total_m: Optional[str],
+    no_cuda_graph: bool,
+    use_rotating_buffer_bench: bool,
+    shapes: Optional[str],
+    trace: bool,
+    disable_fast_accum: bool,
+    torch_compile: bool,
+    rep: int,
+):
+    if enable_amd_env_vars:
+        set_amd_env_vars()
+
+    # Validate that total_m and total_k are mutually exclusive
+    if total_m is not None and total_k is not None:
+        raise ValueError(
+            "total_m and total_k cannot be specified at the same time. "
+            "Please provide only one of them."
+        )
+
+    if groups:
+        grouped = True
+
+    # If kernel filter is provided, parse it. Else, benchmark all kernels.
+    all_kernels = kernels.strip().split(",") if kernels else None
+    gemm_ops = collect_kernels_to_profile(all_kernels, grouped)
+
+    if len(gemm_ops) == 0:
+        print("No valid kernels to benchmark. Available kernels:")
+        print_kernels(all_kernels)
+        sys.exit(1)
+
+    if num_iters < 1:
+        print("Warning: Number of iterations must be at least 1.")
+        num_iters = 1
+
+    # Enumerate shapes to benchmark.
+    if grouped and not groups:
+        # In grouped mode, M, N, and K represent the groups of a single gemm.
+        assert m is not None and n is not None and k is not None
+        M = [int(m_val) for m_val in m.strip().split(",")]
+        N = [int(n_val) for n_val in n.strip().split(",")]
+        K = [int(k_val) for k_val in k.strip().split(",")]
+        assert (
+            len(M) == len(N) == len(K)
+        ), "M, N, and K must be the same length in grouped mode."
+
+        # Note this is a single grouped gemm.
+        MNK = [[M, N, K]]
+    else:
+        if shapes:
+            if shapes not in shape_registry:
+                print(
+                    f"Shape {shapes} not found in shape registry. Valid shapes: {", ".join(shape_registry.keys())}."
+                )
+                sys.exit(1)
+            MNK = shape_registry[shapes]()
+        else:
+            if m is None:
+                M = [1, 4, 8, 16, 32, 64, 128, 2048, 4096, 8192, 16384]
+            else:
+                M = [int(m_val) for m_val in m.strip().split(",")]
+            if n is None:
+                N = [1280, 2304, 7168, 8192, 16384]
+            else:
+                N = [int(n_val) for n_val in n.strip().split(",")]
+            if k is None:
+                K = [1024, 3584, 8192, 16384]
+            else:
+                K = [int(k_val) for k_val in k.strip().split(",")]
+            # List all shapes for simplicity.
+            if pair_nk:
+                if len(N) != len(K):
+                    raise Exception("N and K must be the same length in pair_NK mode.")
+                NK = zip(N, K)
+                MNK = [(M, N, K) for (M, (N, K)) in itertools.product(M, NK)]
+            else:
+                MNK = list(itertools.product(M, N, K))
+    # When groups is provided transform shapes into grouped format.
+    if groups:
+        groups_list = [int(g) for g in groups.strip().split(",")]
+        if total_m:
+            total_m_list = [int(tm) for tm in total_m.strip().split(",")]
+            MNK = [
+                [
+                    generate_group_tensor(g, tm),
+                    [n] * g,
+                    [k] * g,
+                ]
+                for g in groups_list
+                for tm in total_m_list
+                for _, n, k in MNK
+            ]
+            shape_mode = ShapeMode.GROUPED_TOTAL_M
+        elif total_k:
+            total_k_list = [int(tk) for tk in total_k.strip().split(",")]
+            MNK = [
+                [
+                    [m] * g,
+                    [n] * g,
+                    generate_group_tensor(g, tk),
+                ]
+                for g in groups_list
+                for tk in total_k_list
+                for m, n, _ in MNK
+            ]
+            shape_mode = ShapeMode.GROUPED_TOTAL_K
+        else:
+            MNK = [[[m] * g, [n] * g, [k] * g] for g in groups_list for m, n, k in MNK]
+            shape_mode = ShapeMode.GROUPED
+    elif grouped:
+        shape_mode = ShapeMode.GROUPED
+    else:
+        shape_mode = ShapeMode.REGULAR
+
+    # Iterate over shapes and benchmark.
+    mem_bw_gbps = triton.testing.get_dram_gbps()
+    benchmark_results: list[Metrics] = []
+    csv: list[dict[str, Any]] = []
+    benchmark_func = benchmark_grouped if grouped else benchmark
+
+    opts = BenchOptions(
+        num_iters=num_iters,
+        cuda_graph=not no_cuda_graph,
+        rotating_buffer=use_rotating_buffer_bench,
+        rep_ms=rep,
+        trace=trace,
+        fast_accum=not disable_fast_accum,
+        torch_compile=torch_compile,
+    )
+
+    for m, n, k in MNK:
+        shape_measurements = benchmark_func(
+            gemm_ops,
+            m,  # pyre-ignore[6]: Incompatible parameter type [6]
+            n,  # pyre-ignore[6]: Incompatible parameter type [6]
+            k,  # pyre-ignore[6]: Incompatible parameter type [6]
+            mem_bw_gbps,
+            opts,
+            bench_quantize,
+            shape_mode,
+        )
+        benchmark_results.extend(shape_measurements)
+        csv_row: dict[str, Any] = {}
+        for metric in shape_measurements:
+            csv_row.update(metric.as_dict())
+        csv.append(csv_row)
+
+    print("")
+    print(Metrics.header(shape_mode))
+    for metric in benchmark_results:
+        print(metric)
+
+    print("")
+    print(f"Hardware: {torch.cuda.get_device_name()}")
+    print(f"    Memory BW: {mem_bw_gbps:.2f} GB/s")
+
+    print("")
+    print("Benchmark Settings:")
+    print(f"    CUDA graph: {not no_cuda_graph}")
+    print(f"    Buffer rotation: {use_rotating_buffer_bench}")
+    print(f"    Fast accumulation: {not disable_fast_accum}")
+    print(f"    Torch compile: {torch_compile}")
+
+    if export_csv or plot:
+        os.makedirs(output_dir, exist_ok=True)
+    if export_csv:
+        datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_file = os.path.join(output_dir, f"gemm_ops_benchmark_{datetime_str}.csv")
+        # Export results to a CSV file.
+        df = pd.DataFrame(csv)
+        df.to_csv(csv_file, na_rep="NaN", index=False)
+        print(f"CSV saved to {csv_file}")
+    if plot:
+        plot_benchmark(benchmark_results, output_dir)
+
+
+if __name__ == "__main__":
+    invoke_main()  # pragma: no cover

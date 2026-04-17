@@ -1,0 +1,24 @@
+[submodule "external/asmjit"]
+	path = external/asmjit
+	url = https://github.com/asmjit/asmjit.git
+[submodule "external/cpuinfo"]
+	path = external/cpuinfo
+	url = https://github.com/pytorch/cpuinfo
+[submodule "external/googletest"]
+	path = external/googletest
+	url = https://github.com/google/googletest
+[submodule "external/hipify_torch"]
+	path = external/hipify_torch
+	url = https://github.com/ROCmSoftwarePlatform/hipify_torch.git
+# TODO Using a private copy of cutlass is a temporary mitigation to enable grouped gemm.
+# Go back to main cutlass when possible.
+[submodule "external/cutlass"]
+	path = external/cutlass
+	url = https://github.com/jwfromm/cutlass
+	branch = FBGEMM
+[submodule "external/composable_kernel"]
+	path = external/composable_kernel
+	url = https://github.com/ROCm/composable_kernel.git
+[submodule "external/json"]
+	path = external/json
+	url = https://github.com/nlohmann/json.git
