@@ -1,0 +1,4 @@
+var searchData=
+[
+  ['unique_5frange_5fin_0',['unique_range_in',['../classnvtx3_1_1v1_1_1mv1_1_1unique__range__in.html#a27c179a93061ab4b9fa16e79ec8ca09a',1,'nvtx3::v1::mv1::unique_range_in::unique_range_in(event_attributes const &amp;attr) noexcept'],['../classnvtx3_1_1v1_1_1mv1_1_1unique__range__in.html#a55861dc66288d385d2e01a97548d8d50',1,'nvtx3::v1::mv1::unique_range_in::unique_range_in(Args const &amp;... args) noexcept'],['../classnvtx3_1_1v1_1_1mv1_1_1unique__range__in.html#addd78bbe204d46b28d3f977f7432270b',1,'nvtx3::v1::mv1::unique_range_in::unique_range_in() noexcept'],['../classnvtx3_1_1v1_1_1mv1_1_1unique__range__in.html#acec27a6767d3112ed49597a3d79d38b8',1,'nvtx3::v1::mv1::unique_range_in::unique_range_in(unique_range_in &amp;&amp;other) noexcept=default'],['../classnvtx3_1_1v1_1_1mv1_1_1unique__range__in.html#ad32eb17a5c188412443fef3ab1c42e5a',1,'nvtx3::v1::mv1::unique_range_in::unique_range_in(unique_range_in const &amp;)=delete']]]
+];
