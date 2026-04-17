@@ -1,0 +1,258 @@
+CXX = clang++
+CXXFLAGS = -g -std=c++11 -I. -Wall -Wextra -Wtype-limits -Wconversion -Wshadow $(EXTRA_CXXFLAGS) -DCPPHTTPLIB_USE_NON_BLOCKING_GETADDRINFO -fsanitize=address # -fno-exceptions -DCPPHTTPLIB_NO_EXCEPTIONS
+
+ifneq ($(OS), Windows_NT)
+	UNAME_S := $(shell uname -s)
+	ifeq ($(UNAME_S), Darwin)
+		PREFIX ?= $(shell brew --prefix)
+		OPENSSL_DIR = $(PREFIX)/opt/openssl@3
+		OPENSSL_SUPPORT = -DCPPHTTPLIB_OPENSSL_SUPPORT -I$(OPENSSL_DIR)/include -L$(OPENSSL_DIR)/lib -lssl -lcrypto
+		OPENSSL_SUPPORT += -framework CoreFoundation -framework Security
+		MBEDTLS_DIR ?= $(shell brew --prefix mbedtls@3)
+		MBEDTLS_SUPPORT = -DCPPHTTPLIB_MBEDTLS_SUPPORT -I$(MBEDTLS_DIR)/include -L$(MBEDTLS_DIR)/lib -lmbedtls -lmbedx509 -lmbedcrypto
+		MBEDTLS_SUPPORT += -framework CoreFoundation -framework Security
+		WOLFSSL_DIR ?= $(shell brew --prefix wolfssl)
+		WOLFSSL_SUPPORT = -DCPPHTTPLIB_WOLFSSL_SUPPORT -I$(WOLFSSL_DIR)/include -I$(WOLFSSL_DIR)/include/wolfssl -L$(WOLFSSL_DIR)/lib -lwolfssl
+		WOLFSSL_SUPPORT += -framework CoreFoundation -framework Security
+	else
+		OPENSSL_SUPPORT = -DCPPHTTPLIB_OPENSSL_SUPPORT -lssl -lcrypto
+		MBEDTLS_SUPPORT = -DCPPHTTPLIB_MBEDTLS_SUPPORT -lmbedtls -lmbedx509 -lmbedcrypto
+		WOLFSSL_SUPPORT = -DCPPHTTPLIB_WOLFSSL_SUPPORT -lwolfssl
+	endif
+endif
+
+ZLIB_SUPPORT = -DCPPHTTPLIB_ZLIB_SUPPORT -lz
+
+ifneq ($(OS), Windows_NT)
+	UNAME_S := $(shell uname -s)
+	ifeq ($(UNAME_S), Darwin)
+		# macOS: use Homebrew paths for brotli and zstd
+		BROTLI_DIR = $(PREFIX)/opt/brotli
+		BROTLI_SUPPORT = -DCPPHTTPLIB_BROTLI_SUPPORT -I$(BROTLI_DIR)/include -L$(BROTLI_DIR)/lib -lbrotlicommon -lbrotlienc -lbrotlidec
+		ZSTD_DIR = $(PREFIX)/opt/zstd
+		ZSTD_SUPPORT = -DCPPHTTPLIB_ZSTD_SUPPORT -I$(ZSTD_DIR)/include -L$(ZSTD_DIR)/lib -lzstd
+		LIBS = -lpthread -lcurl -framework CoreFoundation -framework CFNetwork
+	else
+		# Linux: use system paths
+		BROTLI_SUPPORT = -DCPPHTTPLIB_BROTLI_SUPPORT -lbrotlicommon -lbrotlienc -lbrotlidec
+		ZSTD_SUPPORT = -DCPPHTTPLIB_ZSTD_SUPPORT -lzstd
+		LIBS = -lpthread -lcurl -lanl
+	endif
+endif
+
+TEST_ARGS = gtest/src/gtest-all.cc gtest/src/gtest_main.cc -Igtest -Igtest/include $(OPENSSL_SUPPORT) $(ZLIB_SUPPORT) $(BROTLI_SUPPORT) $(ZSTD_SUPPORT) $(LIBS)
+TEST_ARGS_MBEDTLS = gtest/src/gtest-all.cc gtest/src/gtest_main.cc -Igtest -Igtest/include $(MBEDTLS_SUPPORT) $(ZLIB_SUPPORT) $(BROTLI_SUPPORT) $(ZSTD_SUPPORT) $(LIBS)
+TEST_ARGS_WOLFSSL = gtest/src/gtest-all.cc gtest/src/gtest_main.cc -Igtest -Igtest/include $(WOLFSSL_SUPPORT) $(ZLIB_SUPPORT) $(BROTLI_SUPPORT) $(ZSTD_SUPPORT) $(LIBS)
+TEST_ARGS_NO_TLS = gtest/src/gtest-all.cc gtest/src/gtest_main.cc -Igtest -Igtest/include $(ZLIB_SUPPORT) $(BROTLI_SUPPORT) $(ZSTD_SUPPORT) $(LIBS)
+
+# By default, use standalone_fuzz_target_runner.
+# This runner does no fuzzing, but simply executes the inputs
+# provided via parameters.
+# Run e.g. "make all LIB_FUZZING_ENGINE=/path/to/libFuzzer.a"
+# to link the fuzzer(s) against a real fuzzing engine.
+# OSS-Fuzz will define its own value for LIB_FUZZING_ENGINE.
+LIB_FUZZING_ENGINE ?= standalone_fuzz_target_runner.o
+
+CLANG_FORMAT = clang-format
+REALPATH = $(shell which grealpath 2>/dev/null || which realpath 2>/dev/null)
+STYLE_CHECK_FILES = $(filter-out httplib.h httplib.cc, \
+	$(wildcard example/*.h example/*.cc fuzzing/*.h fuzzing/*.cc *.h *.cc ../httplib.h))
+
+all : test test_split
+	LSAN_OPTIONS=suppressions=lsan_suppressions.txt ./test
+
+SHARDS ?= 4
+
+define run_parallel
+	@echo "Running $(1) with $(SHARDS) shards in parallel..."
+	@fail=0; \
+	for i in $$(seq 0 $$(($(SHARDS) - 1))); do \
+	  GTEST_TOTAL_SHARDS=$(SHARDS) GTEST_SHARD_INDEX=$$i \
+	  LSAN_OPTIONS=suppressions=lsan_suppressions.txt \
+	  ./$(1) --gtest_color=yes > $(1)_shard_$$i.log 2>&1 & \
+	done; \
+	wait; \
+	for i in $$(seq 0 $$(($(SHARDS) - 1))); do \
+	  if ! grep -q "\[  PASSED  \]" $(1)_shard_$$i.log; then \
+	    echo "=== Shard $$i FAILED ==="; \
+	    cat $(1)_shard_$$i.log; \
+	    fail=1; \
+	  else \
+	    passed=$$(grep "\[  PASSED  \]" $(1)_shard_$$i.log); \
+	    echo "Shard $$i: $$passed"; \
+	  fi; \
+	done; \
+	if [ $$fail -ne 0 ]; then exit 1; fi; \
+	echo "All shards passed."
+endef
+
+.PHONY: test_openssl_parallel test_mbedtls_parallel test_wolfssl_parallel test_no_tls_parallel
+
+test_openssl_parallel : test
+	$(call run_parallel,test)
+
+test_mbedtls_parallel : test_mbedtls
+	$(call run_parallel,test_mbedtls)
+
+test_wolfssl_parallel : test_wolfssl
+	$(call run_parallel,test_wolfssl)
+
+test_no_tls_parallel : test_no_tls
+	$(call run_parallel,test_no_tls)
+
+proxy : test_proxy
+	@echo "Starting proxy server..."
+	cd proxy && \
+	docker compose up -d
+	@echo "Waiting for proxy to be ready..."
+	@until nc -z localhost 3128 && nc -z localhost 3129; do sleep 1; done
+	@echo "Proxy servers are ready, waiting additional 5 seconds for full startup..."
+	@sleep 5
+	@echo "Checking proxy server status..."
+	@cd proxy && docker compose ps
+	@echo "Checking proxy server logs..."
+	@cd proxy && docker compose logs --tail=20
+	@echo "Running proxy tests..."
+	./test_proxy; \
+	exit_code=$$?; \
+	echo "Stopping proxy server..."; \
+	cd proxy && docker compose down; \
+	exit $$exit_code
+
+proxy_mbedtls : test_proxy_mbedtls
+	@echo "Starting proxy server..."
+	cd proxy && \
+	docker compose up -d
+	@echo "Waiting for proxy to be ready..."
+	@until nc -z localhost 3128 && nc -z localhost 3129; do sleep 1; done
+	@echo "Proxy servers are ready, waiting additional 5 seconds for full startup..."
+	@sleep 5
+	@echo "Checking proxy server status..."
+	@cd proxy && docker compose ps
+	@echo "Checking proxy server logs..."
+	@cd proxy && docker compose logs --tail=20
+	@echo "Running proxy tests (Mbed TLS)..."
+	./test_proxy_mbedtls; \
+	exit_code=$$?; \
+	echo "Stopping proxy server..."; \
+	cd proxy && docker compose down; \
+	exit $$exit_code
+
+proxy_wolfssl : test_proxy_wolfssl
+	@echo "Starting proxy server..."
+	cd proxy && \
+	docker compose up -d
+	@echo "Waiting for proxy to be ready..."
+	@until nc -z localhost 3128 && nc -z localhost 3129; do sleep 1; done
+	@echo "Proxy servers are ready, waiting additional 5 seconds for full startup..."
+	@sleep 5
+	@echo "Checking proxy server status..."
+	@cd proxy && docker compose ps
+	@echo "Checking proxy server logs..."
+	@cd proxy && docker compose logs --tail=20
+	@echo "Running proxy tests (wolfSSL)..."
+	./test_proxy_wolfssl; \
+	exit_code=$$?; \
+	echo "Stopping proxy server..."; \
+	cd proxy && docker compose down; \
+	exit $$exit_code
+
+test : test.cc include_httplib.cc ../httplib.h Makefile cert.pem
+	$(CXX) -o $@ -I.. $(CXXFLAGS) test.cc include_httplib.cc $(TEST_ARGS)
+	@file $@
+
+# Note: The intention of test_split is to verify that it works to compile and
+# link the split httplib.h, so there is normally no need to execute it.
+test_split : test.cc ../httplib.h httplib.cc Makefile cert.pem
+	$(CXX) -o $@ $(CXXFLAGS) test.cc httplib.cc $(TEST_ARGS)
+
+# Mbed TLS backend targets
+test_mbedtls : test.cc include_httplib.cc ../httplib.h Makefile cert.pem
+	$(CXX) -o $@ -I.. $(CXXFLAGS) test.cc include_httplib.cc $(TEST_ARGS_MBEDTLS)
+	@file $@
+
+test_split_mbedtls : test.cc ../httplib.h httplib.cc Makefile cert.pem
+	$(CXX) -o $@ $(CXXFLAGS) test.cc httplib.cc $(TEST_ARGS_MBEDTLS)
+
+# wolfSSL backend targets
+test_wolfssl : test.cc include_httplib.cc ../httplib.h Makefile cert.pem
+	$(CXX) -o $@ -I.. $(CXXFLAGS) test.cc include_httplib.cc $(TEST_ARGS_WOLFSSL)
+	@file $@
+
+test_split_wolfssl : test.cc ../httplib.h httplib.cc Makefile cert.pem
+	$(CXX) -o $@ $(CXXFLAGS) test.cc httplib.cc $(TEST_ARGS_WOLFSSL)
+
+# No TLS
+test_no_tls : test.cc include_httplib.cc ../httplib.h Makefile
+	$(CXX) -o $@ -I.. $(CXXFLAGS) test.cc include_httplib.cc $(TEST_ARGS_NO_TLS)
+	@file $@
+
+test_split_no_tls : test.cc ../httplib.h httplib.cc Makefile
+	$(CXX) -o $@ $(CXXFLAGS) test.cc httplib.cc $(TEST_ARGS_NO_TLS)
+
+# ThreadPool unit tests (no TLS, no compression needed)
+test_thread_pool : test_thread_pool.cc ../httplib.h Makefile
+	$(CXX) -o $@ -I.. $(CXXFLAGS) test_thread_pool.cc gtest/src/gtest-all.cc gtest/src/gtest_main.cc -Igtest -Igtest/include -lpthread
+
+check_abi:
+	@./check-shared-library-abi-compatibility.sh
+
+.PHONY: style_check
+style_check: $(STYLE_CHECK_FILES)
+	@for file in $(STYLE_CHECK_FILES); do \
+		$(CLANG_FORMAT) $$file > $$file.formatted; \
+		if ! diff -u $$file $$file.formatted; then \
+			file2=$$($(REALPATH) --relative-to=.. $$file); \
+			printf "\n%*s\n" 80 | tr ' ' '#'; \
+			printf "##%*s##\n" 76; \
+			printf "##   %-70s   ##\n" "$$file2 not properly formatted. Please run clang-format."; \
+			printf "##%*s##\n" 76; \
+			printf "%*s\n\n" 80 | tr ' ' '#'; \
+			failed=1; \
+		fi; \
+		rm -f $$file.formatted; \
+	done; \
+	if [ -n "$$failed" ]; then \
+		echo "Style check failed for one or more files. See above for details."; \
+		false; \
+	else \
+		echo "All files are properly formatted."; \
+	fi
+
+test_websocket_heartbeat : test_websocket_heartbeat.cc ../httplib.h Makefile
+	$(CXX) -o $@ -I.. $(CXXFLAGS) test_websocket_heartbeat.cc $(TEST_ARGS)
+	@file $@
+
+test_proxy : test_proxy.cc ../httplib.h Makefile cert.pem
+	$(CXX) -o $@ -I.. $(CXXFLAGS) test_proxy.cc $(TEST_ARGS)
+
+test_proxy_mbedtls : test_proxy.cc ../httplib.h Makefile cert.pem
+	$(CXX) -o $@ -I.. $(CXXFLAGS) test_proxy.cc $(TEST_ARGS_MBEDTLS)
+
+test_proxy_wolfssl : test_proxy.cc ../httplib.h Makefile cert.pem
+	$(CXX) -o $@ -I.. $(CXXFLAGS) test_proxy.cc $(TEST_ARGS_WOLFSSL)
+
+# Runs server_fuzzer.cc based on value of $(LIB_FUZZING_ENGINE).
+# Usage: make fuzz_test LIB_FUZZING_ENGINE=/path/to/libFuzzer
+fuzz_test: server_fuzzer
+	./server_fuzzer fuzzing/corpus/*
+
+# Fuzz target, so that you can choose which $(LIB_FUZZING_ENGINE) to use.
+server_fuzzer : fuzzing/server_fuzzer.cc ../httplib.h standalone_fuzz_target_runner.o
+	$(CXX) -o $@ -I.. $(CXXFLAGS) $< $(OPENSSL_SUPPORT) $(ZLIB_SUPPORT) $(BROTLI_SUPPORT) $(LIB_FUZZING_ENGINE) $(ZSTD_SUPPORT) $(LIBS)
+	@file $@
+
+# Standalone fuzz runner, which just reads inputs from fuzzing/corpus/ dir and
+# feeds it to server_fuzzer.
+standalone_fuzz_target_runner.o : fuzzing/standalone_fuzz_target_runner.cpp
+	$(CXX) -o $@ -I.. $(CXXFLAGS) -c $<
+
+httplib.cc : ../httplib.h
+	python3 ../split.py -o .
+
+cert.pem:
+	./gen-certs.sh
+
+clean:
+	rm -rf test test_split test_mbedtls test_split_mbedtls test_wolfssl test_split_wolfssl test_no_tls, test_split_no_tls test_proxy test_proxy_mbedtls test_proxy_wolfssl server_fuzzer *.pem *.0 *.o *.1 *.srl httplib.h httplib.cc _build* *.dSYM *_shard_*.log cpp-httplib
+
