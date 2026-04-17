@@ -1,0 +1,94 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+# This workflow is used for FBGEMM_GPU-GenAI CI, and is meant to be used for
+# copies of the FBGEMM repos hosted outside of the pytorch org.
+name: FBGEMM_GPU GenAI CI (Generic Runner)
+
+on:
+  # PR Trigger
+  #
+  pull_request:
+    branches: []
+
+  # Push Trigger (enable to catch errors coming out of multiple merges)
+  #
+  push:
+    branches: []
+
+  # Manual Trigger
+  #
+  workflow_dispatch:
+    inputs:
+      pytorch_channel_version:
+        description: Package Channel + Version to Use for PyTorch Installation, in `<channel>[/<version>]` Format
+        type: string
+        required: false
+        default: ""
+
+concurrency:
+  # Cancel previous runs in the PR if a new commit is pushed
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-build-matrix:
+    if: ${{ github.repository_owner != 'pytorch' }}
+    uses: ./.github/workflows/_fbgemm_gpu_generate_ci_matrix.yml
+    with:
+      repo-owner: ${{ github.repository_owner }}
+      repo-ref: ${{ github.ref }}
+      targets: genai
+      variant: cuda
+      jobtype: build
+
+  build:
+    needs: generate-build-matrix
+    uses: ./.github/workflows/_fbgemm_gpu_cuda_build.yml
+    with:
+      matrix: ${{ needs.generate-build-matrix.outputs.matrix }}
+      repo-ref: ${{ github.ref }}
+      pytorch-channel-version: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.pytorch-channel-version) || 'nightly' }}
+      extra-env: >-
+        {
+          "DONT_USE_SUDO": 1,
+          "BUILD_INCLUDE_FB_ONLY": 1
+        }
+
+  generate-test-matrix:
+    needs: build
+    uses: ./.github/workflows/_fbgemm_gpu_generate_ci_matrix.yml
+    with:
+      repo-owner: ${{ github.repository_owner }}
+      repo-ref: ${{ github.ref }}
+      targets: genai
+      variant: cuda
+      jobtype: test
+
+  test:
+    needs: generate-test-matrix
+    uses: ./.github/workflows/_fbgemm_gpu_cuda_test.yml
+    with:
+      matrix: ${{ needs.generate-test-matrix.outputs.matrix }}
+      repo-ref: ${{ github.ref }}
+      pytorch-channel-version: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.pytorch-channel-version) || 'nightly' }}
+      publish-to-pypi: ${{ (github.event_name == 'schedule') || (github.event_name == 'workflow_dispatch' && github.event.inputs.publish-to-pypi == 'true') }}
+      extra-env: >-
+        {
+          "DONT_USE_SUDO": 1,
+          "ENFORCE_CUDA_DEVICE": 0,
+          "CUDA_VISIBLE_DEVICES": -1,
+          "ADD_LIBCUDA_SYMLINK": 1
+        }
+      container: >-
+        {
+          "image": "amazonlinux:2023",
+          "options": "--user root --privileged --pid=host",
+          "volumes": [
+            "/var/run/docker.sock:/var/run/docker.sock"
+          ]
+        }
+    secrets:
+      PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
