@@ -5,14 +5,13 @@
 import sys, os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../frameworks')))
-
 import gc
 import yaml
 import torch
 torch.set_float32_matmul_precision('high')
 import torch.nn as tnn
 import torch.nn.functional as F
-from ptorch.nn.modules import Linear, LinearMain, ReLU, MultiHeadAttention, Conversion, Mean, SumReLU, RMSNorm, ReLUSquared, CausalSelfAttention, Softcap
+from ptorch.nn.modules import Linear, LinearMain, ReLU, MultiHeadAttention, Conversion, Mean, SumReLU, RMSNorm, ReLUSquared, CausalSelfAttention, CrossEntropyLoss
 from ptorch.core.ops import CrossEntropyProjection, HardMarginProjection
 import ptorch.optim_static as ptorch_optim_static
 import ptorch.config as ptorch_config
@@ -22,85 +21,6 @@ import wandb
 import argparse
 import copy
 import torch.distributed as dist
-
-# -----------------------------
-# MUON OPTIMIZER
-# -----------------------------
-def zeropower_via_newtonschulz5(G: torch.Tensor, steps: int = 10, eps: float = 1e-7) -> torch.Tensor:
-    a, b, c = (3.4445, -4.7750, 2.0315)
-    X = G.bfloat16()
-    X /= X.norm() + eps
-    transposed = G.size(0) > G.size(1)
-    if transposed:
-        X = X.T
-    for _ in range(steps):
-        A = X @ X.T
-        B = b * A + c * A @ A
-        X = a * X + B @ X
-    return X.T if transposed else X
-
-class Muon(torch.optim.Optimizer):
-    def __init__(self, params, lr: float, momentum: float, backend_steps: int, nesterov: bool = True, weight_decay: float = 0.0):
-        super().__init__(
-            params,
-            dict(lr=lr, momentum=momentum, backend_steps=backend_steps, nesterov=nesterov, weight_decay=weight_decay),
-        )
-
-    @torch.no_grad()
-    def step(self, closure=None):
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
-
-        if ptorch_config.use_projections:
-            for group in self.param_groups:
-                for p in group["params"]:
-                    if p.grad is not None:
-                        p.grad.copy_(p.data - p.grad)
-
-        distributed = dist.is_available() and dist.is_initialized()
-        world_size = dist.get_world_size() if distributed else 1
-        rank = dist.get_rank() if distributed else 0
-
-        for group in self.param_groups:
-            params = group["params"]
-            if not params:
-                continue
-            lr = group["lr"]
-            momentum = group["momentum"]
-            backend_steps = group["backend_steps"]
-            nesterov = group["nesterov"]
-
-            total_params = sum(int(p.numel()) for p in params)
-            updates_flat = torch.zeros(total_params, device=params[0].device, dtype=torch.bfloat16)
-
-            curr = 0
-            for i, p in enumerate(params):
-                if i % world_size == rank and p.grad is not None:
-                    g = p.grad
-                    state = self.state[p]
-                    if "momentum_buffer" not in state:
-                        state["momentum_buffer"] = torch.zeros_like(g)
-                    buf = state["momentum_buffer"]
-                    buf.mul_(momentum).add_(g)
-                    if nesterov:
-                        g = g.add(buf, alpha=momentum)
-                    g = zeropower_via_newtonschulz5(g, steps=backend_steps)
-                    g *= max(1, g.size(0) / g.size(1)) ** 0.5
-                    updates_flat[curr : curr + p.numel()] = g.reshape(-1)
-                curr += p.numel()
-
-            if distributed:
-                dist.all_reduce(updates_flat, op=dist.ReduceOp.SUM)
-
-            curr = 0
-            for p in params:
-                g = updates_flat[curr : curr + p.numel()].view_as(p).to(dtype=p.dtype)
-                p.add_(g, alpha=-lr)
-                curr += p.numel()
-
-        return loss
 
 
 FRAMEWORK = "ptorch_parr"
@@ -124,13 +44,13 @@ class TextMLP(tnn.Module):
                 self.hidden_layers.append(linear_cls(last, f, norm=norm))  # projection-based
             else:
                 self.hidden_layers.append(linear_cls(last, f))
-            self.hidden_layers.append(ReLU())              # projection-based
-            self.norm = RMSNorm(f)
+            self.hidden_layers.append(SumReLU())              # projection-based
+            #self.norm = RMSNorm(f)
             last = f
         if linear_cls is Linear:
-            self.out = linear_cls(last, classes, norm=norm)
+            self.out = linear_cls(last, classes, norm=norm, g=float('inf'))
         else:
-            self.out = linear_cls(last, classes)
+            self.out = linear_cls(last, classes, g=float('inf'))
 
     def forward(self, x):
         embedded = self.embedding(x)
@@ -174,7 +94,7 @@ class GPTMLP(tnn.Module):
         super().__init__()
         hidden = mlp_mult * dim
         self.fc = linear_cls(dim, hidden, bias=False, norm=norm) if linear_cls is Linear else linear_cls(dim, hidden, bias=False)
-        self.act = ReLUSquared()
+        self.act = ReLU()
         self.proj = linear_cls(hidden, dim, bias=False, norm=norm) if linear_cls is Linear else linear_cls(hidden, dim, bias=False)
 
     def forward(self, x):
@@ -190,22 +110,24 @@ class GPTBlock(tnn.Module):
         linear_cls=Linear
     ):
         super().__init__()
-        self.attn_norm = RMSNorm(dim)
-        self.mlp_norm = RMSNorm(dim)
+        #self.attn_norm = RMSNorm(dim)
+        #self.mlp_norm = RMSNorm(dim)
         
         # Using num_kv_heads = num_heads, rope_base = 10000.0, qk_gain_init = 1.5
         self.attn = CausalSelfAttention(dim, num_heads, num_heads, 10000.0, 1.5, norm=norm)
         self.mlp = GPTMLP(dim, mlp_mult, norm=norm, linear_cls=linear_cls)
-        self.attn_scale = tnn.Parameter(torch.ones(1, dim, dtype=torch.float32))
-        self.mlp_scale = tnn.Parameter(torch.ones(1, dim, dtype=torch.float32))
+        self.attn_scale = tnn.Parameter(torch.ones(1,dim, dtype=torch.float32))
+        self.mlp_scale = tnn.Parameter(torch.ones(1,dim, dtype=torch.float32))
         self.resid_mix = tnn.Parameter(torch.stack((torch.ones(dim), torch.zeros(dim))).float())
 
     def forward(self, x, x0):
         mix = self.resid_mix.to(dtype=x.dtype)
         x = torch.add(torch.mul(mix[0][None, None, :], x), torch.mul(mix[1][None, None, :], x0))
-        attn_out = self.attn(self.attn_norm(x))
-        x = torch.add(x, torch.mul(self.attn_scale.to(dtype=x.dtype), attn_out))
-        x = torch.add(x, torch.mul(self.mlp_scale.to(dtype=x.dtype), self.mlp(self.mlp_norm(x))))
+        attn_out = self.attn(x)
+        x = torch.add(x, torch.mul(self.attn_scale.to(dtype=x.dtype)[None, None, :], attn_out))
+        x = x.squeeze()
+        x = torch.add(x, torch.mul(self.mlp_scale.to(dtype=x.dtype)[None, None, :], self.mlp(x)))
+        x = x.squeeze()
         return x
 
 class TinyGPT(tnn.Module):
@@ -213,34 +135,30 @@ class TinyGPT(tnn.Module):
         super().__init__()
         self.embedding = tnn.Embedding(vocab_size, embed_dim)
         self.conversion = Conversion()
-        self.initial_norm = RMSNorm(embed_dim)
         
         self.blocks = tnn.ModuleList([
             GPTBlock(embed_dim, num_heads, mlp_mult, norm=norm, linear_cls=linear_cls)
             for _ in range(num_layers)
         ])
         
-        self.final_norm = RMSNorm(embed_dim)
         self.mean = Mean(dim=1)
         if linear_cls is Linear:
             self.out = linear_cls(embed_dim, classes, bias=False, norm=norm)
         else:
             self.out = linear_cls(embed_dim, classes, bias=False)
             
-        self.cap = Softcap(logit_softcap=30.0)
         
     def forward(self, x):
         x = self.embedding(x) # B, S, E
         x = self.conversion(x)  # bridge: gradient → projection
-        x = self.initial_norm(x)
         x0 = x
         
         for block in self.blocks:
             x = block(x, x0)
             
-        x = self.final_norm(x)
+        x = x
         pooled = self.mean(x) # B, E
-        return self.cap(self.out(pooled))
+        return self.out(pooled)
 
 
 # ── Training ─────────────────────────────────────
@@ -324,11 +242,12 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
     opt_kwargs = cfg.get("ptorch_optimizer_kwargs", {})
 
     if opt_name == "Muon":
-        optimizers = [Muon(model.parameters(), lr=opt_kwargs.get("lr", 0.02), momentum=0.95, backend_steps=5, weight_decay=opt_kwargs.get("weight_decay", 0.1))]
+        optimizers_proj = [Muon(model.parameters(), lr=opt_kwargs.get("lr", 0.02), momentum=0.95, backend_steps=5, weight_decay=opt_kwargs.get("weight_decay", 0.3))]
     else:
-        optimizers = [OPTIM_MODULES[opt_name](model.parameters(), **opt_kwargs)]
+        optimizers_proj = [OPTIM_MODULES[opt_name](model.parameters(), **opt_kwargs)]
 
-    for opt in optimizers:
+    optimizers = optimizers_proj 
+    for opt in optimizers_proj :
         for group in opt.param_groups:
             group["base_lr"] = group["lr"]
 
@@ -357,10 +276,32 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
         **ptorch_config.snapshot(),
     })
 
+    # GPU memory logging helper (works when device is CUDA)
+    def _mb(x: int) -> float:
+        return float(x) / (1024.0 * 1024.0)
+
+    def log_gpu_mem(step: int, phase: str = ""):
+        if not torch.cuda.is_available():
+            return
+        try:
+            dev = device if getattr(device, 'type', None) == 'cuda' else None
+            allocated = torch.cuda.memory_allocated(dev)
+            reserved = torch.cuda.memory_reserved(dev)
+            peak = torch.cuda.max_memory_allocated(dev)
+            wandb.log({
+                f"gpu/{phase}allocated_mb": _mb(allocated),
+                f"gpu/{phase}reserved_mb": _mb(reserved),
+                f"gpu/{phase}peak_allocated_mb": _mb(peak),
+            }, step=step)
+        except Exception:
+            # Best-effort logging; do not crash training on unexpected CUDA queries
+            pass
+
     def step_fn(x, y):
         logits  = model(x)
         y_oh    = F.one_hot(y.long(), num_classes=logits.shape[-1]).float()
-        projected = CrossEntropyProjection.apply(logits, y_oh)
+        loss = CrossEntropyLoss()
+        projected = loss(logits, y_oh)
         for opt in optimizers:
             opt.zero_grad(set_to_none=True)
         projected.sum().backward()
@@ -392,6 +333,10 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
         for opt in optimizers:
             opt.zero_grad(set_to_none=True)
 
+    # Reset peak memory stats before main loop so peak is meaningful
+    if torch.cuda.is_available():
+        dev = device if getattr(device, 'type', None) == 'cuda' else None
+        torch.cuda.reset_peak_memory_stats(dev)
     max_steps = cfg.get("max_steps", 0)
     warmdown_iters = cfg.get("warmdown_iters", int(0.1 * max_steps) if max_steps else 0)
 
@@ -401,43 +346,10 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
         warmdown_start = max(max_steps - warmdown_iters, 0)
         return max((max_steps - step) / max(warmdown_iters, 1), 0.0) if warmdown_start <= step < max_steps else 1.0
 
-    alpha_start = float(cfg.get("projection_alpha_start", 0.001))
-    alpha_end = float(cfg.get("projection_alpha_end", 100000.0))
-    g_start = float(cfg.get("projection_g_start", 1.0))
-    g_end = float(cfg.get("projection_g_end", 1.0))
-    
-    ema_loss = None
-    ema_loss_slow = None
-    current_alpha = alpha_start
-    current_g = g_start
-
-    # Added to control how aggressively alpha changes per step. 
-    # Without this, alpha will instantly hit its max/min bounds.
-    update_rate = 0.1  
 
     with tqdm.tqdm(unit="step") as pbar:
-        while True:
-            if ema_loss_slow is not None and ema_loss_slow > 0 and ptorch_config.use_projections:
-                ratio = ema_loss / ema_loss_slow
-                
-                # ratio > 1.0: loss is increasing or stagnant -> positive adjustment
-                # ratio < 1.0: loss is decreasing -> negative adjustment
-                adjustment = ratio - 1.0
-                
-                # Clamp the adjustment to prevent exploding updates on massive loss spikes
-                adjustment = max(-0.5, min(0.5, adjustment))
-            else:
-                adjustment = 0.0
-            
-            # Apply the update
-            current_alpha += (alpha_end - alpha_start) * adjustment * update_rate
-            current_g += (g_end - g_start) * adjustment * update_rate
-            
-            # CRITICAL: Clamp current_alpha so it doesn't drift below 0.1 or above 10
-            current_alpha = max(alpha_start, min(alpha_end, current_alpha))                
-            current_g = max(g_start, min(g_end, current_g))                
-            ptorch_config.update("projection_g", current_g)
-                
+        while True:             
+
             scale = lr_mul(step)
             for opt in optimizers:
                 for group in opt.param_groups:
@@ -454,8 +366,10 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
                     val_acc = 0.0
                     
                 model.train()
-                wandb.log({"val/val_acc": val_acc}, step=step)
+                wandb.log({"val/val_acc": val_acc, "val/use_projections": bool(ptorch_config.use_projections)}, step=step)
                 wandb.log({"training_time_s": time.time() - t0}, step=step)
+                # Log GPU memory during evaluation
+                log_gpu_mem(step, phase="val/")
                 pbar.set_postfix(val_acc=f"{val_acc:.4f}", best=f"{best_val_acc:.4f}")
                 if val_acc > best_val_acc:
                     best_val_acc, best_step = val_acc, step
@@ -464,25 +378,24 @@ def run(cfg, task_cfg, batch_size, run_number, device, model_name):
                 else:
                     no_improve += 1
                 if no_improve >= cfg["patience"]:
-                    print(f"Early stop at step {step}")
-                    break
+                    print(f"switched paradigm {step}")
+                    new_val = not ptorch_config.use_projections
+                    ptorch_config.update("use_projections", new_val)
+                    optimizers = optimizers_proj
+                    if new_val:
+                        for opt in optimizers:
+                            for group in opt.param_groups:
+                                group["lr"] = group["lr"] /2
 
+                    no_improve = 0
             x, y = next(train_iter)
-            loss = step_fn(
-                torch.tensor(x, dtype=torch.long, device=device),
-                torch.tensor(y, dtype=torch.long, device=device))
+            x_t = torch.tensor(x, dtype=torch.long, device=device)
+            y_t = torch.tensor(y, dtype=torch.long, device=device)
+            loss = step_fn(x_t, y_t)
             loss_val = float(loss)
-            if ema_loss is None:
-                ema_loss = loss_val
-                ema_loss_slow = loss_val
-            else:
-                ema_loss = 0.9 * ema_loss + 0.1 * loss_val
-                ema_loss_slow = 0.99 * ema_loss_slow + 0.01 * loss_val
-                
-            log_dict = {"train/loss": loss_val, "train/ema_loss": ema_loss}
-            if max_steps > 0:
-                log_dict["train/projection_alpha"] = current_alpha
-                log_dict["train/projection_g"] = current_g
+            # Compute training accuracy on the same batch and log it
+            train_acc = float(eval_fn(x_t, y_t))
+            log_dict = {"train/loss": loss_val, "train/train_acc": train_acc}
             wandb.log(log_dict, step=step)
             
             step += 1

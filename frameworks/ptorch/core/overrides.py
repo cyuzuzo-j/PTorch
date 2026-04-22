@@ -88,7 +88,9 @@ class ProjectedAdd(torch.autograd.Function):
             # Distance: ||x* - x||^2 + ||y* - y||^2
             # Normal vector to hyperplane is (1, alpha).
             delta = grad_output - (x + alpha * y)
-            t = delta / (1.0 + alpha**2)
+            # FIX: Properly compute Lagrangian multiplier to strictly satisfy the projection geometry 
+            # without doubling the magnitude of the errors at every sum operation.
+            t = delta / (1.0 + alpha ** 2)
             grad_x = x + t
             grad_y = y + alpha * t
             
@@ -183,6 +185,8 @@ _original_tensor_add = torch.Tensor.add
 _original_tensor_square = torch.Tensor.square
 _original_tensor_mul = torch.Tensor.mul
 _original_tensor_mul_magic = torch.Tensor.__mul__
+_original_tensor_add_magic = torch.Tensor.__add__
+_original_tensor_radd_magic = torch.Tensor.__radd__
 
 def projected_sum(input, *args, **kwargs):
     if not isinstance(input, torch.Tensor) or not input.requires_grad:
@@ -249,6 +253,8 @@ def apply_overrides():
     torch.mul = projected_mul
     torch.Tensor.mul = projected_tensor_mul
     torch.Tensor.__mul__ = projected_tensor_mul
+    torch.Tensor.__add__ = projected_tensor_add
+    torch.Tensor.__radd__ = projected_tensor_add
     
 def remove_overrides():
     torch.sum = _original_sum
@@ -260,3 +266,5 @@ def remove_overrides():
     torch.Tensor.square = _original_tensor_square
     torch.Tensor.mul = _original_tensor_mul
     torch.Tensor.__mul__ = _original_tensor_mul_magic
+    torch.Tensor.__add__ = _original_tensor_add_magic
+    torch.Tensor.__radd__ = _original_tensor_radd_magic

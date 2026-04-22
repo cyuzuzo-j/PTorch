@@ -11,9 +11,11 @@ import yaml
 import torch
 import torch.nn as tnn
 import torch.nn.functional as F
-from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
+from experiments.shared.data_loaders import MNISTDataModule, InfiniteCifarDataModule
 import tqdm, time
 import wandb
+from experiments.shared.hash_utils import get_code_hash
+code_hash = get_code_hash()
 
 FRAMEWORK = "torch"
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
@@ -43,7 +45,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     run_seed = seed + run_number
     torch.manual_seed(run_seed)
 
-    dataset_cls = DATASETS[task_cfg["name"]]
+    dataset_name = task_cfg.get("dataset", task_cfg["name"])
+    dataset_cls = DATASETS[dataset_name]
     ds = dataset_cls(batch_size=batch_size, seed=run_seed)
     train_iter = ds.train_iterator()
     val_loader  = ds.val_dataloader()
@@ -61,6 +64,7 @@ def run(cfg, task_cfg, batch_size, run_number, device):
         "task": task_cfg["name"],
         "hidden": task_cfg["hidden"],
         "optimizer": opt_name,
+        "code_hash": code_hash,
         **{f"opt_{k}": v for k, v in opt_kwargs.items()},
         "batch_size": batch_size,
         "seed": run_seed,
@@ -92,8 +96,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
             if step % cfg["eval_every"] == 0:
                 model.eval()
                 accs = [eval_fn(
-                    torch.tensor(x, dtype=torch.float32, device=device),
-                    torch.tensor(y, dtype=torch.long,  device=device))
+                    x.clone().detach().to(dtype=torch.float32, device=device),
+                    y.clone().detach().to(dtype=torch.long,  device=device))
                     for x, y in val_loader]
                 val_acc = float(torch.stack(accs).mean())
                 model.train()
@@ -112,8 +116,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
 
             x, y = next(train_iter)
             loss = step_fn(
-                torch.tensor(x, dtype=torch.float32, device=device),
-                torch.tensor(y, dtype=torch.long,  device=device))
+                x.clone().detach().to(dtype=torch.float32, device=device),
+                y.clone().detach().to(dtype=torch.long,  device=device))
             wandb.log({"train/loss": float(loss)}, step=step)
             step += 1
             pbar.update(1)
@@ -125,8 +129,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
         model.load_state_dict(best_state)
     model.eval()
     test_accs = [eval_fn(
-        torch.tensor(x, dtype=torch.float32, device=device),
-        torch.tensor(y, dtype=torch.long,  device=device))
+        x.clone().detach().to(dtype=torch.float32, device=device),
+        y.clone().detach().to(dtype=torch.long,  device=device))
         for x, y in test_loader]
     final_acc = float(torch.stack(test_accs).mean())
     print(f"Test Acc: {final_acc:.4f}  Time: {total_time:.1f}s")

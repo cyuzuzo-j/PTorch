@@ -24,7 +24,7 @@ sns.set_theme(style="whitegrid", context="paper", font_scale=2.0)
 D = 8               # Dimensionality of input (d) and width (W)
 N_STEPS = 1000        # Total training steps (N)
 N_SEEDS = 3           # Number of random seeds (K)
-DEPTHS = [2, 4, 8, 16]
+DEPTHS = [2, 4, 8]
 BATCH_SIZE = 16
 LR = 0.1              # Step size (eta)
 
@@ -43,7 +43,7 @@ class IdentityMLP(nn.Module):
         
         # Build layers: Depth L means L Linear layers.
         for i in range(depth):
-            self.layers.append(Linear(d, d, bias=True))
+            self.layers.append(Linear(d, d, bias=True, residual=True))
             if i < depth - 1:
                 self.layers.append(ReLU())
         
@@ -150,14 +150,17 @@ def plot_results(results_deltas, results_final_loss, out_dir="figures"):
     for i, depth in enumerate(DEPTHS):
         # results_deltas[depth][t_plot] is a list of lists: shape (N_SEEDS, depth)
         data = torch.tensor(results_deltas[depth][t_plot]) # (K, L)
-        mean_deltas = data.mean(dim=0).numpy()
-        std_deltas = data.std(dim=0).numpy()
+        mean_deltas = data.mean(dim=0).tolist()
+        std_deltas = data.std(dim=0).tolist()
         
         # x-axis: distance from output (1 = output, L = input layer)
         x_axis = range(1, depth + 1)
         
-        ax1.plot(x_axis, mean_deltas, marker='o', color=colors[i], label=f"L={depth}")
-        ax1.fill_between(x_axis, mean_deltas - std_deltas, mean_deltas + std_deltas, color=colors[i], alpha=0.2)
+        # Convert to numpy arrays or lists. Let's make sure we can do arithmetic if applying fill_between
+        mean_deltas_tensor = data.mean(dim=0)
+        std_deltas_tensor = data.std(dim=0)
+        ax1.plot(x_axis, mean_deltas_tensor.tolist(), marker='o', color=colors[i], label=f"L={depth}")
+        ax1.fill_between(x_axis, (mean_deltas_tensor - std_deltas_tensor).tolist(), (mean_deltas_tensor + std_deltas_tensor).tolist(), color=colors[i], alpha=0.2)
         
     ax1.set_xlabel("Distance from Output Layer")
     ax1.set_ylabel(r"Target Signal Magnitude $\delta_k^{(t)}$")

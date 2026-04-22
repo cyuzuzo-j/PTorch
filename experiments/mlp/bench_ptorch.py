@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 import gc
 import yaml
 import torch
+torch.set_float32_matmul_precision('high')
 import torch.nn as tnn
 import torch.nn.functional as F
 from ptorch.nn.modules import Linear as PLinear, ReLU as PReLU, SumReLU
@@ -18,7 +19,9 @@ import ptorch.config as ptorch_config
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 import tqdm, time
 import wandb
-
+from experiments.shared.hash_utils import get_code_hash
+code_hash = get_code_hash()
+    
 def _parse_norm(norm):
     """Parse a norm string/value into (norm_type, p_value).
     
@@ -57,7 +60,7 @@ def _parse_norm(norm):
     except ValueError:
         raise ValueError(f"Unrecognised norm: '{norm}'. Use 'l2', 'linf', 'l1', or 'l<p>' (e.g. 'l1.5', 'l3').")
 
-FRAMEWORK = "ptorch_final_final_final"
+FRAMEWORK = "ptorch_active"
 
 OPTIM_MODULES = vars(ptorch_optim_static)
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
@@ -83,7 +86,7 @@ class MLP(tnn.Module):
         self.hidden_layers = tnn.ModuleList()
         for f in hidden:
             self.hidden_layers.append(PLinear(last, f, norm=norm, dtp=dtp, residual=False))
-            self.hidden_layers.append(SumReLU())
+            self.hidden_layers.append(PReLU())
             last = f
         self.n_hidden = len(hidden)
         self.out = PLinear(last, classes, norm=norm, dtp=dtp)
@@ -109,7 +112,7 @@ def run(cfg, task_cfg, batch_size, run_number, device, loss_projection_cls=Cross
     
     # Set global config for the projection norm
     ptorch_config.update("projection_norm", model_norm)
-    dataset_cls = DATASETS[task_cfg["name"]]
+    dataset_cls = DATASETS[task_cfg["name"].split("_")[0]] 
     ds = dataset_cls(batch_size=batch_size, seed=run_seed)
     train_iter = ds.train_iterator()
     val_loader  = ds.val_dataloader()
@@ -150,11 +153,13 @@ def run(cfg, task_cfg, batch_size, run_number, device, loss_projection_cls=Cross
         torch.cuda.synchronize()
 
     run_wandb = wandb.init(project="pjax", name=run_name)
+
     wandb.config.update({
         "framework": FRAMEWORK,
         "task": task_cfg["name"],
         "hidden": task_cfg["hidden"],
         "optimizer": opt_name,
+        "code_hash": code_hash,
         **{f"opt_{k}": v for k, v in opt_kwargs.items()},
         "batch_size": batch_size,
         "seed": run_seed,
