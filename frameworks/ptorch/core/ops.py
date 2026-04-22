@@ -24,6 +24,7 @@ _POLAR_COEFFS = [
     (a / 1.01, b / 1.01**3, c / 1.01**5) for a, b, c in _POLAR_COEFFS[:-1]
 ] + [_POLAR_COEFFS[-1]]
 
+@torch.compile()
 def zeropower_via_polarexpress(G: torch.Tensor, steps: int = 5, eps: float = 1e-2) -> torch.Tensor:
     """
     Computes the polar factor using the optimal Polar Express polynomial method.
@@ -1297,6 +1298,7 @@ class SumReLUProjection(torch.autograd.Function):
                        for x_1, x_2 in zip(new_inputs_1, new_inputs_2))
         return result
 
+@torch.compile()
 def midpoint_softmax_proj_pt(a, z):
     """
     Computes the entropy-regularized projection.
@@ -1453,6 +1455,7 @@ class StepProjection(torch.autograd.Function):
         mid = (s - z_target) / (n + 1)
         
         return projected_inputs
+@torch.compile(dynamic=True)
 def simplex_op_pt(a):
     """Project onto probability simplex (forward operation). Batched version."""
     n = a.size(-1)
@@ -1475,6 +1478,7 @@ def simplex_op_pt(a):
     
     return torch.maximum(a - tau, torch.tensor(0.0, device=a.device, dtype=a.dtype))
 
+@torch.compile(dynamic=True)
 def simplex_proj_pt(a, z):
     """Project onto the probability simplex function graph. Batched version."""
     n = a.size(-1)
@@ -1713,7 +1717,7 @@ class DropoutProjection(torch.autograd.Function):
         return x_star, None, None
 
 
-# @torch.compile(dynamic=True)
+@torch.compile(dynamic=True)
 def exact_batchnorm_proj(x, z, eps=1e-5, num_steps=15):
     """
     Exact projection onto the non-linear BatchNorm constraint graph.
@@ -1764,7 +1768,7 @@ def exact_batchnorm_proj(x, z, eps=1e-5, num_steps=15):
     
     return x_star, y_star
 
-# @torch.compile(dynamic=True)
+@torch.compile(dynamic=True)
 def exact_batchnorm_proj(x, z, eps=1e-5, num_steps=5):
     """
     Exact pointwise Newton projection onto the non-linear BatchNorm constraint graph.
@@ -1846,7 +1850,7 @@ class AffineBatchNormProjection(torch.autograd.Function):
         return x_star, weight_star, beta_star, None, None
 
 
-# @torch.compile(dynamic=True)
+@torch.compile(dynamic=True)
 def exact_rmsnorm_proj(x, z, eps=1e-5, num_steps=5):
     """
     Exact pointwise Newton projection onto the RMSNorm constraint graph.

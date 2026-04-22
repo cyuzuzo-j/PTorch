@@ -4,27 +4,43 @@
 ##################################################
 
 # ── Experiment identity ───────────────────────────
-experiment_name: mlp
+experiment_name: mlp_benchmark_final_actually_final
 random_seed: 43
 max_steps: 50_000
 num_runs: 3
 eval_every: 200
 patience: 10
-ptorch_norm_sweep: ["linf"]  # l2 | linf"
+ptorch_norm_sweep: [linf]  # restricted to linf as per paper
 # ── Batch sizes to sweep ─────────────────────────
-batch_sizes: [8, 32, 128, 512]
+batch_sizes: [32, 128, 8]
 
 # ── Tasks (comment out to disable) ───────────────
 tasks:
-  - name: MNIST
+
+
+  - name: MNIST_1L
+    dataset: MNIST
     in_features: 784
     classes: 10
-    hidden: [128]
+    hidden: [512]
 
-  - name: CIFAR10
+  - name: CIFAR10_1L
+    dataset: CIFAR10
     in_features: 3072
     classes: 10
-    hidden: [256]
+    hidden: [512]
+
+  - name: CIFAR10_4L
+    dataset: CIFAR10
+    in_features: 3072
+    classes: 10
+    hidden: [512, 512, 512, 512]
+
+  - name: MNIST_4L
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [512, 512, 512, 512]
 
 
 # ── Optimizers per framework ──────────────────────

@@ -11,7 +11,7 @@ defaults = {
     "use_projections": True,
     "projection_alpha": 1.0,
     "projection_g": 1.0,
-    "muon_activations": False,
+    "muon_activations": True,
     "muon_activations_lr": 1.0,
     "muon_activations_scale": False,
 }
