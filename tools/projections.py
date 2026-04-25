@@ -184,6 +184,48 @@ def stepActivationVectorized(x, W, y):
     y_projected = jax.numpy.where(H >= 0, 1.0, -1.0)
     return x, W, y_projected
 
+
+@jax.jit
+def reluActivationVectorized(x, W, z):
+    """
+    Vectorized ReLU activation projection.
+    x is the pre-activation input, W is the identity matrix, z is the target post-activation.
+    """
+    H = W @ x
+
+    x_1 = jnp.clip(H, a_max=0)
+    dist_1 = (H - x_1) ** 2 + z ** 2
+
+    x_2 = jnp.clip((H + z) / 2.0, a_min=0)
+    dist_2 = (H - x_2) ** 2 + (z - x_2) ** 2
+
+    new_H = jnp.where(dist_1 < dist_2, x_1, x_2)
+    new_z = jnp.where(dist_1 < dist_2, 0.0, x_2)
+
+    return new_H, W, new_z
+
+
+@jax.jit
+def leakyReluActivationVectorized(x, W, z, slope=0.1):
+    """
+    Vectorized Leaky ReLU activation projection.
+    x is the pre-activation input, W is the identity matrix, z is the target post-activation.
+    """
+    H = W @ x
+
+    x_1 = jnp.clip((H + slope * z) / (1.0 + slope * slope), a_max=0)
+    y_1 = slope * x_1
+    dist_1 = (H - x_1) ** 2 + (z - y_1) ** 2
+
+    x_2 = jnp.clip((H + z) / 2.0, a_min=0)
+    y_2 = x_2
+    dist_2 = (H - x_2) ** 2 + (z - y_2) ** 2
+
+    new_H = jnp.where(dist_1 < dist_2, x_1, x_2)
+    new_z = jnp.where(dist_1 < dist_2, y_1, y_2)
+
+    return new_H, W, new_z
+
 def pos(x, w, y):
     """Project onto positive orthant."""
     return jax.numpy.maximum(x, 0), jax.numpy.maximum(w, 0), y
