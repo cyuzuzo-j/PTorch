@@ -12,7 +12,7 @@ eval_every: 200
 patience: 10
 ptorch_norm_sweep: [linf]  # restricted to linf as per paper
 # ── Batch sizes to sweep ─────────────────────────
-batch_sizes: [32, 128, 8]
+batch_sizes: [8, 128, 32]
 
 # ── Tasks (comment out to disable) ───────────────
 tasks:

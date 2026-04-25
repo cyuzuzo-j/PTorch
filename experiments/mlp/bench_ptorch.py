@@ -12,15 +12,15 @@ import torch
 torch.set_float32_matmul_precision('high')
 import torch.nn as tnn
 import torch.nn.functional as F
-from ptorch.nn.modules import Linear as PLinear, ReLU as PReLU, SumReLU
+from ptorch.nn.modules import Linear as PLinear, ReLU as PReLU, SumReLU, Simplex
+from ptorch.nn.experimental_modules import Quantize
 from ptorch.core.ops import CrossEntropyProjection, HardMarginProjection, ProximalHingeMargin, SmoothSoftMargin
 import ptorch.optim_static as ptorch_optim_static
 import ptorch.config as ptorch_config
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 import tqdm, time
 import wandb
-from experiments.shared.hash_utils import get_code_hash
-code_hash = get_code_hash()
+code_hash = "get_code_hash()"
     
 def _parse_norm(norm):
     """Parse a norm string/value into (norm_type, p_value).
@@ -86,7 +86,7 @@ class MLP(tnn.Module):
         self.hidden_layers = tnn.ModuleList()
         for f in hidden:
             self.hidden_layers.append(PLinear(last, f, norm=norm, dtp=dtp, residual=False))
-            self.hidden_layers.append(PReLU())
+            self.hidden_layers.append(Simplex())
             last = f
         self.n_hidden = len(hidden)
         self.out = PLinear(last, classes, norm=norm, dtp=dtp)

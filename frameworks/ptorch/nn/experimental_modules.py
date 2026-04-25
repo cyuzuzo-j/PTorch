@@ -242,7 +242,8 @@ class MultiHeadAttention(nn.Module):
     """
 
     def __init__(self, model_features, qkv_features, heads, num_kv_heads=None,
-                 alpha=1.0, g=1.0, attention_type='simplex', norm="l2"):
+                 alpha=1.0, g=1.0, attention_type='simplex', norm="l2",
+                 use_rotary=False, rope_base=10000.0):
         super().__init__()
         if num_kv_heads is None:
             num_kv_heads = heads
@@ -260,6 +261,10 @@ class MultiHeadAttention(nn.Module):
         self.key_layer = Linear(model_features, kv_dim, alpha=alpha, g=g, norm=norm)
         self.value_layer = Linear(model_features, kv_dim, alpha=alpha, g=g, norm=norm)
         self.out_layer = Linear(heads * qkv_features, model_features, alpha=alpha, g=g, norm=norm)
+
+        self.use_rotary = use_rotary
+        if use_rotary:
+            self.rotary = Rotary(qkv_features, base=rope_base)
 
     def _project_pairwise_matmul(self, left, right, omega=1.0):
         if not config.use_projections:
@@ -322,6 +327,11 @@ class MultiHeadAttention(nn.Module):
         head_dim = q.shape[-1]
         k = k.reshape(batch_size, seq_len, self.num_kv_heads, head_dim).permute(0, 2, 1, 3)
         v = v.reshape(batch_size, seq_len, self.num_kv_heads, head_dim).permute(0, 2, 1, 3)
+
+        if getattr(self, 'use_rotary', False):
+            cos, sin = self.rotary(seq_len, q.device, q.dtype)
+            q = apply_rotary_emb(q, cos, sin)
+            k = apply_rotary_emb(k, cos, sin)
 
         # Expand KV heads to match Q heads for attention: (B, heads, S, D)
         k = self._expand_kv_heads(k)
@@ -399,6 +409,38 @@ class ReLUSquared(nn.Module):
         if config.use_projections:
             return SquaredReLUProjection.apply(input)
         return torch.square(torch.relu(input))
+    
+
+class Quantize(nn.Module):
+    """Infinite-ladder quantization activation.
+
+    Rounds each element to the nearest multiple of ``step``, producing
+    a staircase function with uniform step height extending to ±∞:
+
+        f(x) = step × round(x / step)
+
+    Unlike a bounded quantizer (which clamps to a finite set of levels),
+    this function has infinitely many rungs so that every real-valued
+    input maps to a well-defined level without range saturation.
+
+    In projection mode the backward pass computes the exact Euclidean
+    projection of ``(x, z_target)`` onto the graph of the staircase,
+    giving a meaningful geometric training signal despite the piecewise-
+    constant forward pass.
+
+    Args:
+        step: Distance between adjacent quantization levels (default 1.0).
+    """
+    def __init__(self, step: float = 0.1):
+        super().__init__()
+        if step <= 0:
+            raise ValueError(f"step must be positive, got {step}")
+        self.step = step
+
+    def forward(self, input):
+        if config.use_projections:
+            return QuantizeReLUProjection.apply(input, self.step)
+        return self.step * torch.round(input / self.step)
     
 
 

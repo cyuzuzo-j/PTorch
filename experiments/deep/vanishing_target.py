@@ -21,12 +21,12 @@ import ptorch.config as ptorch_config
 sns.set_theme(style="whitegrid", context="paper", font_scale=2.0)
 
 # ─── Configuration ────────────────────────────────────────────────────────────
-D = 8               # Dimensionality of input (d) and width (W)
-N_STEPS = 1000        # Total training steps (N)
+D = 32               # Dimensionality of input (d) and width (W)
+N_STEPS = 5000        # Total training steps (N)
 N_SEEDS = 3           # Number of random seeds (K)
 DEPTHS = [2, 4, 8]
 BATCH_SIZE = 16
-LR = 0.1              # Step size (eta)
+LR = 0.001              # Step size (eta)
 
 # ─── Model Definition ─────────────────────────────────────────────────────────
 
@@ -43,9 +43,7 @@ class IdentityMLP(nn.Module):
         
         # Build layers: Depth L means L Linear layers.
         for i in range(depth):
-            self.layers.append(Linear(d, d, bias=True, residual=True))
-            if i < depth - 1:
-                self.layers.append(ReLU())
+            self.layers.append(Linear(d, d, bias=True, residual=False))
         
         self.captured_deltas = {}  # Store per-layer delta norms
         self._setup_hooks()
@@ -162,7 +160,7 @@ def plot_results(results_deltas, results_final_loss, out_dir="figures"):
         ax1.plot(x_axis, mean_deltas_tensor.tolist(), marker='o', color=colors[i], label=f"L={depth}")
         ax1.fill_between(x_axis, (mean_deltas_tensor - std_deltas_tensor).tolist(), (mean_deltas_tensor + std_deltas_tensor).tolist(), color=colors[i], alpha=0.2)
         
-    ax1.set_xlabel("Distance from Output Layer")
+    ax1.set_xlabel("Distance from Input Layer")
     ax1.set_ylabel(r"Target Signal Magnitude $\delta_k^{(t)}$")
     ax1.set_yscale("log")
     ax1.set_title(r"(a) Vanishing Signal Profile (Step 1)")

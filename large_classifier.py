@@ -1,4 +1,8 @@
 # %%
+import sys 
+import os
+sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '..')))
+
 import jax.numpy as np
 import jax.random as random
 import tools.optimize as optimize
@@ -33,12 +37,15 @@ delta = 1
 error = []
 optInput = optimizer([projections.stepActivation],[projections.bilinearMatrix])
 optHidden = optimizer([], [projections.bilinearMatrix])
+
 optOutput= optimizer([lambda x,w,y :projections.classifierOutputVector(x,w,y,delta=delta)], [])
 error = []
 bias0 = []
 bias1 = []
 for iter in range(1000):
     batchError = np.zeros(len(outputData))
+    
+    forward_states = []
     for k, sample in enumerate(outputData.T):
         ## do a forward pass
         x_in = inputData[:,k]
@@ -55,18 +62,28 @@ for iter in range(1000):
             else:
                 batchError = batchError.at[k].set(batchError[k] + (x_out[i])**2 if x_out[i] > 0 else 0)
 
-        x_out, _, _ = optOutput.step_layer(x_out, np.eye(outputDim), sample)
-        h_hidden_aug, w1_proj, x_out = optHidden.step_layer(h_hidden_aug, W1, x_out)
-        h_hidden= h_hidden_aug[:][:-1]
+        forward_states.append((x_in_aug, x_hidden, h_hidden_aug, x_out))
 
-        x_in_aug, w0_proj, x_hidden = optInput.step_layer(x_in_aug, W0, x_hidden)
+    num_backward_passes = 1  # change this to do multiple backward passes
+    for _ in range(num_backward_passes):
+        for k, sample in enumerate(outputData.T):
+            x_in_aug, x_hidden, h_hidden_aug, x_out = forward_states[k]
+            
+            x_out_proj, _, _ = optOutput.step_layer(x_out, np.eye(outputDim), sample)
+            h_hidden_aug, w1_proj, x_out_proj = optHidden.step_layer(h_hidden_aug, W1, x_out_proj)
+            h_hidden= h_hidden_aug[:][:-1]
 
-        b1 = b1 + (1/(k+1))*(h_hidden_aug[:][-1:] - b1)
-        b0 = b0 + (1/(k+1))*(x_in_aug[:][-len(b0):] - b0) 
-        bias0.append(b0)
-        
-        W0 = W0 + (1/(k+1))*(w0_proj - W0)
-        W1 = W1 + (1/(k+1))*(w1_proj - W1)
+            x_in_aug, w0_proj, x_hidden = optInput.step_layer(x_in_aug, W0, x_hidden)
+
+            b1 = b1 + (1/(k+1))*(h_hidden_aug[:][-1:] - b1)
+            b0 = b0 + (1/(k+1))*(x_in_aug[:][-len(b0):] - b0) 
+            bias0.append(b0)
+            
+            W0 = W0 + (1/(k+1))*(w0_proj - W0)
+            W1 = W1 + (1/(k+1))*(w1_proj - W1)
+            
+            # Save updated variables for the next backward pass
+            forward_states[k] = (x_in_aug, x_hidden, h_hidden_aug, x_out_proj)
     error.append(np.mean(batchError))
     print(iter)
 
