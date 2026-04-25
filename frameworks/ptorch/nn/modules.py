@@ -165,6 +165,52 @@ class Step(nn.Module):
         return torch.where(input >= 0, torch.tensor(1.0, dtype=input.dtype, device=input.device), 
                            torch.tensor(-1.0, dtype=input.dtype, device=input.device))
 
+class Gap(nn.Module):
+    """Gap activation function.
+    
+    The forward pass is the identity (pass-through). The projection
+    backward enforces that outputs must lie outside the gap, i.e.
+    |y| >= delta/2, forcing the network to commit to a definitive
+    decision rather than hovering near zero.
+
+    Args:
+        delta: Width of the gap region (default 2.0, giving a gap of
+               [-1, 1] in output space).
+    """
+    def __init__(self, delta: float = 2.0):
+        super().__init__()
+        self.delta = delta
+        
+    def forward(self, input):
+        if config.use_projections:
+            return GapProjection.apply(input, self.delta)
+        return input
+
+class GappedStep(nn.Module):
+    """Step activation function with a dead zone.
+    
+    Like the regular Step activation but with a gap of width `delta`
+    centred at the origin where the function is undefined:
+
+        f(x) = +1   if x >= delta/2
+        f(x) = -1   if x <= -delta/2
+        f(x) =  0   otherwise (undefined region, outputs 0)
+
+    Args:
+        delta: Width of the gap region (default 2.0).
+    """
+    def __init__(self, delta: float = 2.0):
+        super().__init__()
+        self.delta = delta
+        
+    def forward(self, input):
+        if config.use_projections:
+            return GappedStepProjection.apply(input, self.delta)
+        half = self.delta / 2.0
+        return torch.where(input >= half, torch.tensor(1.0, dtype=input.dtype, device=input.device),
+               torch.where(input <= -half, torch.tensor(-1.0, dtype=input.dtype, device=input.device),
+                            torch.tensor(0.0, dtype=input.dtype, device=input.device)))
+
 
 class Simplex(nn.Module):
     """Simplex activation function."""

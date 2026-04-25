@@ -66,8 +66,15 @@ def zeropower_via_polarexpress(G: torch.Tensor, steps: int = 5, eps: float = 1e-
 def process_activation_target(A_det, A_proj):
     if getattr(config, 'muon_activations', True):
         orig_shape = A_det.shape
-        A_2d = A_det.reshape(-1, orig_shape[-1])
-        A_proj_2d = A_proj.reshape(-1, orig_shape[-1])
+        last_dim = orig_shape[-1]
+        
+        # Dynamo sometimes traces with 0-sized fake tensors which causes 
+        # reshape(-1, 0) to fail with an ambiguous shape error.
+        if last_dim == 0 or A_det.numel() == 0:
+            return A_proj
+            
+        A_2d = A_det.reshape(-1, last_dim)
+        A_proj_2d = A_proj.reshape(-1, last_dim)
         g = A_2d - A_proj_2d
         
         g_muon = zeropower_via_polarexpress(g)
@@ -1455,6 +1462,185 @@ class StepProjection(torch.autograd.Function):
         mid = (s - z_target) / (n + 1)
         
         return projected_inputs
+class QuantizeReLUProjection(torch.autograd.Function):
+    """
+    Quantized ReLU with Projection-aware gradients.
+    
+    Forward: 
+        f(x) = step * round(max(0, x) / step)
+    
+    Backward: 
+        Projects (x, z_target) onto the nearest segment of the non-negative 
+        staircase. The first segment (k=0) extends from (-inf, 0.5 * step].
+    """
+    @staticmethod
+    def forward(ctx, x, step=1.0):
+        ctx.save_for_backward(x)
+        ctx.step = step
+        # Apply ReLU then round to nearest step
+        return step * torch.round(torch.clamp(x, min=0.0) / step)
+
+    @staticmethod
+    def backward(ctx, z_target):
+        x, = ctx.saved_tensors
+        s = ctx.step
+
+        # Nearest rung index to target, but forced to be at least 0 (ReLU)
+        k0 = torch.clamp(torch.round(z_target / s), min=0.0)
+
+        best_x = x.clone()
+        best_dist = torch.full_like(x, float('inf'))
+
+        # Check candidate levels: k0-1, k0, k0+1
+        for dk in (-1, 0, 1):
+            k = k0 + dk
+            
+            valid_mask = k >= 0
+            
+            level = k * s
+            
+            # For k=0, the domain is (-inf, 0.5 * s]
+            # For k>0, the domain is [(k - 0.5) * s, (k + 0.5) * s]
+            lo = torch.where(k == 0, torch.full_like(k, float('-inf')), (k - 0.5) * s)
+            hi = (k + 0.5) * s
+            
+            x_clamped = torch.maximum(lo, torch.minimum(x, hi))
+            dist = (x - x_clamped) ** 2 + (z_target - level) ** 2
+            
+            better = valid_mask & (dist < best_dist)
+            best_x = torch.where(better, x_clamped, best_x)
+            best_dist = torch.where(better, dist, best_dist)
+
+        # Assuming process_activation_target handles the STE or projection update
+        return process_activation_target(x, best_x), None
+
+class GapProjection(torch.autograd.Function):
+    """
+    Projection-aware Gap activation.
+
+    Forward: identity (pass-through).
+    Backward: projects input x onto the feasible set |x| >= delta/2,
+    enforcing a gap of width `delta` in output space centred at zero.
+    Values inside the gap are snapped to the nearest boundary (+delta/2
+    or -delta/2), forcing the network to commit.
+    """
+    @staticmethod
+    def forward(ctx, x, delta=2.0):
+        ctx.save_for_backward(x)
+        ctx.delta = delta
+        return x
+
+    @staticmethod
+    def backward(ctx, z_target):
+        x, = ctx.saved_tensors
+        half = ctx.delta / 2.0
+
+        # Project: snap values inside the gap to the nearest boundary
+        result = torch.where(
+            z_target >= 0,
+            torch.clamp(z_target, min=half),
+            torch.clamp(z_target, max=-half),
+        )
+
+        return process_activation_target(x, result), None
+
+class GappedStepProjection(torch.autograd.Function):
+    """
+    Projection-aware Gapped Step activation.
+
+    Like the regular Step activation but with a dead zone of width `delta`
+    centred at the origin where the function is undefined:
+
+        f(x) = +1   if x >= delta/2
+        f(x) = -1   if x <= -delta/2
+        (undefined)  if -delta/2 < x < delta/2
+
+    The projection selects the closer of the two feasible branches:
+        Branch 1 (positive): x' = clamp(x, min=delta/2), y = +1
+        Branch 2 (negative): x' = clamp(x, max=-delta/2), y = -1
+    """
+    @staticmethod
+    def forward(ctx, x, delta=2.0):
+        ctx.save_for_backward(x)
+        ctx.delta = delta
+        half = delta / 2.0
+        return torch.where(x >= half, torch.ones_like(x),
+               torch.where(x <= -half, -torch.ones_like(x),
+                            torch.zeros_like(x)))
+
+    @staticmethod
+    def backward(ctx, z_target):
+        x, = ctx.saved_tensors
+        half = ctx.delta / 2.0
+
+        # Branch 1: positive (x >= delta/2, y = +1)
+        x_pos = torch.clamp(x, min=half)
+        dist_pos = (x - x_pos) ** 2 + (z_target - 1.0) ** 2
+
+        # Branch 2: negative (x <= -delta/2, y = -1)
+        x_neg = torch.clamp(x, max=-half)
+        dist_neg = (x - x_neg) ** 2 + (z_target + 1.0) ** 2
+
+        # Select branch with minimum distance
+        result = torch.where(dist_pos <= dist_neg, x_pos, x_neg)
+
+        return process_activation_target(x, result), None
+
+class QuantizeProjection(torch.autograd.Function):
+    """
+    Projection-aware Quantize (infinite ladder) activation.
+
+    Forward: rounds each element to the nearest multiple of `step`,
+    producing an infinite staircase function:
+
+        f(x) = step * round(x / step)
+
+    The graph consists of horizontal line segments: for integer k,
+    when x ∈ [(k - ½) * step,  (k + ½) * step], the output is k * step.
+
+    Backward: exact Euclidean projection of (x, z_target) onto the
+    nearest segment of the staircase graph.  For each element we
+    consider 3 candidate rungs (the level nearest to z_target and its
+    two neighbours), clamp x into each segment's domain, compute the
+    squared distance, and pick the winner.
+
+    This avoids the problems of the pjax quantize_proj:
+      1. Returns the projected input (z is deterministic given x).
+      2. Uses the infinite ladder — no bounded range / clamping.
+      3. The 3-candidate search is exact (nearest rung ± 1 always
+         covers the optimal segment for any (x, z) pair).
+    """
+    @staticmethod
+    def forward(ctx, x, step=1.0):
+        ctx.save_for_backward(x)
+        ctx.step = step
+        return step * torch.round(x / step)
+
+    @staticmethod
+    def backward(ctx, z_target):
+        x, = ctx.saved_tensors
+        s = ctx.step
+
+        # Nearest rung index to the target output
+        k0 = torch.round(z_target / s)
+
+        best_x = x  # placeholder
+        best_dist = torch.full_like(x, float('inf'))
+
+        # Check 3 candidate levels: k0 - 1,  k0,  k0 + 1
+        for dk in (-1, 0, 1):
+            k = k0 + dk
+            level = k * s                     # output value on this rung
+            lo = (k - 0.5) * s                # segment domain lower bound
+            hi = (k + 0.5) * s                # segment domain upper bound
+            x_clamped = torch.clamp(x, min=lo, max=hi)
+            dist = (x - x_clamped) ** 2 + (z_target - level) ** 2
+            better = dist < best_dist
+            best_x = torch.where(better, x_clamped, best_x)
+            best_dist = torch.where(better, dist, best_dist)
+
+        return process_activation_target(x, best_x), None
+
 @torch.compile(dynamic=True)
 def simplex_op_pt(a):
     """Project onto probability simplex (forward operation). Batched version."""
@@ -1595,6 +1781,7 @@ def hardmax_proj_pt(a, z):
     winner = torch.argmax(z, dim=-1, keepdim=True)
     projected_a = _project_hardmax_winner_region_pt(a, winner)
     return (projected_a,)
+
 
 class SimplexProjection(torch.autograd.Function):
     """

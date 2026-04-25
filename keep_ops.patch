@@ -1,0 +1,239 @@
+diff --git a/frameworks/ptorch/core/ops.py b/frameworks/ptorch/core/ops.py
+index 5f4cfc341..658031459 100644
+--- a/frameworks/ptorch/core/ops.py
++++ b/frameworks/ptorch/core/ops.py
+@@ -1453,6 +1453,134 @@ class StepProjection(torch.autograd.Function):
+         mid = (s - z_target) / (n + 1)
+         
+         return projected_inputs
++
++class GapProjection(torch.autograd.Function):
++    """
++    Projection-aware Gap activation.
++
++    Forward: identity (pass-through).
++    Backward: projects input x onto the feasible set |x| >= delta/2,
++    enforcing a gap of width `delta` in output space centred at zero.
++    Values inside the gap are snapped to the nearest boundary (+delta/2
++    or -delta/2), forcing the network to commit.
++    """
++    @staticmethod
++    def forward(ctx, x, delta=2.0):
++        ctx.save_for_backward(x)
++        ctx.delta = delta
++        return x
++
++    @staticmethod
++    def backward(ctx, z_target):
++        x, = ctx.saved_tensors
++        half = ctx.delta / 2.0
++
++        # Project: snap values inside the gap to the nearest boundary
++        result = torch.where(
++            z_target >= 0,
++            torch.clamp(z_target, min=half),
++            torch.clamp(z_target, max=-half),
++        )
++
++        return process_activation_target(x, result), None
++
++class GappedStepProjection(torch.autograd.Function):
++    """
++    Projection-aware Gapped Step activation.
++
++    Like the regular Step activation but with a dead zone of width `delta`
++    centred at the origin where the function is undefined:
++
++        f(x) = +1   if x >= delta/2
++        f(x) = -1   if x <= -delta/2
++        (undefined)  if -delta/2 < x < delta/2
++
++    The projection selects the closer of the two feasible branches:
++        Branch 1 (positive): x' = clamp(x, min=delta/2), y = +1
++        Branch 2 (negative): x' = clamp(x, max=-delta/2), y = -1
++    """
++    @staticmethod
++    def forward(ctx, x, delta=2.0):
++        ctx.save_for_backward(x)
++        ctx.delta = delta
++        half = delta / 2.0
++        return torch.where(x >= half, torch.ones_like(x),
++               torch.where(x <= -half, -torch.ones_like(x),
++                            torch.zeros_like(x)))
++
++    @staticmethod
++    def backward(ctx, z_target):
++        x, = ctx.saved_tensors
++        half = ctx.delta / 2.0
++
++        # Branch 1: positive (x >= delta/2, y = +1)
++        x_pos = torch.clamp(x, min=half)
++        dist_pos = (x - x_pos) ** 2 + (z_target - 1.0) ** 2
++
++        # Branch 2: negative (x <= -delta/2, y = -1)
++        x_neg = torch.clamp(x, max=-half)
++        dist_neg = (x - x_neg) ** 2 + (z_target + 1.0) ** 2
++
++        # Select branch with minimum distance
++        result = torch.where(dist_pos <= dist_neg, x_pos, x_neg)
++
++        return process_activation_target(x, result), None
++
++class QuantizeProjection(torch.autograd.Function):
++    """
++    Projection-aware Quantize (infinite ladder) activation.
++
++    Forward: rounds each element to the nearest multiple of `step`,
++    producing an infinite staircase function:
++
++        f(x) = step * round(x / step)
++
++    The graph consists of horizontal line segments: for integer k,
++    when x ∈ [(k - ½) * step,  (k + ½) * step], the output is k * step.
++
++    Backward: exact Euclidean projection of (x, z_target) onto the
++    nearest segment of the staircase graph.  For each element we
++    consider 3 candidate rungs (the level nearest to z_target and its
++    two neighbours), clamp x into each segment's domain, compute the
++    squared distance, and pick the winner.
++
++    This avoids the problems of the pjax quantize_proj:
++      1. Returns the projected input (z is deterministic given x).
++      2. Uses the infinite ladder — no bounded range / clamping.
++      3. The 3-candidate search is exact (nearest rung ± 1 always
++         covers the optimal segment for any (x, z) pair).
++    """
++    @staticmethod
++    def forward(ctx, x, step=1.0):
++        ctx.save_for_backward(x)
++        ctx.step = step
++        return step * torch.round(x / step)
++
++    @staticmethod
++    def backward(ctx, z_target):
++        x, = ctx.saved_tensors
++        s = ctx.step
++
++        # Nearest rung index to the target output
++        k0 = torch.round(z_target / s)
++
++        best_x = x  # placeholder
++        best_dist = torch.full_like(x, float('inf'))
++
++        # Check 3 candidate levels: k0 - 1,  k0,  k0 + 1
++        for dk in (-1, 0, 1):
++            k = k0 + dk
++            level = k * s                     # output value on this rung
++            lo = (k - 0.5) * s                # segment domain lower bound
++            hi = (k + 0.5) * s                # segment domain upper bound
++            x_clamped = torch.clamp(x, min=lo, max=hi)
++            dist = (x - x_clamped) ** 2 + (z_target - level) ** 2
++            better = dist < best_dist
++            best_x = torch.where(better, x_clamped, best_x)
++            best_dist = torch.where(better, dist, best_dist)
++
++        return process_activation_target(x, best_x), None
++
+ def simplex_op_pt(a):
+     """Project onto probability simplex (forward operation). Batched version."""
+     n = a.size(-1)
+diff --git a/frameworks/ptorch/nn/experimental_modules.py b/frameworks/ptorch/nn/experimental_modules.py
+index cc6382ea8..7ea619c06 100644
+--- a/frameworks/ptorch/nn/experimental_modules.py
++++ b/frameworks/ptorch/nn/experimental_modules.py
+@@ -401,6 +401,38 @@ class ReLUSquared(nn.Module):
+         return torch.square(torch.relu(input))
+     
+ 
++class Quantize(nn.Module):
++    """Infinite-ladder quantization activation.
++
++    Rounds each element to the nearest multiple of ``step``, producing
++    a staircase function with uniform step height extending to ±∞:
++
++        f(x) = step × round(x / step)
++
++    Unlike a bounded quantizer (which clamps to a finite set of levels),
++    this function has infinitely many rungs so that every real-valued
++    input maps to a well-defined level without range saturation.
++
++    In projection mode the backward pass computes the exact Euclidean
++    projection of ``(x, z_target)`` onto the graph of the staircase,
++    giving a meaningful geometric training signal despite the piecewise-
++    constant forward pass.
++
++    Args:
++        step: Distance between adjacent quantization levels (default 1.0).
++    """
++    def __init__(self, step: float = 1.0):
++        super().__init__()
++        if step <= 0:
++            raise ValueError(f"step must be positive, got {step}")
++        self.step = step
++
++    def forward(self, input):
++        if config.use_projections:
++            return QuantizeProjection.apply(input, self.step)
++        return self.step * torch.round(input / self.step)
++    
++
+ 
+ class Rotary(nn.Module):
+     # Caches cos/sin tables per sequence length on the current device.
+diff --git a/frameworks/ptorch/nn/modules.py b/frameworks/ptorch/nn/modules.py
+index 2512d22f0..2eb2b82af 100644
+--- a/frameworks/ptorch/nn/modules.py
++++ b/frameworks/ptorch/nn/modules.py
+@@ -165,6 +165,52 @@ class Step(nn.Module):
+         return torch.where(input >= 0, torch.tensor(1.0, dtype=input.dtype, device=input.device), 
+                            torch.tensor(-1.0, dtype=input.dtype, device=input.device))
+ 
++class Gap(nn.Module):
++    """Gap activation function.
++    
++    The forward pass is the identity (pass-through). The projection
++    backward enforces that outputs must lie outside the gap, i.e.
++    |y| >= delta/2, forcing the network to commit to a definitive
++    decision rather than hovering near zero.
++
++    Args:
++        delta: Width of the gap region (default 2.0, giving a gap of
++               [-1, 1] in output space).
++    """
++    def __init__(self, delta: float = 2.0):
++        super().__init__()
++        self.delta = delta
++        
++    def forward(self, input):
++        if config.use_projections:
++            return GapProjection.apply(input, self.delta)
++        return input
++
++class GappedStep(nn.Module):
++    """Step activation function with a dead zone.
++    
++    Like the regular Step activation but with a gap of width `delta`
++    centred at the origin where the function is undefined:
++
++        f(x) = +1   if x >= delta/2
++        f(x) = -1   if x <= -delta/2
++        f(x) =  0   otherwise (undefined region, outputs 0)
++
++    Args:
++        delta: Width of the gap region (default 2.0).
++    """
++    def __init__(self, delta: float = 2.0):
++        super().__init__()
++        self.delta = delta
++        
++    def forward(self, input):
++        if config.use_projections:
++            return GappedStepProjection.apply(input, self.delta)
++        half = self.delta / 2.0
++        return torch.where(input >= half, torch.tensor(1.0, dtype=input.dtype, device=input.device),
++               torch.where(input <= -half, torch.tensor(-1.0, dtype=input.dtype, device=input.device),
++                            torch.tensor(0.0, dtype=input.dtype, device=input.device)))
++
+ 
+ class Simplex(nn.Module):
+     """Simplex activation function."""

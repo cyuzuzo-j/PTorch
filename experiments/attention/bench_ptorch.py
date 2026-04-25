@@ -12,8 +12,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
-from frameworks.ptorch.nn.modules import Linear, MultiHeadAttention
+from frameworks.ptorch.nn.modules import Linear
+from frameworks.ptorch.nn.experimental_modules import MultiHeadAttention
 from frameworks.ptorch.core.ops import CrossEntropyProjection
+from frameworks.ptorch.core.overrides import apply_overrides
 import ptorch.optim_static as optim_static
 import tqdm, time
 import wandb
@@ -23,6 +25,7 @@ CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 
 DATASETS = {"MNIST": MNISTDataModule, "CIFAR10": InfiniteCifarDataModule}
 
+apply_overrides()
 
 # ── Model ────────────────────────────────────────
 class MNISTAttention_PTorch(nn.Module):
@@ -33,23 +36,11 @@ class MNISTAttention_PTorch(nn.Module):
         self.num_patches = (28 // patch_size) ** 2
         self.patch_dim = patch_size * patch_size
 
-        # In ptorch, we need Conversion after standard Embedding layers,
-        # but since we process patches using nn.Linear to project them, that's what we use.
-        # Note: the standard pytorch nn.Linear is fine if we use Conversion after it,
-        # or we can use ptorch's Linear. Following other MLP benchmarks, we use ptorch.nn.modules.Linear
-        
         self.embedding = Linear(self.patch_dim, emb_dim)
 
-        self.cls_token = nn.Parameter(torch.randn(1, emb_dim))
-        self.pos_embedding = nn.Parameter(torch.randn(self.num_patches + 1, emb_dim))
-
-        #self.norm1 = BatchNorm(emb_dim)
-        
         # Ptorch custom MultiHeadAttention which uses SimplexProjection internally
-        self.attn = MultiHeadAttention(emb_dim, emb_dim // num_heads, num_heads)
+        self.attn = MultiHeadAttention(emb_dim, emb_dim // num_heads, num_heads, use_rotary=True)
         
-        #self.norm2 = BatchNorm(emb_dim)
-
         self.mlp_head = Linear(emb_dim, 10)
 
     def forward(self, x):
@@ -66,21 +57,15 @@ class MNISTAttention_PTorch(nn.Module):
         # Project patches
         tokens = self.embedding(patches)
 
-        cls_tokens = self.cls_token.unsqueeze(0).expand(B, -1, -1)
-        tokens = torch.cat([cls_tokens, tokens], dim=1)
-
-        tokens = tokens + self.pos_embedding.unsqueeze(0)
-
-        #x_norm = self.norm1(tokens)
-        
         # ptorch MultiHeadAttention only returns the output, no weights
         attn_out = self.attn(tokens)
         
         x_attn = tokens + attn_out
         
-        cls_out = x_attn[:,0]
+        # Mean pooling across patches
+        pooled_out = x_attn.mean(dim=1)
 
-        return self.mlp_head(cls_out)
+        return self.mlp_head(pooled_out)
 
 # ── Training ─────────────────────────────────────
 def run(cfg, task_cfg, batch_size, run_number, device):
