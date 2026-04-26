@@ -5,6 +5,9 @@ import sys, os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../frameworks')))
 
+# Keep this benchmark in eager mode to avoid inductor cache/JIT crashes.
+os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
+
 import yaml
 import torch
 import torch.nn as tnn
@@ -16,14 +19,22 @@ import ptorch.optim_static as ptorch_optim_static
 import tqdm, time
 import wandb
 
-FRAMEWORK = "ptorch_simplex"
+FRAMEWORK = "ptorch_cyclic"
+XOR_BITS = 14
 
 OPTIM_MODULES = vars(ptorch_optim_static)
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 
 # ── XOR Dataset ──────────────────────────────────
-X_XOR = torch.tensor([[0., 0.], [0., 1.], [1., 0.], [1., 1.]])
-Y_XOR = torch.tensor([0, 1, 1, 0], dtype=torch.long)
+def make_xor_truth_table(num_bits):
+    n = 1 << num_bits
+    rows = torch.arange(n, dtype=torch.long)
+    bits = ((rows.unsqueeze(1) >> torch.arange(num_bits - 1, -1, -1)) & 1)
+    labels = (bits.sum(dim=1) % 2).long()
+    return bits.float(), labels
+
+
+X_XOR, Y_XOR = make_xor_truth_table(XOR_BITS)
 
 
 class ProjectionTracer(torch.fx.Tracer):
@@ -94,7 +105,7 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     seed = cfg["random_seed"]
     torch.manual_seed(seed + run_number)
 
-    model      = MLP(task_cfg["hidden"], task_cfg["in_features"], task_cfg["classes"]).to(device)
+    model      = MLP(task_cfg["hidden"], X_XOR.shape[1], task_cfg["classes"]).to(device)
 
     opt_name   = cfg["ptorch_optimizer"]
     opt_kwargs = cfg.get("ptorch_optimizer_kwargs", {})
