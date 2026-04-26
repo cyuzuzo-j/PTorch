@@ -8,7 +8,7 @@ random_seed: 42
 max_steps: 20000000
 num_runs: 1
 eval_every: 1
-patience: 10
+patience: 100000
 
 # ── Batch sizes to sweep ─────────────────────────
 batch_sizes: [4]
@@ -18,7 +18,7 @@ tasks:
   - name: XOR
     in_features: 2
     classes: 1
-    hidden: [200]
+    hidden: [6000]
 
 # ── Optimizers per framework ──────────────────────
 pjax_optimizer: CyclicProjections
