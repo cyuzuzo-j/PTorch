@@ -392,6 +392,7 @@ def matmul_proj(A, B, Z, t_init=None, alpha=1.0, g=1.0, omega=1.0, num_steps=1, 
         B_proj = B_eff_proj
 
     return A_proj, B_proj, Z_proj, t.detach()
+
 # ─── autograd.Function wrappers ───────────────────────────────────────────────
 class MatMulProjection(torch.autograd.Function):
     """
@@ -399,12 +400,13 @@ class MatMulProjection(torch.autograd.Function):
     subject to A_{new} @ B_{new} = Z_{new} (or A_{new} - A_{new} @ B_{new} = Z_{new} if residual)
     """
     @staticmethod
-    def forward(ctx, A, B, num_steps, alpha, g, omega, proj_cache=None, pairwise=False, residual=True):
+    def forward(ctx, A, B, num_steps, alpha, g, omega, proj_cache=None, pairwise=False, residual=True, forward_cache=None):
         ctx.save_for_backward(A, B)
         ctx.alpha = alpha
         ctx.g = g
         ctx.num_steps = num_steps
         ctx.proj_cache = proj_cache  # Store reference to the mutable dictionary
+        ctx.forward_cache = forward_cache  # Store reference to the mutable dictionary for forward pass caching
         ctx.omega = omega
         ctx.pairwise = pairwise
         ctx.residual = residual
@@ -435,20 +437,21 @@ class MatMulProjection(torch.autograd.Function):
             
             t_init_2d = t_init.reshape(Z_2d.shape) if (t_init is not None and t_init.shape == Z_det.shape) else None
             
-            A_proj_2d, B_proj_2d, _, t_new = matmul_proj(
+            A_proj_2d, B_proj_2d, Z_proj_2d, t_new = matmul_proj(
                 A_2d, B_2d, Z_2d, t_init=t_init_2d, alpha=ctx.alpha, g=ctx.g, 
                 omega=ctx.omega, num_steps=ctx.num_steps, residual=ctx.residual
             )
             
             A_proj = A_proj_2d.reshape(A_det.shape)
             B_proj = B_proj_2d.reshape(B_det.shape[-2], B_det.shape[-1]).expand(B_det.shape)
+            Z_proj = Z_proj_2d.reshape(Z_det.shape)
             
             if ctx.proj_cache is not None:
                 ctx.proj_cache['t'] = t_new.reshape(Z_det.shape)
         else:
             # .contiguous().clone() ensures no view _base for 2D inputs
             # that may come from transpose() or other view ops
-            A_proj, B_proj, _, t_new = matmul_proj(
+            A_proj, B_proj, Z_proj, t_new = matmul_proj(
                 A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
                 t_init=t_init, alpha=ctx.alpha, g=ctx.g, omega=ctx.omega, 
                 num_steps=ctx.num_steps, residual=ctx.residual
@@ -459,7 +462,90 @@ class MatMulProjection(torch.autograd.Function):
                 ctx.proj_cache['t'] = t_new
 
         # Return Nones for proj_cache, pairwise, and residual 
-        return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None, None
+        #print(f"DEBUG MatMulProjection.backward called. ctx.forward_cache len: {len(ctx.forward_cache) if ctx.forward_cache else 'None'}")
+        if ctx.forward_cache is not None:
+            ctx.forward_cache[0] = Z_proj
+            #print(f"DEBUG Populated forward_cache[0] with tensor of shape {Z_proj.shape}, sum {Z_proj.sum().item()}")
+        return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None, None, None
+
+
+@torch.compile()
+def matmul_proj_fixed_A(A, B, Z, g=1.0, omega=1.0, residual=False):
+    """
+    Exact projection onto {A, B, Z : A @ B = Z} with A held fixed.
+    A: (..., M, K)
+    B: (..., K, N)
+    Z: (..., M, N)
+    """
+    M = A.size(-2)
+    N = B.size(-1)
+
+    if residual:
+        I_res = torch.eye(B.size(-2), B.size(-1), device=B.device, dtype=B.dtype)
+        B_eff = I_res - B
+    else:
+        B_eff = B
+
+    lam = (omega ** 2) / (g ** 2)
+    P = A @ B_eff  # (..., M, N)
+    Z0 = Z * omega # (..., M, N)
+
+    S = A @ A.transpose(-1, -2) # (..., M, M)
+    I = torch.eye(M, device=A.device, dtype=A.dtype)
+    system_matrix = I + lam * S
+
+    rhs = P + lam * (S @ Z0)
+
+    # Solve (I + lam*S) Z_proj = rhs
+    Z_proj = torch.linalg.solve(system_matrix, rhs)
+
+    T = lam * (Z_proj - Z0)
+    B_eff_proj = B_eff - A.transpose(-1, -2) @ T
+
+    Z_proj = Z_proj / omega
+
+    if residual:
+        B_proj = I_res - B_eff_proj
+    else:
+        B_proj = B_eff_proj
+
+    return A, B_proj, Z_proj, None
+
+
+class MatMulProjectionFrozenA(torch.autograd.Function):
+    """
+    Minimize || B_{new} - B_{old} ||_F^2 + g * || Z_{new} - Z_{old} ||_F^2
+    subject to A_{old} @ B_{new} = Z_{new} (A is held fixed)
+    """
+    @staticmethod
+    def forward(ctx, A, B, g, omega, residual=False, forward_cache=None):
+        ctx.save_for_backward(A, B)
+        ctx.g = g
+        ctx.omega = omega
+        ctx.residual = residual
+        ctx.forward_cache = forward_cache
+        
+        if residual:
+            return (A - A @ B) / omega
+        else:
+            return (A @ B) / omega
+
+    @staticmethod
+    def backward(ctx, Z_target):
+        A, B = ctx.saved_tensors
+        A_det = A.detach()
+        B_det = B.detach()
+        Z_det = Z_target.detach()
+
+        A_proj, B_proj, Z_proj, _ = matmul_proj_fixed_A(
+            A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
+            g=ctx.g, omega=ctx.omega, residual=ctx.residual
+        )
+
+        if ctx.forward_cache is not None:
+            ctx.forward_cache[0] = Z_proj
+
+        return process_activation_target(A_det, A_proj), B_proj, None, None, None, None
 
 
 class MatMulProjectionDTP(torch.autograd.Function):
@@ -1048,6 +1134,7 @@ class CrossEntropyProjection(torch.autograd.Function):
         for _ in range(steps):
             x = x + lmbda * (labels - F.softmax(x, dim=-1))
 
+        #print(f"DEBUG CrossEntropyProjection.backward returning x of shape {x.shape}")
         return x, labels
 
 class HardMarginProjection(torch.autograd.Function):
@@ -1185,8 +1272,9 @@ class ReLUProjection(torch.autograd.Function):
     Ignores the original input x entirely.
     """
     @staticmethod
-    def forward(ctx, x):
+    def forward(ctx, x, forward_cache=None):
         ctx.save_for_backward(x)
+        ctx.forward_cache = forward_cache
         return torch.relu(x)
 
     @staticmethod
@@ -1202,8 +1290,10 @@ class ReLUProjection(torch.autograd.Function):
         dist_2 = (x - x_2)**2 + (z - x_2)**2
 
         # Select solution minimizing distance
-        result = torch.where(dist_1 < dist_2, x_1, x_2)
-        return process_activation_target(x, result)        
+        result_backwards = torch.where(dist_1 < dist_2, x_1, x_2)
+        result_forwards = torch.where(dist_1 < dist_2, torch.zeros_like(x), x_2)
+        ctx.forward_cache[0] = result_forwards        
+        return process_activation_target(x, result_backwards), None    
 
 class LogitSoftcapInversion(torch.autograd.Function):
     """
@@ -2175,7 +2265,6 @@ class SquaredReLUProjection(torch.autograd.Function):
 
 # ─── ℓ∞ ReLU Bilinear Projection ─────────────────────────────────────────────
 # @torch.compile(dynamic=True) 
-import torch
 
 @torch.compile(dynamic=True)
 def _abs_bilinear_newton(x, w, mode, constant, gamma_sq, eps_init=None, num_steps=5):

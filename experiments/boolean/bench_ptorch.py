@@ -9,10 +9,10 @@ import yaml
 import torch
 import torch.nn as tnn
 import torch.nn.functional as F
-from ptorch.nn.modules import LinearBias, Simplex, ReLU, MultiHeadAttention
-from ptorch.core.ops import CrossEntropyProjection
+import torch.fx
+from ptorch.nn.modules import Linear, LinearFrozen, ReLU, LeakyReLU, ProjectionModule, CrossEntropy, HardMarginLoss
+from ptorch import config
 import ptorch.optim_static as ptorch_optim_static
-import ptorch.config as ptorch_config
 import tqdm, time
 import wandb
 
@@ -25,25 +25,68 @@ CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 X_XOR = torch.tensor([[0., 0.], [0., 1.], [1., 0.], [1., 1.]])
 Y_XOR = torch.tensor([0, 1, 1, 0], dtype=torch.long)
 
+
+class ProjectionTracer(torch.fx.Tracer):
+    def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
+        if isinstance(m, ProjectionModule):
+            return True
+        return super().is_leaf_module(m, module_qualified_name)
+
+class PropagateCache(torch.fx.Interpreter):
+    def run_node(self, n: torch.fx.Node):
+        cache_to_apply = None
+        if n.op == 'call_module':
+            submod = self.module.get_submodule(n.target)
+            if hasattr(submod, 'projection_forward_cache') and isinstance(submod.projection_forward_cache, list):
+                if submod.projection_forward_cache:
+                    cache = submod.projection_forward_cache[0]
+                    if cache is not None:
+                        cache_to_apply = cache
+                    else:
+                        print(f"\n[PropagateCache] Intercepted node '{n.name}' but cache is empty.")
+                    
+        result = super().run_node(n)
+        
+        if cache_to_apply is not None:
+            #print(f"  -> Original tensor data sum: {result.sum().item():.4f}")
+            result.data.copy_(cache_to_apply.data)
+            #print(f"  -> Successfully updated tensor data in-place! New sum: {result.sum().item():.4f}")
+            
+        return result
 # ── Model ────────────────────────────────────────
 class MLP(tnn.Module):
     def __init__(self, hidden, in_features, classes):
         super().__init__()
         last = in_features
         self.hidden_layers = tnn.ModuleList()
-        for f in hidden:
-            # Using same g and alpha from CNN/MLP
-            self.hidden_layers.append(LinearBias(last, f, g=0.885, alpha=120.11))
-            self.hidden_layers.append(ReLU(f))
+        for i, f in enumerate(hidden):
+            # Using bias=False to match JAX implementation
+            if i == 0:
+                self.hidden_layers.append(LinearFrozen(last, f, bias=False, g=1.0))
+            else:
+                self.hidden_layers.append(Linear(last, f, bias=False, g=1.0, alpha=1.0, num_iters=10))
+            self.hidden_layers.append(LeakyReLU(0.1))
             last = f
         self.n_hidden = len(hidden)
-        self.out = LinearBias(last, classes)
+        # Using bias=False and 1 output class to match JAX implementation
+        self.out = Linear(last, 1, bias=False, g=1.0, alpha=1.0, num_iters=10)
+        self.loss = HardMarginLoss()
 
-    def forward(self, x):
+    def forward(self, x, y):
         for i in range(0,len(self.hidden_layers),2):
             x = self.hidden_layers[i](x) 
             x = self.hidden_layers[i+1](x)
-        return self.out(x)
+        x = self.out(x)
+        # JAX target shape is (batch_size, 1)
+        return self.loss(x, y.view(-1, 1).float())
+
+    def forward_eval(self, x):
+        for i in range(0,len(self.hidden_layers),2):
+            x = self.hidden_layers[i](x) 
+            x = self.hidden_layers[i+1](x)
+        x = self.out(x)
+        return x
+
 
 
 # ── Training ─────────────────────────────────────
@@ -52,6 +95,7 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     torch.manual_seed(seed + run_number)
 
     model      = MLP(task_cfg["hidden"], task_cfg["in_features"], task_cfg["classes"]).to(device)
+
     opt_name   = cfg["ptorch_optimizer"]
     opt_kwargs = cfg.get("ptorch_optimizer_kwargs", {})
     optimizer  = OPTIM_MODULES[opt_name](model.parameters(), **opt_kwargs)
@@ -71,22 +115,13 @@ def run(cfg, task_cfg, batch_size, run_number, device):
         "max_steps": cfg["max_steps"],
         "eval_every": cfg["eval_every"],
         "patience": cfg["patience"],
-        **ptorch_config.snapshot(),
     })
-
-    def step_fn(x, y):
-        logits  = model(x)
-        y_oh    = F.one_hot(y, num_classes=logits.shape[-1]).float()
-        projected = CrossEntropyProjection.apply(logits, y_oh)
-        optimizer.zero_grad()
-        projected.sum().backward()
-        loss = F.cross_entropy(logits.detach(), y)
-        optimizer.step()
-        return loss
 
     def eval_fn(x, y):
         with torch.no_grad():
-            return (model(x).argmax(dim=-1) == y).float().mean()
+            logits = model.forward_eval(x)
+            preds = (logits > 0.5).long().squeeze()
+            return (preds == y).float().mean()
 
     best_val_acc, best_state, best_step = 0.0, None, 0
     no_improve = 0
@@ -94,6 +129,27 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     t0 = time.time()
 
     x_train, y_train = X_XOR.to(device), Y_XOR.to(device)
+
+    ## ------ do only real forward backward pass --------
+    traced_model  = torch.fx.symbolic_trace(model)
+    graph = traced_model(x_train, y_train)
+    optimizer.zero_grad()
+
+    def step_fn():
+        optimizer.zero_grad()
+        logits = model(x_train, y_train)
+        # Projection losses return logits (non-scalar), so seed backward explicitly.
+        logits.sum().backward()
+        optimizer.step()
+
+        # Keep a scalar metric for logging that matches the hard-margin objective.
+        with torch.no_grad():
+            target = y_train.view(-1, 1).float()
+            err1 = torch.where(target == 1, torch.where(logits < 1.0, (logits - 1.0) ** 2, torch.tensor(0.0, device=logits.device)), torch.tensor(0.0, device=logits.device))
+            err0 = torch.where(target == 0, torch.where(logits > 0.0, logits ** 2, torch.tensor(0.0, device=logits.device)), torch.tensor(0.0, device=logits.device))
+            scalar_loss = (err1 + err0).mean()
+        return float(scalar_loss.item())
+
 
     with tqdm.tqdm(unit="step") as pbar:
         while True:
@@ -114,7 +170,7 @@ def run(cfg, task_cfg, batch_size, run_number, device):
                     print(f"Early stop at step {step}")
                     break
 
-            loss = step_fn(x_train, y_train)
+            loss = step_fn()
             wandb.log({"train/loss": float(loss)}, step=step)
             step += 1
             pbar.update(1)
