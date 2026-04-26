@@ -7,7 +7,7 @@ experiment_name: xor_benchmark
 random_seed: 42
 max_steps: 20000000
 num_runs: 1
-eval_every: 100
+eval_every: 1
 patience: 10
 
 # ── Batch sizes to sweep ─────────────────────────
@@ -17,8 +17,8 @@ batch_sizes: [4]
 tasks:
   - name: XOR
     in_features: 2
-    classes: 2
-    hidden: [4]
+    classes: 1
+    hidden: [200]
 
 # ── Optimizers per framework ──────────────────────
 pjax_optimizer: CyclicProjections
@@ -29,8 +29,8 @@ pjax_orr_optimizer: DouglasRachford
 pjax_orr_optimizer_kwargs:
   steps_per_update: 20
 
-ptorch_optimizer: ProjectionMuon
-ptorch_optimizer_kwargs: {lr: 0.001}
+ptorch_optimizer: AlternatingProjectionsMomentum
+ptorch_optimizer_kwargs: {lr: 1.0, momentum: 0.9}
 
 torch_optimizer: Adam
 torch_optimizer_kwargs:

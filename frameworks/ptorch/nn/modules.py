@@ -5,7 +5,14 @@ import torch.nn.functional as F
 from ..core.ops import * 
 from .. import config
 
-class Linear(nn.Module):
+class ProjectionModule(nn.Module):
+    """Base class for projection-aware modules."""
+    def __init__(self, outputs):
+        super().__init__()
+        self.outputs = outputs
+        self.projection_forward_cache = [None for _ in range(outputs)]
+    
+class Linear(ProjectionModule):
     """Projection-only linear layer following the old main-style matmul path.
 
     Supports optional affine bias via input augmentation and optional residual
@@ -25,7 +32,7 @@ class Linear(nn.Module):
         dtp: bool = False,
         norm = 'l2',
     ):
-        super().__init__()
+        super().__init__(outputs=1)
         self.in_features = in_features
         self.out_features = out_features
         self.alpha = alpha
@@ -109,8 +116,8 @@ class Linear(nn.Module):
                 projected_input, weight_matrix, self.num_iters,
                 self.alpha * config.projection_alpha,
                 self.g * config.projection_g, self.omega,
-                self.proj_cache, False, self.residual,
-            )
+                self.proj_cache, False, self.residual, self.projection_forward_cache)
+            
 
         # Slice back to correct output dimension if padding occurred
         if self.residual:
@@ -118,9 +125,84 @@ class Linear(nn.Module):
             
         return output
         
-class ReLU(nn.ReLU):
-    def __init__(self, inplace: bool = False, norm="l2"):
-        super().__init__(inplace=inplace)
+class LinearFrozen(ProjectionModule):
+    """Projection-only linear layer with frozen input A.
+    Only the weights (B) are updated to satisfy A @ B = Z.
+    """
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        bias: bool = True,
+        g: float = 1.0,
+        omega: float = 1.0,
+        residual: bool = False,
+    ):
+        super().__init__(outputs=1)
+        self.in_features = in_features
+        self.out_features = out_features
+        self.g = g
+        self.omega = omega
+        self.use_bias = bias
+        self.residual = residual
+
+        self.weight = nn.Parameter(torch.empty(out_features, in_features))
+        if self.use_bias:
+            self.bias = nn.Parameter(torch.zeros(1, out_features))
+        else:
+            self.register_parameter('bias', None)
+
+        nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
+        
+        if self.residual:
+            with torch.no_grad():
+                identity = torch.eye(
+                    out_features, in_features, 
+                    device=self.weight.device, 
+                    dtype=self.weight.dtype
+                )
+                self.weight.copy_(identity - self.weight)
+
+    def forward(self, input):
+        if not config.use_projections:
+            b = self.bias.squeeze(0) if self.use_bias else None
+            output = F.linear(input, self.weight, b)
+            return output / self.omega
+
+        projected_input = input
+        weight_matrix = self.weight.T
+
+        if self.use_bias:
+            projected_input = F.pad(input, (0, 1), value=1.0)
+            weight_matrix = torch.cat([weight_matrix, self.bias], dim=0)
+
+        if self.residual:
+            in_dim = projected_input.shape[-1]
+            out_dim = weight_matrix.shape[-1]
+            padded_dim = max(in_dim, out_dim)
+
+            if padded_dim > in_dim:
+                projected_input = F.pad(projected_input, (0, padded_dim - in_dim), value=0.0)
+
+            if padded_dim != in_dim or padded_dim != out_dim:
+                padded_weight = weight_matrix.new_zeros((padded_dim, padded_dim))
+                padded_weight[:in_dim, :out_dim] = weight_matrix
+                weight_matrix = padded_weight
+
+        output = MatMulProjectionFrozenA.apply(
+            projected_input, weight_matrix,
+            self.g * config.projection_g, self.omega,
+            self.residual, self.projection_forward_cache
+        )
+
+        if self.residual:
+            return output[..., :self.out_features]
+            
+        return output
+        
+class ReLU(ProjectionModule):
+    def __init__(self, norm="l2"):
+        super().__init__(1)
         self.norm = norm
 
     def forward(self, input, norm=None):
@@ -128,9 +210,8 @@ class ReLU(nn.ReLU):
         if config.use_projections:
             if norm == 'linf':
                 return ReLULInfinityProjection.apply(input)
-            return ReLUProjection.apply(input)
-        if norm == 'linf':
-            raise ValueError("L∞ projection for ReLU is not supported in gradient mode")
+            return ReLUProjection.apply(input,  self.projection_forward_cache)
+        raise ValueError("L∞ projection for ReLU is not supported in gradient mode")
         return super().forward(input)
 
 
@@ -165,6 +246,12 @@ class Step(nn.Module):
         return torch.where(input >= 0, torch.tensor(1.0, dtype=input.dtype, device=input.device), 
                            torch.tensor(-1.0, dtype=input.dtype, device=input.device))
 
+class CrossEntropy(ProjectionModule):
+    def __init__(self):
+        super().__init__(0)
+
+    def forward(self, input, data_target):
+        return CrossEntropyProjection.apply(input, data_target)
 class Gap(nn.Module):
     """Gap activation function.
     
@@ -296,6 +383,18 @@ class CrossEntropyLoss(nn.Module):
         if config.use_projections:
             return CrossEntropyProjection.apply(input, target)
         return F.cross_entropy(input, target)
+
+class HardMarginLoss(ProjectionModule):
+    def __init__(self, delta=1.0):
+        super().__init__(0)
+        self.delta = delta
+
+    def forward(self, input, target):
+        if config.use_projections:
+            return HardMarginProjection.apply(input, target)
+        err1 = torch.where(target == 1, torch.where(input < self.delta, (input - self.delta)**2, torch.tensor(0.0, device=input.device)), torch.tensor(0.0, device=input.device))
+        err0 = torch.where(target == 0, torch.where(input > 0, input**2, torch.tensor(0.0, device=input.device)), torch.tensor(0.0, device=input.device))
+        return (err1 + err0).mean()
     
 class RMSNorm(nn.Module):
     def __init__(self, dim: int, eps: float = 1e-5):
