@@ -12,7 +12,10 @@ eval_every: 200
 patience: 10
 ptorch_norm_sweep: ["2"]  # restricted to linf as per paper
 # ── Batch sizes to sweep ─────────────────────────
-batch_sizes: [1024]
+batch_sizes: [16]
+
+# Number of backward passes (cyclic projections) per batch
+K: 10
 
 # ── Tasks (comment out to disable) ───────────────
 tasks:
