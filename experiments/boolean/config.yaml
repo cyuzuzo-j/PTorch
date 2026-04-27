@@ -18,7 +18,7 @@ tasks:
   - name: XOR
     in_features: 2
     classes: 1
-    hidden: [6000]
+    hidden: [12000]
 
 # ── Optimizers per framework ──────────────────────
 pjax_optimizer: CyclicProjections
@@ -29,8 +29,8 @@ pjax_orr_optimizer: DouglasRachford
 pjax_orr_optimizer_kwargs:
   steps_per_update: 20
 
-ptorch_optimizer: AlternatingProjectionsMomentum
-ptorch_optimizer_kwargs: {lr: 1.0, momentum: 0.9}
+ptorch_optimizer: ProjectionMuon
+ptorch_optimizer_kwargs: {lr: 0.001}
 
 torch_optimizer: Adam
 torch_optimizer_kwargs:

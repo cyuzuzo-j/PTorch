@@ -1,4 +1,4 @@
-##################################################
+experiments/boolean/bench_ptorch.py##################################################
 ###   Benchmark — ptorch                      ###
 ##################################################
 import sys, os
@@ -20,7 +20,7 @@ import tqdm, time
 import wandb
 
 FRAMEWORK = "ptorch_cyclic"
-XOR_BITS = 14
+XOR_BITS = 8
 
 OPTIM_MODULES = vars(ptorch_optim_static)
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
