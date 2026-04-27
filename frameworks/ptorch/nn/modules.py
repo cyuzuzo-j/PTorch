@@ -406,3 +406,63 @@ class RMSNorm(nn.Module):
         if config.use_projections:
             return RMSNormProjection.apply(x, self.weight, self.eps, 5)
         return F.rms_norm(x, (x.size(-1),), eps=self.eps)
+
+class Conv2D(ProjectionModule):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: Union[int, Tuple[int, int]] = 3,
+        stride: Union[int, Tuple[int, int]] = 1,
+        padding: Union[int, Tuple[int, int], str] = 0,
+        alpha: float = 1.0,
+        g: float = 1.0,
+        num_iters: int = 1,
+    ):
+        super().__init__(outputs=1)
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size, kernel_size)
+        if isinstance(stride, int):
+            stride = (stride, stride)
+
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding_mode = padding
+
+        kH, kW = kernel_size
+        self.linear = Linear(in_features=in_channels * kH * kW, out_features=out_channels, bias=True, alpha=alpha, g=g, num_iters=num_iters)
+
+    def _resolve_padding(self, H: int, W: int) -> Tuple[int, int]:
+        if isinstance(self.padding_mode, str):
+            if self.padding_mode.lower() == 'same':
+                kH, kW = self.kernel_size
+                sH, sW = self.stride
+                pad_h = max(0, (H - 1) * sH + kH - H) // 2
+                pad_w = max(0, (W - 1) * sW + kW - W) // 2
+                return (pad_h, pad_w)
+            elif self.padding_mode.lower() == 'valid':
+                return (0, 0)
+            else:
+                raise ValueError(f"Unknown padding mode: {self.padding_mode}")
+        elif isinstance(self.padding_mode, int):
+            return (self.padding_mode, self.padding_mode)
+        else:
+            return tuple(self.padding_mode)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        N, C, H, W = input.shape
+        padding = self._resolve_padding(H, W)
+
+        if config.use_projections:
+            patches = ConvPatchProjection.apply(input, self.kernel_size, self.stride, padding)
+        else:
+            patches = F.unfold(input, self.kernel_size, dilation=1, padding=padding, stride=self.stride)
+            L = patches.shape[-1]
+            pad_h, pad_w = padding
+            H_out = (H + 2 * pad_h - self.kernel_size[0]) // self.stride[0] + 1
+            W_out = (W + 2 * pad_w - self.kernel_size[1]) // self.stride[1] + 1
+            patches = patches.view(N, -1, H_out, W_out).permute(0, 2, 3, 1)
+
+        out = self.linear(patches)
+        out = out.permute(0, 3, 1, 2)
+        return out

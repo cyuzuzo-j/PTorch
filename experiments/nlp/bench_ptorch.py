@@ -52,9 +52,6 @@ class MNISTAttention_PTorch(nn.Module):
 
         patches = patches.contiguous().view(B, -1, self.patch_dim)
 
-        # Project patches
-        #tokens = self.embedding(patches)
-
         # ptorch MultiHeadAttention only returns the output, no weights
         attn_out = self.attn(patches)
         

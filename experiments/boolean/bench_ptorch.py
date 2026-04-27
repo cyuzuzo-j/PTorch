@@ -36,32 +36,32 @@ def make_xor_truth_table(num_bits):
 
 X_XOR, Y_XOR = make_xor_truth_table(XOR_BITS)
 
-
 class ProjectionTracer(torch.fx.Tracer):
-    def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
-        if isinstance(m, ProjectionModule):
+    def is_leaf_module(self, m: tnn.Module, module_qualified_name: str) -> bool:
+        if isinstance(m, (ProjectionModule, LeakyReLU)):
             return True
         return super().is_leaf_module(m, module_qualified_name)
 
+
 class PropagateCache(torch.fx.Interpreter):
+    def __init__(self, module, skip_modules=None):
+        super().__init__(module)
+        self.skip_targets = skip_modules or set()
+
     def run_node(self, n: torch.fx.Node):
         cache_to_apply = None
-        if n.op == 'call_module':
+        if n.op == 'call_module' and n.target not in self.skip_targets:
             submod = self.module.get_submodule(n.target)
             if hasattr(submod, 'projection_forward_cache') and isinstance(submod.projection_forward_cache, list):
                 if submod.projection_forward_cache:
                     cache = submod.projection_forward_cache[0]
                     if cache is not None:
                         cache_to_apply = cache
-                    else:
-                        print(f"\n[PropagateCache] Intercepted node '{n.name}' but cache is empty.")
                     
         result = super().run_node(n)
         
         if cache_to_apply is not None:
-            #print(f"  -> Original tensor data sum: {result.sum().item():.4f}")
             result.data.copy_(cache_to_apply.data)
-            #print(f"  -> Successfully updated tensor data in-place! New sum: {result.sum().item():.4f}")
             
         return result
 # ── Model ────────────────────────────────────────
@@ -141,24 +141,35 @@ def run(cfg, task_cfg, batch_size, run_number, device):
 
     x_train, y_train = X_XOR.to(device), Y_XOR.to(device)
 
-    ## ------ do only real forward backward pass --------
-    traced_model  = torch.fx.symbolic_trace(model)
-    graph = traced_model(x_train, y_train)
-    optimizer.zero_grad()
+    ## ------ initial forward, then backward+propagate each step --------
+    tracer = ProjectionTracer()
+    graph = tracer.trace(model)   
+    traced = torch.fx.GraphModule(model, graph)
+
+    traced.train()
+    output = traced(x_train, y_train)
 
     def step_fn():
+        nonlocal output
         optimizer.zero_grad()
-        logits = model(x_train, y_train)
         # Projection losses return logits (non-scalar), so seed backward explicitly.
-        logits.sum().backward()
+        output.sum().backward()
         optimizer.step()
 
         # Keep a scalar metric for logging that matches the hard-margin objective.
         with torch.no_grad():
+            logits = model.forward_eval(x_train)
             target = y_train.view(-1, 1).float()
             err1 = torch.where(target == 1, torch.where(logits < 1.0, (logits - 1.0) ** 2, torch.tensor(0.0, device=logits.device)), torch.tensor(0.0, device=logits.device))
             err0 = torch.where(target == 0, torch.where(logits > 0.0, logits ** 2, torch.tensor(0.0, device=logits.device)), torch.tensor(0.0, device=logits.device))
             scalar_loss = (err1 + err0).mean()
+
+        # Fake forward: run each module with current weights but inject cached
+        # Z_proj (from this backward) as the layer output. This propagates cyclic
+        # projection targets without recomputing A @ B from scratch.
+        # 'out' is skipped so HardMarginLoss always sees fresh logits.
+        output = PropagateCache(traced, skip_modules={'out'}).run(x_train, y_train)
+
         return float(scalar_loss.item())
 
 
