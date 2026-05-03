@@ -1,0 +1,14 @@
+--- experiments/deep/compare_residual.py
++++ experiments/deep/compare_residual.py
+@@ -32,10 +32,10 @@
+ 
+     def forward(self, x):
+         for layer in self.layers:
+             if self.use_residual and isinstance(layer, Linear):
+-                x = CustomProjectedAdd.apply(x, layer(x))
++                x = x + layer(x)
+             else:
+                 x = layer(x)
+         return x
+ 
+ 

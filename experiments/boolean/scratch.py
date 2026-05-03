@@ -17,9 +17,9 @@ from ptorch.core.ops import HardMarginProjection
 import tqdm, time
 import wandb
 
-FRAMEWORK = "ptorch_normal"
-XOR_BITS = 14
-XOR_TRAIN_SAMPLES = 4096
+FRAMEWORK = "ptorch_normal_normal"
+XOR_BITS = 8
+XOR_TRAIN_SAMPLES = 256
 
 OPTIM_MODULES = vars(ptorch_optim_static)
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")

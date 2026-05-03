@@ -6,6 +6,137 @@ from ..core.ops import *
 from .. import config
 from .modules import Linear, RMSNorm, Conversion as ConversionFn
 
+def max_proj_pt_batch(a, z):
+    """
+    Vectorized projection onto the maximum function graph.
+    Processes a batch of arrays simultaneously.
+    
+    Args:
+        a: Tensor of shape (B, P) where P is the patch size (e.g., kernel_h * kernel_w).
+        z: Tensor of shape (B, 1) containing the target maximums.
+    Returns:
+        Projected tensor of shape (B, P).
+    """
+    B, P = a.shape
+    
+    # 1. Sort arrays
+    a_sorted, idx = torch.sort(a, dim=1)
+
+    # 2. Compute candidate maxima (z_k)
+    a_sorted_flipped = torch.flip(a_sorted, dims=[1])
+    cumsum_flipped = torch.cumsum(a_sorted_flipped, dim=1)
+    divisors = torch.arange(2, P + 2, device=a.device, dtype=a.dtype).unsqueeze(0)
+    
+    z_k_flipped = (cumsum_flipped + z) / divisors
+    z_k = torch.flip(z_k_flipped, dims=[1])
+
+    # 3. Compute candidate arrays (a_k)
+    # Create upper triangular mask (1, P, P)
+    i_ge_k = torch.triu(torch.ones((P, P), dtype=torch.bool, device=a.device)).unsqueeze(0)
+    
+    # a_k shape: (B, P_candidate, P_element)
+    a_k = torch.where(i_ge_k, z_k.unsqueeze(2), a_sorted.unsqueeze(1))
+
+    # 4. Compute distances
+    dist = ((a_k - a_sorted.unsqueeze(1)) ** 2).sum(dim=2) + (z_k - z) ** 2
+
+    # 5. Select valid candidates
+    # Add a small epsilon (1e-5) to handle floating point inaccuracies
+    valid = torch.max(a_k, dim=2)[0] <= z_k + 1e-5
+    dist_valid = torch.where(valid, dist, torch.tensor(float('inf'), device=a.device, dtype=dist.dtype))
+
+    # 6. Select candidate minimizing distance
+    k = torch.argmin(dist_valid, dim=1)
+
+    # Extract the best sorted candidate array for each batch item
+    batch_indices = torch.arange(B, device=a.device)
+    best_a_k_sorted = a_k[batch_indices, k, :]
+
+    # 7. Unsort back to original spatial layout
+    a_proj = torch.zeros_like(a)
+    a_proj.scatter_(1, idx, best_a_k_sorted)
+
+    return a_proj
+
+
+class MaxPool2DProjection(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, kernel_size, stride=None, padding=0):
+        if stride is None:
+            stride = kernel_size
+        
+        # PJAX enforces non-overlapping windows for projection validity
+        k_tuple = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
+        s_tuple = (stride, stride) if isinstance(stride, int) else tuple(stride)
+        
+        if k_tuple != s_tuple:
+            raise ValueError("MaxPool projection requires strides == pool_size")
+
+        ctx.save_for_backward(input)
+        ctx.kernel_size = kernel_size
+        ctx.stride = stride
+        ctx.padding = padding
+        
+        return F.max_pool2d(input, kernel_size, stride, padding)
+
+    @staticmethod
+    def backward(ctx, z_target):
+        input, = ctx.saved_tensors
+        kernel_size = ctx.kernel_size
+        stride = ctx.stride
+        padding = ctx.padding
+
+        N, C, H_in, W_in = input.shape
+        _, _, H_out, W_out = z_target.shape
+
+        kH = kernel_size[0] if isinstance(kernel_size, tuple) else kernel_size
+        kW = kernel_size[1] if isinstance(kernel_size, tuple) else kernel_size
+
+        # 1. Extract patches using unfold
+        # Shape: (N, C * kH * kW, H_out * W_out)
+        patches = F.unfold(input, kernel_size, stride=stride, padding=padding)
+        L = patches.shape[-1] # Number of spatial patches (H_out * W_out)
+        
+        # 2. Reshape to isolate each local pooling window
+        # (N, C, kH * kW, L) -> Permute to (N, C, L, kH * kW)
+        patches = patches.view(N, C, kH * kW, L).permute(0, 1, 3, 2).contiguous()
+        
+        # Flatten batch, channels, and spatial dims into a single batch dimension
+        a_batch = patches.view(-1, kH * kW) # Shape: (B, P)
+        z_batch = z_target.reshape(-1, 1)      # Shape: (B, 1)
+
+        # 3. Apply vectorized projection
+        a_proj_batch = max_proj_pt_batch(a_batch, z_batch)
+
+        # 4. Reconstruct the image
+        # Unflatten back to (N, C, L, kH * kW)
+        a_proj_patches = a_proj_batch.view(N, C, L, kH * kW)
+        
+        # Permute to (N, C, kH * kW, L) and collapse C and spatial patch dims
+        a_proj_unfolded = a_proj_patches.permute(0, 1, 3, 2).contiguous().view(N, C * kH * kW, L)
+
+        # F.fold restores the image geometry. Because stride == kernel_size, there's no overlap.
+        a_proj = F.fold(
+            a_proj_unfolded, 
+            output_size=(H_in, W_in), 
+            kernel_size=kernel_size, 
+            stride=stride, 
+            padding=padding
+        )
+
+        
+        return a_proj, None, None, None
+
+# Module Wrapper
+class MaxPool2d(nn.Module):
+    def __init__(self, kernel_size, stride=None, padding=0):
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.stride = stride if stride is not None else kernel_size
+        self.padding = padding
+
+    def forward(self, x):
+        return MaxPool2DProjection.apply(x, self.kernel_size, self.stride, self.padding)
 class LinearOrth(nn.Module):
     """Simplified linear layer using OrthogonalRotationProjection.
     

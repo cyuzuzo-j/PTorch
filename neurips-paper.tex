@@ -1,0 +1,755 @@
+\documentclass{article}
+
+\usepackage{neurips_2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta}
+
+\title{Ptorch: A Unified Framework for Projection and Gradient-Based Learning}
+
+\author{Anonymous Authors}
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcommand{\missingasset}[1]{%
+    \fbox{%
+        \parbox[c][0.18\textheight][c]{0.9\linewidth}{%
+            \centering Missing asset\\[0.35em]\path{#1}%
+        }%
+    }%
+}
+
+\newcommand{\safeinputdiagram}[2]{%
+    \IfFileExists{#1.tex}{\resizebox{#2}{!}{\input{#1}}}{\missingasset{#1.tex}}%
+}
+
+\newcommand{\safeincludegraphics}[2][]{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{\missingasset{#2}}%
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Projection-based optimization offers a gradient-free alternative to backpropagation, yet existing frameworks lack native integration with modern deep learning infrastructure and suffer from high computational cost and poor scaling with depth. We introduce Ptorch, a PyTorch-based framework that unifies projection-based and gradient-based learning by treating projection residuals as drop-in replacements for stochastic gradients that integrate directly with PyTorch's autograd engine and any first-order optimizer. We propose Sequential Target Propagation (STP) as the core algorithm, alongside two key algorithmic contributions: an $\ell_\infty$ bilinear projection with an efficient $\mathcal{O}(n)$ Newton solver, and compatibility with adaptive optimizers such as Adam and Muon via the projection residuals. We further prove a vanishing target signal theorem showing that, under local non-expansiveness, the layer-wise learning signal decays monotonically with depth, an analogue of vanishing gradients for projection-based methods. On MNIST and CIFAR-10, Ptorch with Muon achieves competitive accuracy with gradient-based baselines on shallow MLPs, while the theoretical depth barrier explains the performance gap in deeper architectures.
+\end{abstract}
+
+\section{Introduction}
+
+Gradient-based optimization has become the default engine of deep learning, yet it 
+imposes two constraints that limit its applicability: every operation in the 
+computational graph must admit a gradient or computationally tractable subgradient, and parameter updates are usually 
+usually driven by the chain rule. Projection-based methods offer a complementary 
+paradigm, enforcing feasibility constraints directly and requiring only that each 
+layer admits a tractable projection rather than a derivative. While existing projection frameworks most notably pjax \cite{bergmeister2025projection} leverage fully parallel graph decompositions to achieve highly concurrent updates. They remain isolated from standard deep learning infrastructure. Furthermore, they incur a memory cost that scales as $\mathcal{O}(MNK)$ in the bilinear consensus step, rendering them impractical on standard hardware for large networks.
+
+We introduce \textbf{Ptorch}, a PyTorch-native framework that closes this gap. The 
+core observation is that the projection residual $\Delta\theta = \theta - P_C(\theta)$ 
+is dimensionally identical to a gradient and can therefore be injected 
+directly into any first-order optimizer Adam, Muon, ... without modification. 
+This transforms projection residuals from a standalone update rule into a 
+\emph{pseudo-gradient} that inherits the full ecosystem of adaptive learning rates, 
+momentum, and schedulers available in PyTorch. The resulting algorithm, 
+\textbf{Sequential Target Propagation (STP)}, propagates targets backward through the computational graph layer by layer, each step solving a local projection 
+subproblem rather than evaluating a chain-rule derivative.
+
+\paragraph{Contributions.} We make five concrete contributions:
+
+\begin{enumerate}
+
+    \item \textbf{Sequential Target Propagation.} We formalize STP as a drop-in 
+    replacement for backpropagation within PyTorch's \texttt{autograd} engine, 
+    enabling gradient-free training of computational graphs with native 
+    torch optimizer compatibility (Section~\ref{sec:stp}).
+
+    \item \textbf{$\ell_\infty$ bilinear projection with an $O(n)$ Newton solver.} 
+    We derive a closed-form characterization of the bilinear projection under the 
+    $\ell_\infty$ norm, showing that the feasibility radius satisfies a 
+    piecewise-quadratic equation with a unique positive root. A branch-masked Newton 
+    iteration solves this exactly in $O(n)$ time without sorting 
+    (Section~\ref{sec:linf}).
+
+    \item \textbf{Memory-efficient $\ell_2$ bilinear projection.} We derive a 
+    vectorized consensus formula for the $\ell_2$ bilinear projection that reduces 
+    memory complexity from $\mathcal{O}(MNK)$ to $\mathcal{O}(MN)$. The key 
+    algebraic insight is that the per-sample target rows $a_{i \to n}$, each 
+    satisfying a scalar constraint $a_i \cdot b_n = z_{in}$ via a Newton-derived 
+    shift $t_{in}$, factor into a single matrix product $VB^\top$ plus a 
+    Hadamard-weighted self-term, collapsing the naïve rank-3 consensus tensor into 
+    two standard 2D operations executable on commodity hardware 
+    (Section~\ref{sec:matmul}).
+
+    \item \textbf{Vanishing target signal theorem.} We prove that, under local 
+    non-expansiveness, the layer-wise learning signal decays monotonically with 
+    depth a structural analogue of vanishing gradients for projection-based 
+    methods. This provides a theoretical explanation for the empirically observed 
+    performance gap between STP and backpropagation in deep architectures 
+    (Section~\ref{sec:theory}).
+
+    \item \textbf{Empirical validation.} On MNIST and CIFAR-10, Ptorch with the 
+    Muon optimizer achieves competitive accuracy with gradient-based baselines on 
+    shallow MLPs. Controlled experiments on an identity-function task confirm that 
+    target signal magnitude decays exponentially with depth, consistent with 
+    Theorem~\ref{thm:vanishing} (Section~\ref{sec:experiments}).
+
+\end{enumerate}
+
+Taken together, these results establish both the promise and the current limits of projection-based learning. We offer this honest accounting alongside PyTorch-native infrastructure that removes extreme hardware requirements, making projection methods broadly accessible and opening the door for hybrid gradient-projection architectures
+
+\section{Related work}
+\paragraph{Projection-based learning.}
+The primary inspiration and base framework for Ptorch is the pjax framework of \cite{bergmeister2025projection}, which builds on the projection-based learning ideas of Elser~\cite{elser2019learning} to yield a highly parallelizable, gradient-free training scheme. Ptorch retains many of their projection operators as a high-quality starting point, but departs from pjax in two key ways: the bipartite, fully parallel update graph is replaced by a sequential propagation scheme compatible with PyTorch's autograd engine, and several computationally expensive projections have been reworked to reduce memory consumption, making the framework feasible on CPU-only or resource-constrained hardware.
+
+\paragraph{Target propagation.}
+A recurring challenge in gradient-free learning is the attenuation of the learning signal with depth, analogous to vanishing gradients in backpropagation. This phenomenon has been studied extensively in the target propagation literature~[TODO INSERT REFERENCE], where layer-wise targets are propagated backward through the network instead of gradients. Difference target propagation methods attempt to mitigate this attenuation by correcting targets with an approximate inverse of the forward map. The vanishing target signal theorem (Theorem~4.3) formalizes this intuition in the projection setting, showing that under local non-expansiveness, the target signal magnitude contracts monotonically with depth.
+
+\paragraph{ADMM-based deep learning.}
+The Alternating Direction Method of Multipliers (ADMM) offers a more popular alternative to projection based training neural networks. Like projection-based methods, ADMM decouples the network into per-layer subproblems by introducing auxiliary variables and enforcing consistency constraints via a Lagrangian penalty. Wang et al.~\cite{10.1145/3292500.3330936} extended this line of work with the dlADMM algorithm, which updates parameters in a backward-then-forward sweep to propagate information across layers more efficiently, reduces subproblem complexity from $\mathcal{O}(n^3)$ to $\mathcal{O}(n^2)$ via iterative quadratic approximations and backtracking, and provides the first global convergence guarantee for an ADMM-based method applied to deep networks under mild conditions on the loss and activation functions. The layer-wise decomposition in dl-ADMM shares the spirit of Ptorch's sequential target propagation: both methods avoid end-to-end differentiation by solving local feasibility problems at each layer. A key difference is that ADMM coordinates these local solutions through dual variables and a global augmented Lagrangian, whereas Ptorch propagates targets sequentially through the computational graph and relies on PyTorch's autograd engine for integration with adaptive first-order optimizers such as Adam and Muon.
+
+% ----------------------------------------------------------------------------------------------------------------------
+\section{From Backpropagation to Sequential Target Propagation}
+\label{sec:method}
+% ---------------------------------------------------------------
+
+We present two new variants, situated in increasing distance from standard backpropagation, each relaxing a distinct assumption of standard backpropagation. We also discuss how prior work fits into this.
+
+\paragraph{Ptorch-Hybrid (gradient-derived targets).}
+In the standard backward pass, gradients update weights directly. In Ptorch-Hybrid, gradients are instead used to derive a target for each hidden state; weights are subsequently updated by projecting onto the constraint set defined by that target and layer. This allows training networks whose weights satisfy arbitrary constraints, as long as the corresponding projection is tractable. However, as the practical benefits of this approach are limited, it will not be described in further detail here.
+
+\paragraph{Ptorch (sequential target propagation).}
+Dropping gradients entirely, Ptorch propagates targets directly: the target $\bar{h}^{n}_{l-1}$ for layer $l{-}1$ is computed by projecting the current iterate onto the constraint set of layer $l$, using the target received from layer $l$ as the anchor (Figure~\ref{fig:pjax-vs-ptorch}, bottom). This eliminates the differentiability requirement; any operation admitting a tractable projection is a valid layer.
+
+\paragraph{pjax (parallel projection, prior work \cite{bergmeister2025projection}).}
+In pjax, the network is modeled as a bipartite graph $\mathcal{G} = (\mathcal{V}, \mathcal{E})$ and all node updates are decoupled, enabling fully parallel projection. Ptorch recovers sequential target propagation as a special case by removing the bipartite decomposition requirement, trading parallelism for direct \texttt{autograd} compatibility and better convergence / lower
+
+\begin{figure}[ht]
+\centering
+\safeinputdiagram{drawings/pjax_vs_pytorch_target}{0.95\textwidth}
+\caption{
+    \textbf{pjax vs.\ Ptorch.}
+    pjax computes weight updates via local projections.
+    Ptorch uses sequential target propagation through PyTorch's autograd engine. Targets $\bar{q}$ flow backward layer by layer, incorporating global loss information at every step.
+}
+\label{fig:pjax-vs-ptorch}
+\end{figure}
+
+% ---------------------------------------------------------------
+\section{Sequential Target Propagation: Mathematical Formulation}
+\label{sec:stp-math}
+% ---------------------------------------------------------------
+
+\subsection{Forward and Backward Semantics}
+
+Consider a neural network structured as a computational chain $\mathcal{G} = (\mathcal{V}, \mathcal{E})$. To exploit the native \texttt{autograd} engine, Ptorch redefines the semantics of the forward and backward passes for each node $v \in \mathcal{V}$.
+
+\begin{definition}[Training Step Variables]
+During training step $n$, we distinguish pre-activation variables $o$ and post-activation variables $h$. The \emph{forward pass} computes the current iterates $(o^{n}, h^{n})$. The \emph{backward pass} computes intermediate targets $(\bar{o}^{n}, \bar{h}^{n})$ and the subsequent iterates $(o^{n+1}, h^{n+1})$.
+\end{definition}
+
+\subsection{Loss Projection and Target Initialization}
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\input{drawings/init_state_backprop}
+}
+\caption{First projection of the backward pass: coupling the network output to the loss constraint.}
+\label{fig:init_back_prop}
+\end{figure}
+
+Let $y^{n}$ denote the data target for batch $n$. The backward pass is initialized by projecting the output onto the loss-minimizing constraint.
+
+\begin{definition}[Output Target]
+\label{def:output-target}
+The output target $\bar{o}_L^n$ is defined via the proximal operation
+\begin{equation}
+\bar{o}_L^n \;\in\; \underset{o}{\mathrm{arg\,min}} \left( \mathcal{L}\bigl(o, y_{\mathrm{target}}^{n}\bigr) + \frac{\lambda}{2} \bigl\|o - o_0^{n}\bigr\|_2^2 \right).
+\end{equation}
+\end{definition}
+
+\subsection{Layer-wise Propagation}
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\input{drawings/next_step_backprop}
+}
+\caption{Update of the output weights: coupling the output loss with the deepest hidden layer.}
+\label{fig:next_back_prop}
+\end{figure}
+
+The target $\bar{o}_L^{n}$ propagates to the preceding linear layer, forming a local projection sub-problem. The target hidden state $\bar{h}_{L-1}^{n}$ and updated weights $W_L^{n+1}$ are obtained by projecting onto the linear feasibility set:
+
+\begin{proposition}[Linear Layer Update]
+\label{prop:linear-layer}
+Define the bilinear feasibility set $C_{\mathrm{out}} := \{(h, W, o) \mid o = Wh\}$. The projection
+\begin{align}
+\bigl(\bar{h}_{L-1}^{n},\; \bar{W}_L^{n},\; o_L^{n+1}\bigr)
+  &\;\in\; P_{C_{\mathrm{out}}}\!\bigl(h_{L-1}^{n},\; W_L^{n},\; \bar{o}_L^n\bigr)
+\end{align}
+simultaneously yields the subsequent pre-activation iterate $o_L^{n+1}$ and the target hidden state $\bar{h}_{L-1}^{n}$ for the preceding layer. The updated weights are then obtained by applying the optimizer to the pseudo-gradient direction, $W_L^{n+1} = \mathrm{Opt}\!\bigl(W_L^{n},\,\eta_n,\,W_L^{n}-\bar{W}_L^{n}\bigr)$. For regular STP, this reduces to the exact projection update $W_L^{n+1} = \bar{W}_L^{n}$.
+
+\end{proposition}
+
+\begin{figure}[htbp]
+\centering
+\resizebox{0.78\textwidth}{!}{%
+\input{drawings/next_update_backprop}
+}
+\caption{Projection through the nonlinear activation constraint.}
+\label{fig:next_back_prop_mid}
+\end{figure}
+
+\begin{proposition}[Activation Layer Update]
+\label{prop:activation-layer}
+Let $\sigma$ be a (possibly non-differentiable) activation function and define the activation feasibility set $C_{\sigma} := \{(o, h) \mid h = \sigma(o)\}$. Given the target $\bar{h}_{L-1}^{n}$ from Proposition~\ref{prop:linear-layer}, the projection
+\begin{align}
+\bigl(\bar{o}_{L-1}^{n},\; h_{L-1}^{n+1}\bigr)
+&\;=\; P_{C_{\sigma}}\!\bigl(o_{L-1}^{n},\; \bar{h}_{L-1}^{n}\bigr)
+\end{align}
+yields the subsequent hidden state $h_{L-1}^{n+1}$ and the target pre-activation $\bar{o}_{L-1}^{n}$ for the preceding linear layer.
+\end{proposition}
+
+This sequential projection procedure repeats, propagating targets backward through the computational graph $\mathcal{G}$ until the root is reached.
+
+\subsection{Algorithm}
+
+\begin{algorithm}[htbp]
+\caption{Sequential Target Propagation (Ptorch)}
+\label{alg:stp}
+\begin{algorithmic}[1]
+\Require Computational graph $\mathcal{G} = (\mathcal{V}, \mathcal{E})$ with topological ordering $v_1, \dots, v_N$; current iterates $\{h_v^{n}\}_{v \in \mathcal{V}}$; current parameters $\{W_v^{n}\}_{v \in \mathcal{V}}$; data target $y^{n}$; step size $\eta_n$. The input to a node is denoted $h$ and its output $q$.
+
+\State $\bar{q}_{v_N}^{n} \;\in\; \underset{q}{\mathrm{arg\,min}} \left( \mathcal{L}\bigl(q, y^{n}\bigr) + \frac{\lambda}{2} \bigl\|q - q_{v_N}^{n}\bigr\|_2^2 \right)$
+\For{$v = v_N$ \textbf{downto} $v_1$}
+    \State $\bigl(\bar{h}_{v}^{n},\; \bar{W}_v^{n},\; q_v^{n+1}\bigr)
+           \;\in\; P_{C_v}\!\bigl(h_{v}^{n},\; W_v^{n},\; \bar{q}_v^{n}\bigr)$
+    \Statex \hspace{2em} where $C_v := \bigl\{(h, W, q) \mid q = f_v(h, W)\bigr\}$
+    \State $ \bar{q}_{v-1}^{n} \gets \bar{h}_{v}^{n}$
+    \State $\Delta W_v^{n} \gets  W_v^{n} -\bar{W}_v^{n}$
+    \State $W_v^{n+1} \gets  f\!\bigl(W_v^{n},\;\eta_n\,\Delta W_v^{n}\bigr)$
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+Note that $q$ and $o$ are not the same. $o$ denotes the pre-activation value 
+(before the nonlinearity) and $h$ the post-activation value (after the 
+nonlinearity). $q_v$ denotes the output of node $v$: it equals $o_l$ when $v$ 
+is a linear node and $h_l$ when $v$ is an activation node.
+
+\subsection{Geometric Interpretation and Pseudo-Gradient Updates}
+
+\begin{figure}[htbp]
+\centering
+\begin{minipage}{0.56\textwidth}
+\vspace{0pt}
+
+The algorithm computes a target weight tensor $\bar{W}_v^{n}$ for each node $v$. The pseudo-gradient (Definition~\ref{def:pseudo-gradient}) at the weight level is
+\begin{equation}
+\Delta W_v^{n} \;:=\;  W_v^{n} - \bar{W}_v^{n},
+\end{equation}
+and the parameter update takes the structurally familiar gradient-descent form
+\begin{equation}
+W_v^{n+1} \;=\; W_v^{n} - \eta_n\,\Delta W_v^{n}.
+\end{equation}
+This is a \emph{relaxed projection} scheme: $\eta_n = 1$ yields an exact projection onto the boundary of the feasibility set, while $\eta_n = 2$ produces a reflected step past that boundary.
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.40\textwidth}
+\centering
+\resizebox{\textwidth}{!}{%
+\input{drawings/pseudo_gradient_reflection_geometry}
+}
+\caption{Geometry of pseudo-gradient updates. $\eta_n = 1$ reaches the exact projection; $\eta_n = 2$ produces a reflected step.}
+\label{fig:pseudogradient-reflection-geometry}
+\end{minipage}
+\end{figure}
+
+The following proposition shows that pseudo-gradients coincide exactly with true gradients of a natural quadratic loss, providing theoretical grounding for their use as a drop-in replacement.
+
+\begin{proposition}[Pseudo-Gradient as True Gradient]
+\label{prop:pseudo-grad-true-grad}
+Let $C_{\mathrm{sol}}$ be a convex solution set and define the fixed target $o^* := P_{C_{\mathrm{sol}}}(o^{n})$. Consider the quadratic loss
+\[
+L(o) \;:=\; \tfrac{1}{2}\,\|o - o^*\|_2^2.
+\]
+Then $\nabla L(o^{n}) = o^{n} - P_{C_{\mathrm{sol}}}(o^{n})$, and the gradient-descent update satisfies
+\begin{align}
+o^{n+1}
+&\;=\; o^{n} - \eta_n\,\nabla L\!\bigl(o^{n}\bigr)
+\;=\; (1 - \eta_n)\,o^{n} + \eta_n\,P_{C_{\mathrm{sol}}}\!\bigl(o^{n}\bigr).
+\end{align}
+Consequently, the pseudo-gradient direction $\Delta o^{n} = o^{n} - P_{C_{\mathrm{sol}}}(o^{n})$ coincides exactly with the true gradient $\nabla L(o^{n})$.
+\end{proposition}
+
+\begin{proof}
+Since $o^*$ is held fixed during step $n$, differentiating $L(o) = \frac{1}{2}\| o - o^*\|_2^2$ gives $\nabla L(o) = o - o^*$. Evaluating at $o^{n}$ and substituting $o^* = P_{C_{\mathrm{sol}}}(o^{n})$ yields the stated gradient. The update formula follows by direct substitution into the gradient-descent recursion.
+\end{proof}
+
+% ---------------------------------------------------------------
+\section{Theoretical Analysis: Vanishing Target Signals in Deep Networks}
+\label{sec:vanishing}
+% ---------------------------------------------------------------
+
+A fundamental limitation of sequential target propagation in deep architectures is the progressive attenuation of the learning signal with depth. We formalize this observation below.
+
+{\color{red}
+\begin{assumption}[Local Non-Expansiveness]
+\label{ass:non-expansive}
+Let the operational constraint set of a layer be
+\[
+C_{\mathrm{op}} \;:=\; \{(h_{\mathrm{in}}, W, h_{\mathrm{out}}) \mid h_{\mathrm{out}} = \mathrm{op}(h_{\mathrm{in}}, W)\}.
+\]
+Although $C_{\mathrm{op}}$ is generally non-convex due to nonlinearities and bilinear weight--activation interactions, we assume that for sufficiently close sets projection $P_{C_{\mathrm{op}}}$ behaves non-expansively within a local neighborhood of the current iterates. \textbf{This assumption is admittedly handwavy, and a better alternative is currently being sought.}
+\end{assumption}
+}
+
+\begin{definition}[Layer-wise Target Signal]
+\label{def:target-signal}
+At training step $n$, the \emph{target signal magnitude} at hidden layer $k$ is\footnote{Note that $k$ defines the network from output to input in contrast to $L$ which is defined as from input to output.}
+\[
+\delta_k^{n} \;:=\; \bigl\|\bar{h}_k^{n} - h_k^{n}\bigr\|_2.
+\]
+\end{definition}
+
+\begin{theorem}[Vanishing Target Signal]
+\label{thm:vanishing-target}
+Under Assumption~\ref{ass:non-expansive}, the target signal magnitude $\delta_k^{n}$ is monotonically non-increasing in $k$ as the propagation moves backward from the output layer. Formally,
+\[
+\delta_k^{n} \;\leq\; \delta_{k-1}^{n} \quad \text{for all } k \geq 1.
+\]
+Consequently, for any network in which learning occurs (i.e., $\|\Delta W_k\| > 0$), the contraction is strict.
+\end{theorem}
+
+\begin{proof}
+We proceed by induction on the layer index.
+
+\medskip\noindent\textbf{Base case.}
+At the output, the proximal update for an arbitrary loss function $\mathcal{L}$ gives
+\[
+\bar{h}_0^{n} \;\in\; \underset{h}{\mathrm{arg\,min}} \left( \mathcal{L}\bigl(h, y_{\mathrm{target}}^{n}\bigr) + \frac{\lambda}{2} \bigl\|h - h_0^{n}\bigr\|_2^2 \right).
+\]
+Assuming $\mathcal{L}$ is proper and lower semi-continuous, this minimum is attained and bounded, so $\delta_0^{n} = \|\bar{h}_0^{n} - h_0^{n}\|_2 < \infty$.\\
+\medskip\noindent\textbf{Inductive step.}
+Suppose $\delta_{k-1}^{n}$ is finite. Consider the two points in the joint space $(h_{\mathrm{in}}, W, h_{\mathrm{out}})$:
+\begin{align*}
+A &\;=\; \bigl(h_1^{n},\; W_1^{n},\; \bar{h}_0^{n}\bigr), \\
+B &\;=\; \bigl(h_1^{n},\; W_1^{n},\; h_0^{n}\bigr).
+\end{align*}
+Since the forward pass satisfies the constraint exactly, $B \in C_{\mathrm{op}}$ and hence $P_{C_{\mathrm{op}}}(B) = B$. By Assumption~\ref{ass:non-expansive}:
+\[
+\|P_{C_{\mathrm{op}}}(A) - P_{C_{\mathrm{op}}}(B)\|^2 \;\leq\; \|A - B\|^2.
+\]
+Expanding both sides and using the fact that $A$ and $B$ agree in their first two components:
+\[
+\|\bar{h}_1^{n} - h_1^{n}\|^2 + \|\Delta W_1\|^2 + \| h_0^{n+1} - h_0^n\|^2
+\;\leq\;
+\|\bar{h}_0^{n} - h_0^{n}\|^2,
+\]
+which gives $(\delta_1^{n})^2 \leq (\delta_0^{n})^2 - \bigl(\|\Delta W_1\|^2 + \|\Delta h_0\|^2\bigr) \leq (\delta_0^{n})^2$, and therefore $\delta_1^{n} \leq \delta_0^{n}$.
+
+By induction this generalizes to $\delta_k^{n} \leq \delta_{k-1}^{n}$ for all $k$.  When $\|\Delta W_i\|^2 > 0$ at every layer (i.e., the network is actively learning), each term is smaller then the previous one.
+\end{proof}
+
+\begin{remark}[Depth Barrier]
+\label{cor:depth-barrier}
+In a network that is actively learning, sequential target propagation provides a diminishing learning signal to early layers. For networks of sufficient depth, the target difference at the earliest layers reaches machine precision, rendering parameter updates in those layers negligible.
+\end{remark}
+
+% ---------------------------------------------------------------
+
+\section{Implementation: Key Algorithmic Contributions}
+The implementation of the matmul operator is the most important property of a projection based neural netowork optimization framework. Many varients have been tried and all result in different convergence properties of the whole algorithm. To keep it brief only the final algorithm is discussed, but the discision in how you implement this is the single most important one and will determine nearly all ofthe properties of the algorithm.
+\label{sec:impl}
+\subsection{Efficient Matrix Multiplication Projection}
+Resolving overlapping constraints represents the most computationally intensive phase of the exact projection. Since each row $a_i$ of the weight matrix $A$ interacts with all $N$ columns of the activation matrix $B$ (denoted as $b_n$), the algorithm generates $N$ independent target states to satisfy the individual linear constraints $a_i \cdot b_n = z_{in}$. 
+
+Computing the average of these $N$ targets across all $M$ rows naively requires the construction of a tensor in $\mathbb{R}^{M \times N \times K}$. This expansion precludes efficient execution on standard hardware due to memory saturation. However, algebraic factorization allows the reduction of this consensus process into a single 2D matrix multiplication.
+
+\subsubsection*{1. Target State Formulation}
+To satisfy the scalar constraint $a_i \cdot b_n = z_{in}$, the Newton-based solver identifies an optimal shift parameter $t_{in}$. The resulting target row $a_{i \to n}$ is defined as
+\begin{equation}
+    a_{i \to n} = \alpha \left( \frac{1}{\alpha - t_{in}^2} a_i + \frac{t_{in}}{\alpha - t_{in}^2} b_n^\top \right).
+\end{equation}
+We define the scalar weight functions $\omega_{in}$ and $v_{in}$ as
+\begin{equation}
+    \omega_{in} := \frac{1}{\alpha - t_{in}^2}, \quad v_{in} := \frac{t_{in}}{\alpha - t_{in}^2}.
+\end{equation}
+Substitution into the target definition yields the simplified expression
+\begin{equation}
+    a_{i \to n} = \alpha \left( \omega_{in} a_i + v_{in} b_n^\top \right).
+\end{equation}
+
+\subsubsection*{2. The Consensus Average}
+The final consensus row $\bar{a}_i$ is the arithmetic mean of all $N$ targets generated by the samples in $\mathcal{D}$:
+\begin{equation}
+    \bar{a}_i = \frac{1}{N} \sum_{n=1}^{N} a_{i \to n}.
+\end{equation}
+Substituting the simplified target expression into the summation yields
+\begin{equation}
+    \bar{a}_i = \frac{1}{N} \sum_{n=1}^{N} \alpha \left( \omega_{in} a_i + v_{in} b_n^\top \right).
+\end{equation}
+Factoring the scalar $\alpha$ and distributing the summation results in
+\begin{equation}
+    \bar{a}_i = \frac{\alpha}{N} \left[ \left( \sum_{n=1}^{N} \omega_{in} a_i \right) + \left( \sum_{n=1}^{N} v_{in} b_n^\top \right) \right].
+\end{equation}
+
+\subsubsection*{3. Summation Factorization}
+The computational complexity is reduced by refactoring both terms within the brackets.
+
+\paragraph{The A-term Factorization:}
+Since the vector $a_i$ is invariant with respect to the sample index $n$, it factors out of the first summation:
+\begin{equation}
+    \sum_{n=1}^{N} \omega_{in} a_i = a_i \sum_{n=1}^{N} \omega_{in}.
+\end{equation}
+This operation is computed via an element-wise multiplication between the original row and the sum of the weights across the sample dimension.
+
+\paragraph{The B-term Factorization:}
+The second term, $\sum_{n=1}^{N} v_{in} b_n^\top$, constitutes a linear combination of the sample vectors $\{b_n^\top\}_{n=1}^N$ weighted by $\{v_{in}\}_{n=1}^N$. This summation is mathematically equivalent to the $i$-th row of the matrix product $V B^\top$, where $V \in \mathbb{R}^{M \times N}$ contains the weights $v_{in}$.
+
+\subsubsection*{4. Vectorized Global Consensus}
+Reassembling these terms for all rows $i \in \{1, \dots, M\}$ yields the vectorized formula for the projected weight matrix $\bar{A}$:
+\begin{equation}
+    \bar{A} = \frac{\alpha}{N} \left( A \odot \Omega \mathbb{1}_N + V B^\top \right),
+\end{equation}
+where $\odot$ denotes the Hadamard product, $\Omega \in \mathbb{R}^{M \times N}$ is the matrix of weights $\omega_{in}$, and $\mathbb{1}_N$ is an all-ones vector. This formulation ensures an exact element-wise consensus while maintaining a memory complexity of $\mathcal{O}(MN)$.
+
+
+% ---------------------------------------------------------------
+\subsection{Bilinear Projection in the Infinity Norm}
+\label{sec:bilinear-inf}
+The optimization geometry of the projection step can be modified to achieve
+different training properties. We replace the standard Euclidean metric with
+the $\ell_\infty$ metric for the bilinear layer $y = w^\top x$.
+
+\begin{definition}[$\ell_\infty$ Bilinear Projection]
+\label{def:bilinear-inf}
+Given the current state $(x, w, y) \in \mathbb{R}^n \times \mathbb{R}^n \times
+\mathbb{R}$ and a scaling parameter $\gamma > 0$, the $\ell_\infty$ bilinear
+projection problem is
+\begin{equation}
+\label{eq:bilinf-proj-bilinear-layer}
+  \min_{\epsilon \,\geq\, 0}\; \epsilon
+  \quad \text{s.t.} \quad
+  \exists\, x',w',y' \colon\;
+  \|x'-x\|_\infty \leq \epsilon,\;
+  \|w'-w\|_\infty \leq \epsilon,\;
+  \gamma^2 |y'-y| \leq \epsilon,\;
+  y' = {w'}^\top x'.
+\end{equation}
+The key is finding the smallest feasible box radius $\epsilon^* \geq 0$ such
+that all constraints are simultaneously satisfiable.
+\end{definition}
+
+\paragraph{Parameterization.}
+Writing $\Delta x_i = x'_i - x_i$ and $\Delta w_i = w'_i - w_i$, the
+constraints read
+\[
+  |\Delta x_i| \leq \epsilon,\quad |\Delta w_i| \leq \epsilon
+  \quad (i=1,\dots,n),
+  \qquad |{y}' - {y}| \leq \frac{\epsilon}{\gamma^2}.
+\]
+The total dot-product change decomposes coordinate-wise:
+\begin{equation}
+\label{eq:bilinf-DeltaP}
+\begin{aligned}
+ D' &= {w'}^\top x'\\
+  \Delta D_i
+    \;&=\; (x_i+\Delta x_i)(w_i+\Delta w_i) - x_i w_i
+    \;=\; x_i\,\Delta w_i + w_i\,\Delta x_i + \Delta x_i\,\Delta w_i.
+\end{aligned}
+\end{equation}
+
+
+\begin{lemma}[Corner Extremality]
+\label{lem:corner}
+$\Delta D_i$  its extrema over
+the box $[-\epsilon,\epsilon]^2$ are attained at the four corners
+$(\pm\epsilon, \pm\epsilon)$.
+\end{lemma}
+
+\paragraph{Corner evaluation.}
+
+\begin{center}
+\renewcommand{\arraystretch}{1.35}
+\begin{tabular}{ccc}
+\hline
+$\Delta x_i$ & $\Delta w_i$ & $\Delta D_i$ \\
+\hline
+$+\epsilon$ & $+\epsilon$ & $\phantom{-}\epsilon(x_i+w_i)+\epsilon^2$ \\
+$-\epsilon$ & $-\epsilon$ & $-\epsilon(x_i+w_i)+\epsilon^2$ \\
+\hline
+$+\epsilon$ & $-\epsilon$ & $\phantom{-}\epsilon(w_i-x_i)-\epsilon^2$ \\
+$-\epsilon$ & $+\epsilon$ & $\phantom{-}\epsilon(x_i-w_i)-\epsilon^2$ \\
+\hline
+\end{tabular}
+\end{center}
+
+\begin{proposition}[Per-Coordinate Reach]
+\label{prop:reach}
+The maximum upward contribution of coordinate $i$ to the dot product is
+\begin{equation}
+\label{eq:bilinf-Mk}
+  M_i(\epsilon)
+    \;=\; \max\!\Bigl(
+      \epsilon|x_i+w_i|+\epsilon^2,\;
+      \epsilon|x_i-w_i|-\epsilon^2
+    \Bigr).
+\end{equation}
+\end{proposition}
+
+\begin{theorem}[Radius Equation]
+\label{thm:radius}
+In the case $D=x^\top w < y$, the smallest feasible radius $\epsilon^*$ is
+the unique positive root of
+\begin{equation}
+\label{eq:bilinf-root}
+\begin{aligned}
+    D+\sum_{i=1}^{n} M_i(\epsilon)
+      &= y  - \frac{\epsilon}{\gamma^2}, \\
+    F(\epsilon)
+      &= \sum_{i=1}^{n} M_i(\epsilon) + \frac{\epsilon}{\gamma^2} - (y - D)
+      \;=\; 0.
+\end{aligned}
+\end{equation}
+$F$ is continuous, strictly monotone increasing, and piecewise quadratic
+in $\epsilon$.
+\end{theorem}
+
+\begin{remark}[Kink Structure and Complexity]
+Each coordinate contributes at most one kink to $F$, occurring at
+\[
+  \epsilon_k^{\mathrm{kink}}
+    \;=\; \max\!\left\{0,\;
+      \frac{|x_k-w_k|-|x_k+w_k|}{2}
+    \right\}.
+\]
+Sorting these kink points requires $\mathcal{O}(n\log n)$ time, with root
+evaluation linear in $n$ on each interval.
+\end{remark}
+
+\begin{proposition}[$\mathcal{O}(n)$ Newton Solve via Branch Masking]
+\label{prop:on-newton}
+Define $a_k := |x_k+w_k|$ and $b_k := |x_k-w_k|$.
+From Proposition~\ref{prop:reach}, coordinate $k$ contributes via whichever
+of two geometrically distinct regimes yields the larger reach:
+\begin{itemize}
+  \item \textbf{Same-sign branch} ($a_k\epsilon + \epsilon^2$): the box pushes
+        $x_k$ and $w_k$ in the \emph{same} direction, expanding their sum.
+        This branch dominates when $\epsilon$ is large relative to the gap
+        $b_k - a_k$.
+  \item \textbf{Opp-sign branch} ($b_k\epsilon - \epsilon^2$): the box pushes
+        $x_k$ and $w_k$ in \emph{opposite} directions, collapsing their
+        difference. This branch dominates when $\epsilon$ is small.
+\end{itemize}
+The crossover between branches occurs at the unique kink
+$\epsilon_k^{\mathrm{kink}} = \max\{0, (b_k - a_k)/2\}$.
+For $\epsilon$ above this threshold the same-sign branch wins; below it the
+opp-sign branch wins. This is encoded by the binary mask
+\[
+  m_k(\epsilon) \;:=\; \mathbf{1}\!\left[2\epsilon \geq b_k - a_k\right],
+\]
+so that the per-coordinate reach takes the \emph{unified} branch-free form
+\begin{equation}
+  M_k(\epsilon)
+    \;=\; m_k(\epsilon)\bigl(a_k\epsilon+\epsilon^2\bigr)
+      + \bigl(1-m_k(\epsilon)\bigr)\bigl(b_k\epsilon-\epsilon^2\bigr).
+\end{equation}
+Since $m_k(\epsilon)$ is a step function that flips \emph{at most once} as
+$\epsilon$ increases, both $F(\epsilon)$ and its derivative
+\begin{equation}
+  F'(\epsilon)
+    \;=\; \sum_{k=1}^{n}\Bigl[
+        m_k(\epsilon)\bigl(a_k + 2\epsilon\bigr)
+      + \bigl(1-m_k(\epsilon)\bigr)\bigl(b_k - 2\epsilon\bigr)
+    \Bigr] + \frac{1}{\gamma^2}
+\end{equation}
+are computable in a single $\mathcal{O}n$ pass by evaluating both branch
+expressions and selecting via $m_k$, \emph{without sorting or branching in
+control flow}. Because $F$ is continuous, strictly increasing, and piecewise
+quadratic with a uniformly positive derivative (guaranteed by the
+$1/\gamma^2$ term), Newton's method is well-conditioned. The safeguarded
+iteration
+\[
+  \epsilon_{n+1}
+    \;=\; \max\!\left(\ell_n,\min\!\left(r_n, \epsilon_n - \frac{F(\epsilon_n)}{F'(\epsilon_n)}\right)\right)
+\]
+(with $[\ell_t, r_t]$ a bisection bracket maintained as a fallback) converges
+in $\mathcal{O}(1)$ iterations in practice: the piecewise-quadratic structure
+means each Newton step either lands in the correct quadratic segment
+immediately, or crosses at most one kink before the next iterate is already in
+the final segment. The full solve is therefore $\mathcal{O}(n)$.
+\end{proposition}
+
+% ---------------------------------------------------------------
+\subsection{Pseudo-Gradients and Adaptive Optimizers}
+\label{sec:muon}
+% ---------------------------------------------------------------
+An alternative approach to parameter updates integrates pseudo-gradients (Definition~\ref{def:pseudo-gradient}) into standard first-order optimization frameworks at the implementation level.
+
+\begin{remark}[Implementation with First-Order Optimizers]
+\label{rem:optimizer-compat}
+Let $\Delta\theta^{n} := \theta^{n} - P_C(\theta^{n})$ be the pseudo-gradient at iteration $n$. Because $\Delta\theta^{n}$ shares the same dimensionality as the parameter space, it can be injected directly into the update rule of standard first-order optimizers in place of the stochastic gradient $\nabla\mathcal{L}(\theta^{n})$. This allows software APIs to apply adaptive learning rate schedules and momentum directly to the projection direction.
+\end{remark}
+
+The motivation for Remark~\ref{rem:optimizer-compat} is practical: individual parameters may reside in regions where larger adjustments are optimal, while others require conservative updates for stability. Passing the pseudo-gradient through adaptive methods such as Adam or Muon allows the update magnitudes to be implicitly scaled based on historical update information.
+% ---------------------------------------------------------------
+\section{Experiments}
+% ---------------------------------------------------------------
+\label{sec:experiments}
+% ---------------------------------------------------------------
+We evaluate Ptorch against \texttt{torch} and \texttt{pjax} on two standard
+image-classification benchmarks. Section~\ref{sec:exp-mlp} establishes thatinstead of 1 layer + relu and
+Ptorch is competitive on shallow architectures; Section~\ref{sec:exp-vanishing}
+confirms the theoretical depth barrier of Theorem~\ref{thm:vanishing-target}.
+
+% ---------------------------------------------------------------
+\subsection{Shallow MLP: MNIST and CIFAR-10}
+\label{sec:exp-mlp}
+% ---------------------------------------------------------------
+\paragraph{Setup.}
+A single-hidden-layer MLP with 1\,024 units is trained on MNIST and CIFAR-10.
+All three frameworks use identical hyperparameters; Ptorch uses the Muon
+optimizer with pseudo-gradients (Section~\ref{sec:muon}).
+
+\begin{figure}[ht]
+\centering
+% Row 1 — accuracy vs. step
+\begin{minipage}[t]{0.49\textwidth}
+    \centering
+    \safeincludegraphics[width=\textwidth]{images/mlp/MNIST_1L_STEP.png}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.49\textwidth}
+    \centering
+    \safeincludegraphics[width=\textwidth]{images/mlp/CIFAR10_1L_STEP.png}
+\end{minipage}
+\vspace{0.5em}
+% Row 2 — accuracy vs. wall-clock
+\begin{minipage}[t]{0.49\textwidth}
+    \centering
+    \safeincludegraphics[width=\textwidth]{images/mlp/MNIST_1L_TIME.png}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.49\textwidth}
+    \centering
+    \safeincludegraphics[width=\textwidth]{images/mlp/CIFAR10_1L_TIME.png}
+\end{minipage}
+\caption{
+    Single-hidden-layer MLP (1\,024 units) on MNIST (left) and CIFAR-10
+    (right). Top row: accuracy vs.\ optimization step. Bottom row: accuracy
+    vs.\ wall-clock time. Ptorch reaches comparable final accuracy to
+    \texttt{torch} while outpacing \texttt{pjax} per wall-clock second on
+    this shallow architecture. Throughput as a function of batch size is
+    reported in Appendix~\ref{app:batch-scaling}.
+}
+\label{fig:shallow-mlp}
+\end{figure}
+% ---------------------------------------------------------------
+\subsection{Memory Usage}
+\label{sec:exp-memory}
+% ---------------------------------------------------------------
+\paragraph{Setup.}
+We measure peak memory for a single linear layer $y = Wx$
+($d_{\mathrm{in}} = d_{\mathrm{out}} = 512$) as batch size $B$ grows.
+
+\begin{figure}[ht]
+\centering
+\safeincludegraphics[width=0.55\textwidth]{images/memory/memory_vs_batch.png}
+\caption{
+    Peak memory vs.\ batch size (log--log scale) for a single linear layer.
+    \texttt{pjax} scales as $\mathcal{O}(MNK)$ in the bilinear consensus
+    step; Ptorch reduces this to $\mathcal{O}(MN)$, matching \texttt{torch}.
+}
+\label{fig:memory}
+\end{figure}
+
+% ---------------------------------------------------------------
+\subsection{Optimizer Influence}
+\label{sec:exp-memory}
+% ---------------------------------------------------------------
+\paragraph{Setup.}
+We measure the influence on the converge charateristic on the MNIST mlp (width=1024) experiment.
+For each Optmizer its optimal learning rate is used, this was aquired by runnig a hyperparameter tune.
+
+\begin{figure}[ht]
+\centering
+\safeincludegraphics[width=0.55\textwidth]{images/mlp/optimizers.png}
+\caption{
+Training loss as a function of epoch for four optimizers applied to Ptorch pseudo-gradients.
+Muon and momentum-based methods converge faster and to lower loss values, consistent with the
+motivation in Section 6.2.}
+\label{fig:memory}
+\end{figure}
+
+% ---------------------------------------------------------------
+\subsection{Vanishing Target Signal and Depth}
+\label{sec:exp-vanishing}
+% ---------------------------------------------------------------
+\paragraph{Setup.}
+Following Definition~\ref{def:target-signal}, we train Ptorch networks of
+depth $L \in \{2, 4, 8, 16\}$ (width 128, no activations, $\ell_\infty$
+norm) to approximate the identity function $f(x)=x$ on
+$x \sim \mathcal{N}(0, I)$, recording $\delta_k^{n}$ at the first training
+step. A 4-layer MLP ($4\times 1\,024$) is additionally evaluated on MNIST
+and CIFAR-10 under the same protocol as Section~\ref{sec:exp-mlp}.
+
+
+\begin{figure}[ht]
+\centering
+% Row 1 — vanishing signal
+\safeincludegraphics[width=\textwidth]{images/deep/vanishing_combined.png}
+\vspace{0.5em}
+% Row 2 — 4-layer accuracy
+\begin{minipage}[t]{0.49\textwidth}
+    \centering
+    \safeincludegraphics[width=\textwidth]{images/mlp/MNIST_4L_TIME.png}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.49\textwidth}
+    \centering
+    \safeincludegraphics[width=\textwidth]{images/mlp/CIFAR10_4L_TIME.png}
+\end{minipage}
+\caption{
+    \textbf{Top:} per-layer target signal magnitude $\delta_k^{n}$ for
+    varying depths (left) and final training loss vs.\ depth (right),
+    confirming Theorem~\ref{thm:vanishing-target}.
+    \textbf{Bottom:} accuracy vs.\ wall-clock time for a 4-layer MLP on
+    MNIST (left) and CIFAR-10 (right). The performance gap relative to
+    \texttt{torch} widens with depth, consistent with
+    Remark~\ref{cor:depth-barrier}.
+}
+\label{fig:depth-barrier}
+\end{figure}
+
+\paragraph{Results.}
+Figure~\ref{fig:depth-barrier} (bottom) illustrates the training dynamics for the 4-layer MLP architectures on both MNIST and CIFAR-10. Highlighting the limitations foreshadowed by our previous experiments, the results demonstrate that Ptorch does not scale well with increased depth. In stark contrast to the shallower networks evaluated in Section~\ref{sec:exp-mlp} where Ptorch maintained competitive performance, the 4-layer models suffer from a severe degradation in learning. As predicted by the vanishing target signal phenomenon (Theorem~\ref{thm:vanishing-target}), Ptorch fails to achieve meaningful accuracy within a comparable wall-clock time. The performance gap relative to standard backpropagation (\texttt{torch}) widens significantly, confirming that depth currently acts as a strict barrier to convergence.
+% ---------------------------------------------------------------
+%\section{Conclusion}
+%\label{sec:conclusion}
+% ---------------------------------------------------------------
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

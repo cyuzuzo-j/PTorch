@@ -1358,7 +1358,7 @@ class LeakyReLUProjection(torch.autograd.Function):
         dist_2 = (x - x_2) ** 2 + (z - y_2) ** 2
 
         result = torch.where(dist_1 < dist_2, x_1, x_2)
-        return result, None
+        return process_activation_target(x, result), None
 
 class SumReLUProjection(torch.autograd.Function):
     """
@@ -2508,7 +2508,7 @@ class ConvPatchProjection(torch.autograd.Function):
         
         # Apply projection target propagation logic
         
-        grad_input = process_activation_target(input, target)
+        input = process_activation_target(input, target)
         
-        return grad_input, None, None, None
+        return input, None, None, None
 

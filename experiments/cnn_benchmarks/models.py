@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 import pjax
 from pjax import nn
 import ptorch
-import ptorch.nn.modules as pnn
+import torch.nn as tnn
 
 # Defaults (overridden by config.yaml at runtime)
 DEFAULT_CONV_WIDTHS = [4, 8, 8]

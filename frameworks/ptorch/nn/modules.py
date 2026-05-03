@@ -31,6 +31,7 @@ class Linear(ProjectionModule):
         residual: bool = False,
         dtp: bool = False,
         norm = 'l2',
+        use_cache=True
     ):
         super().__init__(outputs=1)
         self.in_features = in_features
@@ -44,6 +45,7 @@ class Linear(ProjectionModule):
         self.dtp = dtp
         self.norm = norm
         self.proj_cache: dict = {}
+        self.use_cache = use_cache
 
         # Separate parameters to ensure optimizers (e.g., AdamW) can exclude bias from weight decay
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
@@ -54,7 +56,8 @@ class Linear(ProjectionModule):
 
         # 1. Correct Initialization Variance:
         # Now matches nn.Linear shape (out_features, in_features) natively
-        nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
+
+        nn.init.kaiming_normal_(self.weight, a=0.1, mode='fan_in', nonlinearity='leaky_relu')
         
         # 2. Residual Identity mapping
         if self.residual:
@@ -78,6 +81,8 @@ class Linear(ProjectionModule):
         # Speed/Memory Efficiency: Use F.pad instead of torch.cat for input bias augmentation
         projected_input = input
         weight_matrix = self.weight.T
+        if not self.use_cache:
+            self.proj_cache = {}
 
         if self.use_bias:
             projected_input = F.pad(input, (0, 1), value=1.0)
@@ -152,7 +157,7 @@ class LinearFrozen(ProjectionModule):
         else:
             self.register_parameter('bias', None)
 
-        nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='linear')
+        nn.init.normal_(self.weight, mean=0, std=0.001)
         
         if self.residual:
             with torch.no_grad():
@@ -407,6 +412,94 @@ class RMSNorm(nn.Module):
             return RMSNormProjection.apply(x, self.weight, self.eps, 5)
         return F.rms_norm(x, (x.size(-1),), eps=self.eps)
 
+
+def extract_patches(input: torch.Tensor, kernel_size: Tuple[int, int], stride: Tuple[int, int], padding: Tuple[int, int]) -> torch.Tensor:
+    """Unfolds inputs into spatial patches and permutes for dense layers."""
+    patches = F.unfold(input, kernel_size, dilation=1, padding=padding, stride=stride)
+    
+    H_out = (input.shape[2] + 2 * padding[0] - kernel_size[0]) // stride[0] + 1
+    W_out = (input.shape[3] + 2 * padding[1] - kernel_size[1]) // stride[1] + 1
+    
+    # Reshape to (N, C*kH*kW, H_out, W_out) then permute to (N, H_out, W_out, C*kH*kW)
+    return patches.view(input.shape[0], -1, H_out, W_out).permute(0, 2, 3, 1)
+
+
+class ConvPatchProjection(torch.autograd.Function):
+    """
+    Handles the Spatial Consensus for Convolutional Activations.
+    As proven in consensus_math.md, activations must NEVER be averaged 
+    across the batch. This projection uses F.fold to perfectly sum overlapping 
+    patches and divide by their local spatial overlaps.
+    """
+    @staticmethod
+    def forward(ctx, input, kernel_size, stride, padding):
+        ctx.save_for_backward(input)
+        ctx.kernel_size = kernel_size
+        ctx.stride = stride
+        ctx.padding = padding
+        
+        # Unfold extracts spatial patches: (N, C*kH*kW, L)
+        patches = F.unfold(input, kernel_size, dilation=1, padding=padding, stride=stride)
+        
+        kH = kernel_size[0] if isinstance(kernel_size, tuple) else kernel_size
+        kW = kernel_size[1] if isinstance(kernel_size, tuple) else kernel_size
+        sH = stride[0] if isinstance(stride, tuple) else stride
+        sW = stride[1] if isinstance(stride, tuple) else stride
+        pad_h = padding[0] if isinstance(padding, tuple) else padding
+        pad_w = padding[1] if isinstance(padding, tuple) else padding
+        
+        H_out = (input.shape[2] + 2 * pad_h - kH) // sH + 1
+        W_out = (input.shape[3] + 2 * pad_w - kW) // sW + 1
+        ctx.H_out = H_out
+        ctx.W_out = W_out
+        
+        # Reshape and permute into a dense-compatible format: (N, H_out, W_out, C*kH*kW)
+        return patches.view(input.shape[0], -1, H_out, W_out).permute(0, 2, 3, 1)
+
+    @staticmethod
+    def backward(ctx, z_target):
+        input, = ctx.saved_tensors
+        N, C, H, W = input.shape
+        
+        kH = ctx.kernel_size[0] if isinstance(ctx.kernel_size, tuple) else ctx.kernel_size
+        kW = ctx.kernel_size[1] if isinstance(ctx.kernel_size, tuple) else ctx.kernel_size
+        
+        L = ctx.H_out * ctx.W_out
+        
+        # 1. Revert permutation back to fold format: (N, C*kH*kW, L)
+        z_patches = z_target.permute(0, 3, 1, 2).reshape(N, -1, L)
+        
+        # 2. Fold the patches to sum the overlapping proposals at each spatial pixel
+        target_sum = F.fold(
+            z_patches, 
+            output_size=(H, W), 
+            kernel_size=ctx.kernel_size, 
+            padding=ctx.padding, 
+            stride=ctx.stride
+        )
+        
+        # 3. Memory-Optimized Overlap Counting
+        # Overlap geometry is purely spatial and identical for all batches and channels.
+        # We fold a dummy 1-channel tensor to generate the overlap mask in (1, 1, H, W).
+        # This prevents an O(N * C_in * kH * kW) memory spike!
+        dummy_ones = torch.ones(1, kH * kW, L, device=input.device, dtype=input.dtype)
+        overlap_counts = F.fold(
+            dummy_ones, 
+            output_size=(H, W), 
+            kernel_size=ctx.kernel_size, 
+            padding=ctx.padding, 
+            stride=ctx.stride
+        )
+        
+        # 4. Consensus Projection (PyTorch broadcasts the (1,1,H,W) counts perfectly)
+        target_img = target_sum / torch.clamp(overlap_counts, min=1.0)
+        
+        # Apply the framework's target-residual update mechanism
+        grad_input = process_activation_target(input, target_img)
+        
+        return grad_input, None, None, None
+
+
 class Conv2D(ProjectionModule):
     def __init__(
         self,
@@ -415,54 +508,71 @@ class Conv2D(ProjectionModule):
         kernel_size: Union[int, Tuple[int, int]] = 3,
         stride: Union[int, Tuple[int, int]] = 1,
         padding: Union[int, Tuple[int, int], str] = 0,
+        bias: bool = True,
         alpha: float = 1.0,
         g: float = 1.0,
-        num_iters: int = 1,
+        num_iters: int = 15,
     ):
         super().__init__(outputs=1)
-        if isinstance(kernel_size, int):
-            kernel_size = (kernel_size, kernel_size)
-        if isinstance(stride, int):
-            stride = (stride, stride)
+        
+        self.kernel_size = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
+        self.stride = (stride, stride) if isinstance(stride, int) else tuple(stride)
+        
+        if isinstance(padding, int):
+            self.padding_mode = (padding, padding)
+        elif isinstance(padding, str):
+            self.padding_mode = padding.lower()
+            if self.padding_mode not in ['same', 'valid']:
+                raise ValueError(f"Unknown padding mode: {padding}")
+        else:
+            self.padding_mode = tuple(padding)
 
-        self.kernel_size = kernel_size
-        self.stride = stride
-        self.padding_mode = padding
-
-        kH, kW = kernel_size
-        self.linear = Linear(in_features=in_channels * kH * kW, out_features=out_channels, bias=True, alpha=alpha, g=g, num_iters=num_iters)
+        kH, kW = self.kernel_size
+        
+        # As noted in consensus_math.md: The weights utilize a "flat" global consensus 
+        # across both batch and spatial dimensions. We leverage the Linear layer so 
+        # it natively routes to MatMulProjectionHybrid without O(MNK) expansion issues.
+        self.linear = Linear(
+            in_features=in_channels * kH * kW, 
+            out_features=out_channels, 
+            bias=False, 
+            alpha=alpha, 
+            g=g, 
+            num_iters=num_iters,
+            norm="2",
+            use_cache=False
+        )
 
     def _resolve_padding(self, H: int, W: int) -> Tuple[int, int]:
-        if isinstance(self.padding_mode, str):
-            if self.padding_mode.lower() == 'same':
-                kH, kW = self.kernel_size
-                sH, sW = self.stride
-                pad_h = max(0, (H - 1) * sH + kH - H) // 2
-                pad_w = max(0, (W - 1) * sW + kW - W) // 2
-                return (pad_h, pad_w)
-            elif self.padding_mode.lower() == 'valid':
-                return (0, 0)
-            else:
-                raise ValueError(f"Unknown padding mode: {self.padding_mode}")
-        elif isinstance(self.padding_mode, int):
-            return (self.padding_mode, self.padding_mode)
-        else:
-            return tuple(self.padding_mode)
+        """Dynamically computes spatial padding offsets."""
+        if self.padding_mode == 'same':
+            sH, sW = self.stride
+            kH, kW = self.kernel_size
+            pad_h = max(0, (H - 1) * sH + kH - H) // 2
+            pad_w = max(0, (W - 1) * sW + kW - W) // 2
+            return (pad_h, pad_w)
+        elif self.padding_mode == 'valid':
+            return (0, 0)
+        return self.padding_mode
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        N, C, H, W = input.shape
-        padding = self._resolve_padding(H, W)
+        padding = self._resolve_padding(input.shape[2], input.shape[3])
 
-        if config.use_projections:
+        if getattr(config, 'use_projections', False):
+            # Enforce Spatial Consensus (Activations)
             patches = ConvPatchProjection.apply(input, self.kernel_size, self.stride, padding)
         else:
+            # Standard Unfold Pipeline (Gradients)
             patches = F.unfold(input, self.kernel_size, dilation=1, padding=padding, stride=self.stride)
-            L = patches.shape[-1]
+            kH, kW = self.kernel_size
+            sH, sW = self.stride
             pad_h, pad_w = padding
-            H_out = (H + 2 * pad_h - self.kernel_size[0]) // self.stride[0] + 1
-            W_out = (W + 2 * pad_w - self.kernel_size[1]) // self.stride[1] + 1
-            patches = patches.view(N, -1, H_out, W_out).permute(0, 2, 3, 1)
+            H_out = (input.shape[2] + 2 * pad_h - kH) // sH + 1
+            W_out = (input.shape[3] + 2 * pad_w - kW) // sW + 1
+            patches = patches.view(input.shape[0], -1, H_out, W_out).permute(0, 2, 3, 1)
 
+        # Enforce Flat Global Consensus (Weights & Bias) via MatMulProjection
         out = self.linear(patches)
-        out = out.permute(0, 3, 1, 2)
-        return out
+        
+        # Reshape back to Image Topology: (N, C_out, H_out, W_out)
+        return out.permute(0, 3, 1, 2)

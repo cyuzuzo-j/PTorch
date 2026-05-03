@@ -1,5 +1,8 @@
 import jax.numpy as np
 import jax.random as random
+import os
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.getcwd(), '..')))
 import tools.optimize as optimize
 import tools.projections as projections
 from data import MNISTDataModule
