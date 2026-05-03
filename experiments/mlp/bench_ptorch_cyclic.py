@@ -16,7 +16,7 @@ import torch
 import torch.nn as tnn
 import torch.nn.functional as F
 import torch.fx
-from ptorch.nn.modules import Linear, LinearFrozen, LeakyReLU, ProjectionModule, CrossEntropy
+from ptorch.nn.modules import Linear, LinearFrozen, LeakyReLU,ReLU, ProjectionModule, CrossEntropy, HardMarginLoss
 from ptorch import config as ptorch_config
 import ptorch.optim_static as ptorch_optim_static
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
@@ -37,7 +37,7 @@ DATASETS = {"MNIST": MNISTDataModule, "CIFAR10": InfiniteCifarDataModule}
 
 class ProjectionTracer(torch.fx.Tracer):
     def is_leaf_module(self, m: tnn.Module, module_qualified_name: str) -> bool:
-        if isinstance(m, (ProjectionModule, LeakyReLU)):
+        if isinstance(m, (ProjectionModule, ReLU , LeakyReLU)):
             return True
         return super().is_leaf_module(m, module_qualified_name)
 
@@ -78,13 +78,13 @@ class MLP(tnn.Module):
         self.hidden_layers = tnn.ModuleList()
         for i, f in enumerate(hidden):
             if i == 0:
-                self.hidden_layers.append(LinearFrozen(last, f, bias=False, g=1.0))
+                self.hidden_layers.append(LinearFrozen(in_features, f, bias=False))
             else:
-                self.hidden_layers.append(Linear(last, f, bias=False, g=1.0, alpha=1.0, num_iters=10))
+                self.hidden_layers.append(Linear(last,f, bias=False, residual=True))
             self.hidden_layers.append(LeakyReLU(0.1))
             last = f
-        self.out = Linear(last, classes, bias=False, g=1.0, alpha=1.0, num_iters=10)
-        self.loss = CrossEntropy()
+        self.out = Linear(last, classes, bias=False)
+        self.loss = HardMarginLoss()
 
     def forward(self, x, y_oh):
         x = x.reshape(x.shape[0], -1)
@@ -181,11 +181,23 @@ def run(cfg, task_cfg, batch_size, run_number, device):
             # Initial real forward pass for this batch
             output = traced(x_batch, y_oh)
 
+
             for _ in range(K):
                 if step >= cfg["max_steps"]:
                     break
 
-                # ── Eval ──────────────────────────────────────────────────────────
+
+                # ── Backward + weight update ───────────────────────────────────
+                optimizer.zero_grad()
+                output.sum().backward()
+                optimizer.step()
+
+
+                # ── Propagate projections (no new forward pass) ───────────────
+                interpreter = PropagateCache(traced, skip_modules={'out'})
+                output = interpreter.run(x_batch, y_oh)
+                
+            # ── Eval ──────────────────────────────────────────────────────────
             if step % cfg["eval_every"] == 0:
                 val_acc = eval_acc(val_loader)
                 wandb.log({"val/val_acc": val_acc, "training_time_s": time.time() - t0}, step=step)
@@ -201,21 +213,12 @@ def run(cfg, task_cfg, batch_size, run_number, device):
                 if no_improve >= cfg["patience"]:
                     print(f"Early stop at step {step}")
                     break
-
-            # ── Backward + weight update ───────────────────────────────────
-            optimizer.zero_grad()
-            output.sum().backward()
-            optimizer.step()
-
+                
             with torch.no_grad():
                 logits = model.forward_eval(x_batch)
             ce_loss   = float(F.cross_entropy(logits, y_batch))
             train_acc = float((logits.argmax(dim=-1) == y_batch).float().mean())
             wandb.log({"train/loss": ce_loss, "train/train_acc": train_acc}, step=step)
-
-            # ── Propagate projections (no new forward pass) ───────────────
-            interpreter = PropagateCache(traced, skip_modules={'out'})
-            output = interpreter.run(x_batch, y_oh)
 
             pbar.update(1)
             step += 1

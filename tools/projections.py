@@ -335,6 +335,164 @@ def matmul_proj_fixed_X(X, W, Z, g=1.0, omega=1.0):
 
 
 @jax.jit
+def hyperbolaProj(u0, v0, gamma, num_steps=20, eps=1e-4):
+    """
+    Project (u0, v0) onto the hyperbola C_gamma = {(u,v) : ||u||^2 - ||v||^2 = 2*gamma}
+    in a Hilbert space, for any sign of gamma.
+
+    By Prop 3.3 of Bauschke-Lal-Wang, the optimum has u = alpha * u0, v = beta * v0
+    with alpha, beta >= 0. KKT gives
+        alpha = 1/(1-lam),  beta = 1/(1+lam),  lam in (-1, 1),
+    where lam solves the scalar equation
+        g(lam) := a/(1-lam)^2 - b/(1+lam)^2 = 2*gamma,
+    with a = ||u0||^2, b = ||v0||^2. g is strictly increasing on (-1,1) and ranges over
+    R, so a unique solution exists for any gamma in R.
+
+    Theorem 5.1 (gamma < 0) is automatic here: the swap symmetry
+        P_{C_gamma}(u0, v0) = swap(P_{C_{-gamma}}(v0, u0))
+    corresponds to lam -> -lam in (*); the same Newton solver handles both cases.
+    """
+    a = jnp.sum(u0 * u0)
+    b = jnp.sum(v0 * v0)
+    target = 2.0 * gamma
+    bound = 1.0 - eps
+
+    def step(_, lam):
+        one_minus = 1.0 - lam
+        one_plus  = 1.0 + lam
+        g_val   = a / (one_minus ** 2) - b / (one_plus ** 2) - target
+        g_prime = 2.0 * a / (one_minus ** 3) + 2.0 * b / (one_plus ** 3)
+        lam_new = lam - g_val / (g_prime + 1e-12)
+        return jnp.clip(lam_new, -bound, bound)
+
+    lam = jax.lax.fori_loop(0, num_steps, step, 0.0)
+    alpha = 1.0 / (1.0 - lam)
+    beta  = 1.0 / (1.0 + lam)
+    return alpha * u0, beta * v0
+
+
+@jax.jit
+def bilinearProjViaHyperbola(a, b, z, num_steps=20):
+    """
+    Project (a, b) onto {(a',b') : <a',b'> = z} by routing through the hyperbola
+    formulation: rotate by pi/4 to (u, v) with ||u||^2 - ||v||^2 = 2z, project with
+    `hyperbolaProj`, then rotate back. Equivalent to `bilinearProj` but expressed in
+    the hyperbola variables; supports any sign of z including z < 0 via Thm 5.1.
+    """
+    inv_sqrt2 = 1.0 / jnp.sqrt(2.0)
+    u0 = (a + b) * inv_sqrt2
+    v0 = (b - a) * inv_sqrt2
+    u, v = hyperbolaProj(u0, v0, z, num_steps)
+    a_new = (u - v) * inv_sqrt2
+    b_new = (u + v) * inv_sqrt2
+    return a_new, b_new, z
+
+
+@jax.jit
+def matmul_proj_hyperbola(X, W, Z, num_steps=20, eps=1e-4):
+    """
+    Hyperbola-form variant of `matmul_proj`: projects onto the per-pair / per-row
+    bilinear constraint W[j,:] . X[:,b] = Z[j,b] in isolation, then takes the consensus
+    average across the shared dimensions (b for rows of W, j for columns of X).
+
+    Uses the Newton equation
+        a_{jb}/(1-lam)^2 - b_{jb}/(1+lam)^2 = 2 * Z[j,b]
+    with
+        a_{jb} = (||w_j||^2 + ||x_b||^2)/2 + <w_j, x_b>,
+        b_{jb} = (||w_j||^2 + ||x_b||^2)/2 - <w_j, x_b>,
+    derived from the pi/4 rotation. The reconstruction is the standard
+        x' = (x + lam y)/(1-lam^2),  y' = (lam x + y)/(1-lam^2),
+    which fuses with the consensus averaging into two 2D matmuls (no MNK tensor).
+
+    X: (dim_in, N), W: (M, dim_in), Z: (M, N).
+    """
+    A = jnp.atleast_2d(W)         # (M, K)
+    B = jnp.atleast_2d(X)         # (K, N)
+    Z_target = jnp.atleast_2d(Z)  # (M, N)
+
+    M, K = A.shape
+    N = B.shape[1]
+
+    p  = A @ B                                                # (M, N)  <w_j, x_b>
+    qa = jnp.sum(A * A, axis=-1, keepdims=True)               # (M, 1)
+    qb = jnp.sum(B * B, axis=-2, keepdims=True)               # (1, N)
+    half_q = 0.5 * (qa + qb)                                  # (M, N)
+    a_pair = half_q + p                                       # ||u||^2
+    b_pair = half_q - p                                       # ||v||^2
+
+    bound = 1.0 - eps
+
+    def newton_step(_, lam):
+        one_minus = 1.0 - lam
+        one_plus  = 1.0 + lam
+        g_val   = a_pair / (one_minus ** 2) - b_pair / (one_plus ** 2) - 2.0 * Z_target
+        g_prime = 2.0 * a_pair / (one_minus ** 3) + 2.0 * b_pair / (one_plus ** 3)
+        lam_new = lam - g_val / (g_prime + 1e-12)
+        return jnp.clip(lam_new, -bound, bound)
+
+    lam = jax.lax.fori_loop(0, num_steps, newton_step, jnp.zeros_like(p))
+    lam = jnp.clip(lam, -bound, bound)
+
+    inv_denom    = 1.0 / (1.0 - lam ** 2)                     # (M, N)
+    lam_inv_denom = lam * inv_denom                           # (M, N)
+
+    # Per-pair: w_j' = (w_j + lam x_b)/(1-lam^2), x_b' = (lam w_j + x_b)/(1-lam^2).
+    # Consensus on rows of W (avg over b=1..N) and cols of X (avg over j=1..M).
+    sum_inv_j = jnp.sum(inv_denom, axis=-1, keepdims=True)    # (M, 1)
+    A_proj = (1.0 / N) * (A * sum_inv_j + lam_inv_denom @ B.T)
+
+    sum_inv_i = jnp.sum(inv_denom, axis=-2, keepdims=True)    # (1, N)
+    B_proj = (1.0 / M) * (B * sum_inv_i + A.T @ lam_inv_denom)
+
+    return B_proj.reshape(X.shape), A_proj.reshape(W.shape), Z_target.reshape(Z.shape)
+
+
+@jax.jit
+def matmul_proj_fixed_X_hyperbola(X, W, Z, num_steps=20, eps=1e-4):
+    """
+    X-fixed variant of `matmul_proj_hyperbola`: averages only across N (no consensus on X).
+    Use when the input activations are clamped (e.g. x_in = batch data).
+    """
+    A = jnp.atleast_2d(W)
+    B = jnp.atleast_2d(X)
+    Z_target = jnp.atleast_2d(Z)
+
+    M, K = A.shape
+    N = B.shape[1]
+
+    p  = A @ B
+    qa = jnp.sum(A * A, axis=-1, keepdims=True)
+    qb = jnp.sum(B * B, axis=-2, keepdims=True)
+    half_q = 0.5 * (qa + qb)
+    a_pair = half_q + p
+    b_pair = half_q - p
+
+    bound = 1.0 - eps
+
+    def newton_step(_, lam):
+        one_minus = 1.0 - lam
+        one_plus  = 1.0 + lam
+        g_val   = a_pair / (one_minus ** 2) - b_pair / (one_plus ** 2) - 2.0 * Z_target
+        g_prime = 2.0 * a_pair / (one_minus ** 3) + 2.0 * b_pair / (one_plus ** 3)
+        lam_new = lam - g_val / (g_prime + 1e-12)
+        return jnp.clip(lam_new, -bound, bound)
+
+    lam = jax.lax.fori_loop(0, num_steps, newton_step, jnp.zeros_like(p))
+    lam = jnp.clip(lam, -bound, bound)
+
+    inv_denom    = 1.0 / (1.0 - lam ** 2)
+    lam_inv_denom = lam * inv_denom
+
+    sum_inv_j = jnp.sum(inv_denom, axis=-1, keepdims=True)
+    A_proj = (1.0 / N) * (A * sum_inv_j + lam_inv_denom @ B.T)
+
+    # Z reconstructed from the projected (W, X=fixed): w_j' . x_b - tracked via lam.
+    Z_proj = (a_pair / (1.0 - lam) ** 2 - b_pair / (1.0 + lam) ** 2) * 0.5
+
+    return X.reshape(X.shape), A_proj.reshape(W.shape), Z_proj.reshape(Z.shape)
+
+
+@jax.jit
 def bilinear_proj_orr(a, b, z, steps=10):
     """Project onto bilinear function graph using Newton's method."""
     p = a @ b

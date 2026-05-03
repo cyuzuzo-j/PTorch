@@ -1,4 +1,4 @@
-experiments/boolean/bench_ptorch.py##################################################
+##################################################
 ###   Benchmark — ptorch                      ###
 ##################################################
 import sys, os
@@ -20,7 +20,7 @@ import tqdm, time
 import wandb
 
 FRAMEWORK = "ptorch_cyclic"
-XOR_BITS = 8
+XOR_BITS = 2
 
 OPTIM_MODULES = vars(ptorch_optim_static)
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
@@ -42,7 +42,6 @@ class ProjectionTracer(torch.fx.Tracer):
             return True
         return super().is_leaf_module(m, module_qualified_name)
 
-
 class PropagateCache(torch.fx.Interpreter):
     def __init__(self, module, skip_modules=None):
         super().__init__(module)
@@ -61,9 +60,11 @@ class PropagateCache(torch.fx.Interpreter):
         result = super().run_node(n)
         
         if cache_to_apply is not None:
-            result.data.copy_(cache_to_apply.data)
-            
+            print(f"set node {n} to {cache_to_apply.data}")
+            result.data.copy_(cache_to_apply.data) 
         return result
+
+
 # ── Model ────────────────────────────────────────
 class MLP(tnn.Module):
     def __init__(self, hidden, in_features, classes):
@@ -153,8 +154,10 @@ def run(cfg, task_cfg, batch_size, run_number, device):
         nonlocal output
         optimizer.zero_grad()
         # Projection losses return logits (non-scalar), so seed backward explicitly.
+        print("--------------------------")
         output.sum().backward()
         optimizer.step()
+        print("-------------------------------")
 
         # Keep a scalar metric for logging that matches the hard-margin objective.
         with torch.no_grad():
@@ -164,12 +167,7 @@ def run(cfg, task_cfg, batch_size, run_number, device):
             err0 = torch.where(target == 0, torch.where(logits > 0.0, logits ** 2, torch.tensor(0.0, device=logits.device)), torch.tensor(0.0, device=logits.device))
             scalar_loss = (err1 + err0).mean()
 
-        # Fake forward: run each module with current weights but inject cached
-        # Z_proj (from this backward) as the layer output. This propagates cyclic
-        # projection targets without recomputing A @ B from scratch.
-        # 'out' is skipped so HardMarginLoss always sees fresh logits.
         output = PropagateCache(traced, skip_modules={'out'}).run(x_train, y_train)
-
         return float(scalar_loss.item())
 
 
