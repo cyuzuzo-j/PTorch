@@ -64,29 +64,91 @@ def zeropower_via_polarexpress(G: torch.Tensor, steps: int = 5, eps: float = 1e-
 
 @torch.compile()
 def process_activation_target(A_det, A_proj):
-    if getattr(config, 'muon_activations', True):
-        orig_shape = A_det.shape
-        last_dim = orig_shape[-1]
-        
-        # Dynamo sometimes traces with 0-sized fake tensors which causes 
-        # reshape(-1, 0) to fail with an ambiguous shape error.
-        if last_dim == 0 or A_det.numel() == 0:
-            return A_proj
-            
-        A_2d = A_det.reshape(-1, last_dim)
-        A_proj_2d = A_proj.reshape(-1, last_dim)
-        g = A_2d - A_proj_2d
-        
+    if not getattr(config, 'muon_activations', True):
+        return A_proj
+
+    orig_shape = A_det.shape
+    last_dim = orig_shape[-1]
+
+    if last_dim == 0 or A_det.numel() == 0:
+        return A_proj
+
+    A_2d = A_det.reshape(-1, last_dim)
+    A_proj_2d = A_proj.reshape(-1, last_dim)
+    g = A_2d - A_proj_2d
+
+    g_muon = zeropower_via_polarexpress(g)
+    lr = getattr(config, 'muon_activations_lr', 1.0)
+
+    if getattr(config, 'muon_activations_scale', False):
+        scale = g.norm() / (g_muon.norm() + 1e-8)
+        g_muon = g_muon * scale
+
+    A_proj_new = A_2d - lr * g_muon
+
+    if getattr(config, 'muon_activations_norm_preserve', False):
+        row_norm_orig = A_2d.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+        row_norm_new = A_proj_new.norm(dim=-1, keepdim=True).clamp(min=1e-8)
+        A_proj_new = A_proj_new * (row_norm_orig / row_norm_new)
+
+    return A_proj_new.reshape(orig_shape)
+
+
+@torch.compile()
+def process_weight_target(B_det, B_proj):
+    if getattr(config, 'muon_weights', False):
+        if B_det.numel() == 0:
+            return B_proj
+
+        is_1d = B_det.ndim == 1
+        if is_1d:
+            B_det = B_det.unsqueeze(0)
+            B_proj = B_proj.unsqueeze(0)
+
+        orig_shape = B_det.shape
+        B_2d = B_det.reshape(-1, orig_shape[-1])
+        B_proj_2d = B_proj.reshape(-1, orig_shape[-1])
+        g = B_2d - B_proj_2d
+
         g_muon = zeropower_via_polarexpress(g)
-        lr = getattr(config, 'muon_activations_lr', 1.0)
-        
-        if getattr(config, 'muon_activations_scale', False):
+        lr = getattr(config, 'muon_weights_lr', 0.02)
+
+        if getattr(config, 'muon_weights_scale', False):
             scale = g.norm() / (g_muon.norm() + 1e-8)
             g_muon = g_muon * scale
-            
-        A_proj_new = A_2d - lr * g_muon
-        return A_proj_new.reshape(orig_shape)
-    return A_proj
+
+        B_new = B_2d - lr * g_muon
+        result = B_new.reshape(orig_shape)
+        if is_1d:
+            result = result.squeeze(0)
+        return result
+    return B_proj
+
+
+def compute_weight_target_frozen_a(A, B, Z_target_scaled, g=1.0, omega=1.0, residual=False):
+    """Optimal weight target with frozen activations via (K,K) least-squares solve.
+
+    Solves: min ||B_new - B||^2 + (1/g^2)||A@B_new - Z_target_scaled||^2
+    where Z_target_scaled = Z_target * omega.
+    """
+    K = B.size(-2)
+    frozen_g = g * getattr(config, 'frozen_a_g', 1.0)
+    lam = 1.0 / (frozen_g ** 2 + 1e-8)
+
+    if residual:
+        I_B = torch.eye(K, B.size(-1), device=B.device, dtype=B.dtype)
+        B_eff = I_B - B
+    else:
+        B_eff = B
+
+    ATA = A.transpose(-2, -1) @ A
+    I_K = torch.eye(K, device=A.device, dtype=A.dtype)
+    rhs = B_eff + lam * (A.transpose(-2, -1) @ Z_target_scaled)
+    B_eff_new = torch.linalg.solve(I_K + lam * ATA, rhs)
+
+    if residual:
+        return I_B - B_eff_new
+    return B_eff_new
 
 
 class AverageGradient(torch.autograd.Function):
@@ -443,9 +505,14 @@ class MatMulProjection(torch.autograd.Function):
             )
             
             A_proj = A_proj_2d.reshape(A_det.shape)
+            if getattr(config, 'frozen_a_weights', False):
+                B_proj_2d = compute_weight_target_frozen_a(
+                    A_2d, B_2d, Z_2d, g=ctx.g, omega=ctx.omega, residual=ctx.residual)
+            else:
+                B_proj_2d = process_weight_target(B_2d, B_proj_2d)
             B_proj = B_proj_2d.reshape(B_det.shape[-2], B_det.shape[-1]).expand(B_det.shape)
             Z_proj = Z_proj_2d.reshape(Z_det.shape)
-            
+
             if ctx.proj_cache is not None:
                 ctx.proj_cache['t'] = t_new.reshape(Z_det.shape)
         else:
@@ -453,7 +520,7 @@ class MatMulProjection(torch.autograd.Function):
             # that may come from transpose() or other view ops
             A_proj, B_proj, Z_proj, t_new = matmul_proj(
                 A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
-                t_init=t_init, alpha=ctx.alpha, g=ctx.g, omega=ctx.omega, 
+                t_init=t_init, alpha=ctx.alpha, g=ctx.g, omega=ctx.omega,
                 num_steps=ctx.num_steps, residual=ctx.residual
             )
 
@@ -461,11 +528,17 @@ class MatMulProjection(torch.autograd.Function):
             if not ctx.pairwise and ctx.proj_cache is not None:
                 ctx.proj_cache['t'] = t_new
 
-        # Return Nones for proj_cache, pairwise, and residual 
-        #print(f"DEBUG MatMulProjection.backward called. ctx.forward_cache len: {len(ctx.forward_cache) if ctx.forward_cache else 'None'}")
+            if getattr(config, 'frozen_a_weights', False):
+                A_2d_fb = A_det.contiguous().clone()
+                Z_2d_fb = Z_det.contiguous().clone() * ctx.omega
+                B_proj = compute_weight_target_frozen_a(
+                    A_2d_fb, B_det.contiguous().clone(), Z_2d_fb,
+                    g=ctx.g, omega=ctx.omega, residual=ctx.residual)
+            else:
+                B_proj = process_weight_target(B_det, B_proj)
+
         if ctx.forward_cache is not None:
             ctx.forward_cache[0] = Z_proj
-            #print(f"DEBUG Populated forward_cache[0] with tensor of shape {Z_proj.shape}, sum {Z_proj.sum().item()}")
         return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None, None, None
 
 

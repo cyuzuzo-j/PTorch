@@ -12,8 +12,14 @@ defaults = {
     "projection_alpha": 1.0,
     "projection_g": 1.0,
     "muon_activations": True,
-    "muon_activations_lr":1.0,
+    "muon_activations_lr":0.5,
     "muon_activations_scale": False,
+    "muon_weights": False,
+    "muon_weights_lr": 0.02,
+    "muon_weights_scale": False,
+    "frozen_a_weights": True,
+    "frozen_a_g": 1.0,
+    "muon_activations_norm_preserve": False
 }
 
 
