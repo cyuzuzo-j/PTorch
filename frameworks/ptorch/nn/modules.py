@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from ..core.ops import * 
-from .. import config
+from ..config import config
 
 class ProjectionModule(nn.Module):
     """Base class for projection-aware modules."""
@@ -230,15 +230,6 @@ class LeakyReLU(nn.LeakyReLU):
             return LeakyReLUProjection.apply(input, self.negative_slope)
         return super().forward(input)
 
-class SumReLU(nn.Module):
-    """Rectified Linear Unit."""
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, *inputs):
-        if config.use_projections:
-            return SumReLUProjection.apply(*inputs)
-        return torch.relu(sum(inputs))
 
 class Step(nn.Module):
     """Step activation function."""
@@ -257,26 +248,6 @@ class CrossEntropy(ProjectionModule):
 
     def forward(self, input, data_target):
         return CrossEntropyProjection.apply(input, data_target)
-class Gap(nn.Module):
-    """Gap activation function.
-    
-    The forward pass is the identity (pass-through). The projection
-    backward enforces that outputs must lie outside the gap, i.e.
-    |y| >= delta/2, forcing the network to commit to a definitive
-    decision rather than hovering near zero.
-
-    Args:
-        delta: Width of the gap region (default 2.0, giving a gap of
-               [-1, 1] in output space).
-    """
-    def __init__(self, delta: float = 2.0):
-        super().__init__()
-        self.delta = delta
-        
-    def forward(self, input):
-        if config.use_projections:
-            return GapProjection.apply(input, self.delta)
-        return input
 
 class GappedStep(nn.Module):
     """Step activation function with a dead zone.
@@ -303,63 +274,6 @@ class GappedStep(nn.Module):
                torch.where(input <= -half, torch.tensor(-1.0, dtype=input.dtype, device=input.device),
                             torch.tensor(0.0, dtype=input.dtype, device=input.device)))
 
-
-class Simplex(nn.Module):
-    """Simplex activation function."""
-    def __init__(self):
-        super().__init__()
-        
-    def forward(self, input):
-        if config.use_projections:
-            return SimplexProjection.apply(input)
-        import warnings
-        warnings.warn("Simplex is not supported in gradient mode")
-        return simplex_op_pt(input)
-
-class Mean(nn.Module):
-    def __init__(self, dim):
-        self.dim = dim
-        super().__init__()
-    
-    def forward(self, input):
-        if config.use_projections:
-            return MeanProjection.apply(input, self.dim)
-        return torch.mean(input, dim=self.dim)
-
-class LayerNorm(nn.Module):
-    """Layer normalisation using LayerNormProjection.
-
-    Forward: standard LayerNorm (no learnable affine parameters).
-    Backward: projects inputs onto the locally linearised LayerNorm
-    constraint graph instead of back-propagating real gradients.
-    """
-    def __init__(self, eps: float = 1e-5):
-        super().__init__()
-        self.eps = eps
-
-    def forward(self, input):
-        if config.use_projections:
-            return LayerNormProjection.apply(input, self.eps)
-        mu = input.mean(dim=-1, keepdim=True)
-        var = input.var(dim=-1, keepdim=True, unbiased=False)
-        sigma = torch.sqrt(var + self.eps)
-        return (input - mu) / sigma
-
-
-class Add(nn.Module):
-    """Residual addition using AddProjection.
-    
-    Forward: returns x1 + x2.
-    Backward: projects x1 and x2 onto the addition constraint graph.
-    """
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x1, x2):
-        if config.use_projections:
-            return AddProjection.apply(x1, x2)
-        return x1 + x2
-
 class Dropout(nn.Module):
     """Projection-aware dropout.
 
@@ -380,7 +294,7 @@ class Dropout(nn.Module):
         return input
 
 
-class CrossEntropyLoss(nn.Module):
+class CrossEntropy(ProjectionModule):
     def __init__(self):
         super().__init__()
 
@@ -401,17 +315,6 @@ class HardMarginLoss(ProjectionModule):
         err0 = torch.where(target == 0, torch.where(input > 0, input**2, torch.tensor(0.0, device=input.device)), torch.tensor(0.0, device=input.device))
         return (err1 + err0).mean()
     
-class RMSNorm(nn.Module):
-    def __init__(self, dim: int, eps: float = 1e-5):
-        super().__init__()
-        self.eps = eps
-        self.weight = nn.Parameter(torch.ones(1, dim))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if config.use_projections:
-            return RMSNormProjection.apply(x, self.weight, self.eps, 5)
-        return F.rms_norm(x, (x.size(-1),), eps=self.eps)
-
 
 def extract_patches(input: torch.Tensor, kernel_size: Tuple[int, int], stride: Tuple[int, int], padding: Tuple[int, int]) -> torch.Tensor:
     """Unfolds inputs into spatial patches and permutes for dense layers."""
