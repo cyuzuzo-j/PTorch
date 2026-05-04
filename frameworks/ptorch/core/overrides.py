@@ -1,5 +1,5 @@
 import torch
-from .. import config
+from ..config import config
 
 class ProjectedSum(torch.autograd.Function):
     @staticmethod
