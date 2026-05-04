@@ -17,7 +17,7 @@ patience: 1000
 conv_widths: [4]
 
 # ── Batch sizes to sweep ─────────────────────────
-batch_sizes: [512]
+batch_sizes: [256]
 
 # ── Tasks ─────────────────────────────────────────
 tasks:
@@ -43,8 +43,8 @@ pjax_orr_optimizer_kwargs:
   steps_per_update: 50
 
 # ptorch — ptorch.optim_static classes
-ptorch_optimizer: ProjectionMuon
-ptorch_optimizer_kwargs: {lr: 0.001}
+ptorch_optimizer: ProjectionSGD
+ptorch_optimizer_kwargs: {lr: 0.03}
 
 # torch — any torch.optim class
 torch_optimizer: Adam

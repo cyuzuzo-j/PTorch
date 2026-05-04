@@ -1,0 +1,92 @@
+name: "CodeQL"
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+  schedule:
+    # Run every Monday at midnight
+    - cron: "0 0 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["cpp", "python"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9e8d0789d4a0fa9ceb6b1738f7e269594bdd67f0 # v3.28.9
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@9e8d0789d4a0fa9ceb6b1738f7e269594bdd67f0 # v3.28.9
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@9e8d0789d4a0fa9ceb6b1738f7e269594bdd67f0 # v3.28.9
+        with:
+          category: "/language:${{matrix.language}}"
+
+      - name: Generate CodeQL Security Report
+        uses: rsdmike/github-security-report-action@a149b24539044c92786ec39af8ba38c93496495d # v3.0.4
+        with:
+          template: report
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload CodeQL Security Report
+        uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4.3.0
+        with:
+          name: codeql-report-${{ matrix.language }}
+          path: report.pdf
+
+  analyze_rust:
+    name: Analyze (Rust)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Install clippy
+        run: rustup component add clippy
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@c175bb02c4d5486f22e1a9cb4186cb6097f01434 # 1.10.23
+
+      - name: Install dependencies
+        run: cargo binstall --no-confirm clippy-sarif sarif-fmt
+
+      - name: Run clippy
+        working-directory: rust
+        run: |
+          cargo clippy --all-features --message-format=json > clippy.json
+          sed --in-place 's/"file_name":"itt/"file_name":"rust\/itt/g' clippy.json
+          clippy-sarif --input clippy.json --output clippy.sarif
+        continue-on-error: true
+
+      - name: Print SARIF
+        run: sarif-fmt --input rust/clippy.sarif
+
+      - name: Upload analysis
+        uses: github/codeql-action/upload-sarif@9e8d0789d4a0fa9ceb6b1738f7e269594bdd67f0 # v3.28.9
+        with:
+          sarif_file: rust/clippy.sarif
+          wait-for-processing: true

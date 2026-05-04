@@ -1,3 +1,4 @@
+
 ##################################################
 ###   Benchmark — ptorch (cyclic projections)  ###
 ###   ResNet-8 architecture                    ###
@@ -16,7 +17,7 @@ import ptorch.config as ptorch_config
 import tqdm, time
 import wandb
 import torch.nn as tnn
-from ptorch.nn.modules import ProjectionModule, HardMarginLoss
+from ptorch.nn.modules import ProjectionModule, CrossEntropy
 from ptorch.core.overrides import apply_overrides
 from ptorch.core.ops import process_activation_target
 
@@ -24,6 +25,9 @@ from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 
 apply_overrides()
 ptorch_config.use_projections = True
+ptorch_config.config.update("muon_activations_lr", 0.5)
+ptorch_config.config.update("muon_activations_norm_preserve", False)
+ptorch_config.config.update("frozen_a_weights", True)
 
 FRAMEWORK = "ptorch_resnet8"
 OPTIM_MODULES = vars(ptorch_optim_static)
@@ -65,7 +69,7 @@ class ResidualAdd(torch.autograd.Function):
     @staticmethod
     def backward(ctx, z_target):
         skip, out = ctx.saved_tensors
-        return process_activation_target(out, z_target - out), process_activation_target(skip, z_target - skip)
+        return process_activation_target(skip, z_target - out), process_activation_target(out, z_target - skip)
 
 # ── Model ────────────────────────────────────────────────────────────────────
 
@@ -99,21 +103,21 @@ class BasicBlock(tnn.Module):
         x = self.relu2(x)
         return x
 
-
 class ResNet8_PTorch(tnn.Module):
     def __init__(self, classes=10, in_channels=3, alpha=1.0, g=1.0):
         super().__init__()
-        self.block1 = BasicBlock(in_channels, 64, stride=4, alpha=alpha, g=g)
-        #self.block2 = BasicBlock(16, 32, stride=2, alpha=alpha, g=g)
-        #self.block3 = BasicBlock(32, 64, stride=2, alpha=alpha, g=g)
+        self.block1 = BasicBlock(in_channels, 128, stride=2, alpha=alpha, g=g)
+        self.block2 = BasicBlock(128, 512, stride=2, alpha=alpha, g=g)
+        self.block3 = BasicBlock(512, 1024, stride=2, alpha=alpha, g=g)
 
-        self.head = pnn.Linear(64, classes, norm="inf")
-        self.loss = HardMarginLoss()
+        self.head = pnn.Linear(1024, classes, norm="inf")
+        self.loss = CrossEntropy()
 
     def _forward_features(self, x):
         x = self.block1(x)
-        #x = self.block2(x)
-        #x = self.block3(x)
+        x = self.block2(x)
+        x = self.block3(x)
+
         x = ProjectedGlobalAvgPool.apply(x)
         return x
 

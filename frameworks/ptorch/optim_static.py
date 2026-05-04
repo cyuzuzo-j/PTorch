@@ -61,15 +61,7 @@ class ProjectionSGD(torch.optim.SGD):
         # Now apply the standard SGD step using the pseudo-gradients
         return super().step(closure)
 
-class AlternatingProjectionsMomentum(ProjectionSGD):
-    """
-    Alternating projections optimizer with momentum.
-    This is an alias for ProjectionSGD(..., lr=1.0, momentum=0.9).
-    """
-    def __init__(self, params, lr=1.0, momentum=0.9, **kwargs):
-        super().__init__(params, lr=lr, momentum=momentum, **kwargs)
-
-class ProjectionAdam(torch.optim.Adam):
+class ProjectionAdam(torch.optim.AdamW):
     """
     Projection-based optimizer wrapped around Adam.
     Converts projection targets into pseudo-gradients (g = p - p_proj).
