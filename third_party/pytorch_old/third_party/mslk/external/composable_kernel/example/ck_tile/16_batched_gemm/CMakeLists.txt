@@ -1,1 +1,0 @@
-add_executable(tile_example_batched_gemm EXCLUDE_FROM_ALL batched_gemm.cpp)
