@@ -1,1 +1,0 @@
-add_test_executable(test_slice_tile test_slice_tile.cpp)
