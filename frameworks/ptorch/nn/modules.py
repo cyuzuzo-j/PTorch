@@ -444,3 +444,14 @@ class Conv2D(ProjectionModule):
         
         # Reshape back to Image Topology: (N, C_out, H_out, W_out)
         return out.permute(0, 3, 1, 2)
+
+
+class MaxPool2d(nn.Module):
+    def __init__(self, kernel_size, stride=None, padding=0):
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.stride = stride if stride is not None else kernel_size
+        self.padding = padding
+
+    def forward(self, x):
+        return MaxPool2DProjection.apply(x, self.kernel_size, self.stride, self.padding)

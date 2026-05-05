@@ -1,43 +1,9 @@
 import torch                    
 from .config import config
-                
-class AlternatingProjections(torch.optim.Optimizer):
-    """
-    Minimal projection-based optimizer using alternating projections.
-    
-    Instead of descending gradients, this exploits native PyTorch `autograd` 
-    to pass orthogonal project targets BACKWARDS through the computational graph.
-    """
-    def __init__(self, params, lr=1.0, norm="l2"):
-        defaults = dict(lr=lr, norm=norm)
-        super().__init__(params, defaults)
-
-    @torch.no_grad()
-    def step(self, closure=None):
-        """
-        Updates the parameters using the projected values accumulated in `.grad`.
-        
-        Requires that `loss.backward(target)` has already been called.
-        """
-        if config.use_projections:
-            for group in self.param_groups:
-                for p in group['params']:
-                    if p.grad is not None:
-                        # Update parameter to the newly projected state
-                        # NOTE: p.grad holds the PROJECTION TARGET, not the gradient
-                        p.copy_(p.grad)
-                        
-                        # Clear projection for next iteration
-                        p.grad = None
-        else:
-            for group in self.param_groups:
-                for p in group['params']:
-                    if p.grad is not None:
-                        p.data.add_(p.grad, alpha=-group.get('lr', 1.0))
 
 class ProjectionSGD(torch.optim.SGD):
     """
-    Projection-bZZZased optimizer wrapped around SGD.
+    Projection-based optimizer wrapped around SGD.
     Converts projection targets into pseudo-gradients (g = p - p_proj).
     Supports all SGD features including momentum and weight decay.
     

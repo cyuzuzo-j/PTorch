@@ -14,7 +14,7 @@ import ptorch.optim_static as ptorch_optim_static
 import tqdm, time
 import pandas as pd
 
-FRAMEWORK = "ptorch_cy"
+FRAMEWORK = "ptorch"
 
 OPTIM_MODULES = vars(ptorch_optim_static)
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
@@ -66,7 +66,7 @@ class MLP(tnn.Module):
                 self.hidden_layers.append(LinearFrozen(last, f, bias=False, g=1.0))
             else:
                 self.hidden_layers.append(Linear(last, f, bias=False, g=1.0, alpha=1.0))
-            self.hidden_layers.append(LeakyReLU(0.1))
+            self.hidden_layers.append(ReLU())
             last = f
         self.n_hidden = len(hidden)
 

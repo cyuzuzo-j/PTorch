@@ -30,15 +30,15 @@ CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 # Pretty display names for the legend
 FRAMEWORK_LABELS = {
     "ptorch": r"$\mathcal{P}$Torch",
-    "torch":  "torch",
-    "pjax":   "pjax",
+    "torch":  "Torch",
+    "pjax":   "PJAX",
 }
 
 # Curated palette (viridis-derived) — one color per framework
 FRAMEWORK_COLORS = {
     r"$\mathcal{P}$Torch": sns.color_palette("viridis", 3)[0],
-    "torch":               sns.color_palette("viridis", 3)[1],
-    "pjax":                sns.color_palette("viridis", 3)[2],
+    "Torch":               sns.color_palette("viridis", 3)[1],
+    "PJAX":                sns.color_palette("viridis", 3)[2],
 }
 
 
@@ -78,6 +78,7 @@ def plot_task(df: pd.DataFrame, task_name: str, output_dir: str):
     )
     ax.set_xlabel("Optimization Step")
     ax.set_ylabel("Validation Accuracy")
+
     ax.set_title(f"{dataset_label} — Accuracy vs. Step")
     ax.legend(loc="lower right", fontsize=12, frameon=False)
 
@@ -93,7 +94,7 @@ def plot_task(df: pd.DataFrame, task_name: str, output_dir: str):
     # Bin unaligned wall-clock times into uniform intervals for clean averaging
     time_data = df.dropna(subset=["wall_time_s", "val_acc"]).copy()
     if not time_data.empty:
-        n_bins = 50
+        n_bins = 10000
         time_data["time_bin"] = pd.cut(time_data["wall_time_s"], bins=n_bins)
         time_data["time_mid"] = time_data["time_bin"].apply(
             lambda iv: iv.mid if iv is not None else None
@@ -107,6 +108,7 @@ def plot_task(df: pd.DataFrame, task_name: str, output_dir: str):
 
     ax.set_xlabel("Wall-clock Time (s)")
     ax.set_ylabel("Validation Accuracy")
+    ax.set_xscale("log")
     ax.set_title(f"{dataset_label} — Accuracy vs. Time")
     ax.legend(loc="lower right", fontsize=12, frameon=False)
 

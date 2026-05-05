@@ -30,72 +30,26 @@ OPTIM_MODULES = vars(ptorch_optim_static)
 DATASETS = {"MNIST": MNISTDataModule, "CIFAR10": InfiniteCifarDataModule}
 
 
-# ── FX Tracer / Interpreter ─────────────────────────────────────────────────
-
-class ProjectionTracer(torch.fx.Tracer):
-    def is_leaf_module(self, m: tnn.Module, module_qualified_name: str) -> bool:
-        if isinstance(m, (ProjectionModule)):
-            return True
-        return super().is_leaf_module(m, module_qualified_name)
-
-
-class PropagateCache(torch.fx.Interpreter):
-    def __init__(self, module, skip_modules=None):
-        super().__init__(module)
-        self.skip_targets = skip_modules or set()
-
-    def run_node(self, n: torch.fx.Node):
-        cache_to_apply = None
-        if n.op == 'call_module' and n.target not in self.skip_targets:
-            submod = self.module.get_submodule(n.target)
-            if hasattr(submod, 'projection_forward_cache') and isinstance(submod.projection_forward_cache, list):
-                if submod.projection_forward_cache:
-                    cache = submod.projection_forward_cache[0]
-                    if cache is not None:
-                        cache_to_apply = cache
-
-        result = super().run_node(n)
-
-        if cache_to_apply is not None:
-            result.data.copy_(cache_to_apply.data)
-
-        return result
-
-
 # ── Model ────────────────────────────────────────────────────────────────────
 
 class MLP(tnn.Module):
-    def __init__(self, hidden, in_features, classes, norm='l2', loss_name='HardMarginLoss'):
+    def __init__(self, hidden, in_features, classes, norm='l2'):
         super().__init__()
         last = in_features
         self.hidden_layers = tnn.ModuleList()
         
         for i, f in enumerate(hidden):
-            if i == 0:
-                self.hidden_layers.append(Linear(in_features, f))
-            else:
-                self.hidden_layers.append(Linear(last, f, norm=norm))
+            self.hidden_layers.append(Linear(last, f, norm=norm))
             self.hidden_layers.append(ReLU( norm=norm))
             last = f
         self.out = Linear(last, classes, norm=norm)
-        loss_cls = getattr(ptorch_modules, loss_name, HardMarginLoss)
-        self.loss = loss_cls()
-
-    def forward(self, x, y_oh):
-        x = x.reshape(x.shape[0], -1)
-        for i in range(0, len(self.hidden_layers), 2):
-            x = self.hidden_layers[i](x)
-            x = self.hidden_layers[i + 1](x)
-        x = self.out(x)
-        return self.loss(x, y_oh)
-
-    def forward_eval(self, x):
+        
+    def forward(self, x):
         x = x.reshape(x.shape[0], -1)
         for i in range(0, len(self.hidden_layers), 2):
             x = self.hidden_layers[i](x)
             x = self.hidden_layers[i + 1](x)
         return self.out(x)
-
 
 # ── Training ─────────────────────────────────────────────────────────────────
 
@@ -126,18 +80,15 @@ def run(cfg, task_cfg, batch_size, run_number, device,
     test_loader = ds.test_dataloader()
 
     model = MLP(task_cfg["hidden"], task_cfg["in_features"],
-                task_cfg["classes"], norm=norm, loss_name=loss_name).to(device)
+                task_cfg["classes"], norm=norm).to(device)
 
-    ptorch_config.use_muon_activations = use_muon_activations
-
-    # Trace the model once with ProjectionTracer
-    tracer = ProjectionTracer()
-    graph  = tracer.trace(model)
-    traced = torch.fx.GraphModule(model, graph)
+    ptorch_config.config.use_muon_activations = use_muon_activations
 
     opt_name   = opt_name   or cfg["ptorch_optimizer"]
     opt_kwargs = opt_kwargs if opt_kwargs is not None else cfg.get("ptorch_optimizer_kwargs", {})
-    optimizer  = OPTIM_MODULES[opt_name](traced.parameters(), **opt_kwargs)
+    optimizer  = OPTIM_MODULES[opt_name](model.parameters(), **opt_kwargs)
+    loss = getattr(ptorch_modules, loss_name, HardMarginLoss)()
+
 
     # Build a tag that distinguishes this run in the CSV
     tag = f"{FRAMEWORK}_norm={norm}_opt={opt_name}_loss={loss_name}_muon={use_muon_activations}"
@@ -154,7 +105,7 @@ def run(cfg, task_cfg, batch_size, run_number, device,
             for xv, yv in loader:
                 xv = torch.tensor(xv, dtype=torch.float32, device=device)
                 yv = torch.tensor(yv, dtype=torch.long,  device=device)
-                logits = model.forward_eval(xv)
+                logits = model.forward(xv)
                 accs.append((logits.argmax(dim=-1) == yv).float().mean())
         model.train()
         return float(torch.stack(accs).mean())
@@ -162,8 +113,6 @@ def run(cfg, task_cfg, batch_size, run_number, device,
     best_val_acc, best_state, best_step = 0.0, None, 0
     no_improve = 0
     t0 = time.time()
-
-    K = cfg.get("K", 1)
 
     step = 0
     with tqdm.tqdm(total=cfg["max_steps"], unit="step",
@@ -175,22 +124,16 @@ def run(cfg, task_cfg, batch_size, run_number, device,
             y_batch = torch.tensor(y_np, dtype=torch.long, device=device)
             y_oh    = F.one_hot(y_batch, num_classes=task_cfg["classes"]).float()
 
-            traced.train()
+            if step >= cfg["max_steps"]:
+                break
+
+
             # Initial real forward pass for this batch
-            output = traced(x_batch, y_oh)
-
-            for _ in range(K):
-                if step >= cfg["max_steps"]:
-                    break
-
-                # ── Backward + weight update ──────────────────────────────
-                optimizer.zero_grad()
-                output.sum().backward()
-                optimizer.step()
-
-                # ── Propagate projections (no new forward pass) ───────────
-                interpreter = PropagateCache(traced, skip_modules={'out'})
-                output = interpreter.run(x_batch, y_oh)
+            
+            output = model(x_batch)
+            loss(output, y_oh).sum().backward()
+            optimizer.step()
+            optimizer.zero_grad()
 
             # ── Eval ──────────────────────────────────────────────────────
             if step % cfg["eval_every"] == 0:
@@ -207,7 +150,7 @@ def run(cfg, task_cfg, batch_size, run_number, device,
 
                 if val_acc > best_val_acc:
                     best_val_acc, best_step = val_acc, step
-                    best_state = {k: v.clone() for k, v in traced.state_dict().items()}
+                    best_state = {k: v.clone() for k, v in model.state_dict().items()}
                     no_improve = 0
                 else:
                     no_improve += 1
@@ -224,7 +167,7 @@ def run(cfg, task_cfg, batch_size, run_number, device,
 
     total_time = time.time() - t0
     if best_state:
-        traced.load_state_dict(best_state)
+        model.load_state_dict(best_state)
 
     test_acc = eval_acc(test_loader)
     print(f"Test Acc: {test_acc:.4f}  Time: {total_time:.1f}s")
@@ -259,11 +202,10 @@ if __name__ == "__main__":
 
     # Optimizer sweep: list of {name, kwargs} dicts, or fall back to the
     # single ptorch_optimizer / ptorch_optimizer_kwargs pair.
-    optimizers = cfg.get("optimizers", [
-        {"name": cfg["ptorch_optimizer"],
-         "kwargs": cfg.get("ptorch_optimizer_kwargs", {})}
-    ])
-
+    optimizers = cfg.get("optimizers", [])
+    if not optimizers:
+        optimizers = [{"name": cfg.get("ptorch_optimizer", "ProjectionSGD"), 
+                       "kwargs": cfg.get("kwargs", {})}]
     muon_sweeps = cfg.get("use_muon_activations", [False])
     if not isinstance(muon_sweeps, list):
         muon_sweeps = [muon_sweeps]
