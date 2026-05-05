@@ -92,12 +92,12 @@ def test_projection_knob_changes_b_grad(knob):
 # ── muon on activations ────────────────────────────────────────────────────
 
 def test_muon_activations_off_returns_proj_unchanged():
-    _set(muon_activations=False)
+    _set(use_muon_activations=False)
     assert torch.allclose(process_activation_target(DET, PROJ), PROJ)
 
 
 def test_muon_activations_lr_zero_returns_det_unchanged():
-    _set(muon_activations=True, muon_activations_lr=0.0)
+    _set(use_muon_activations=True, muon_activations_lr=0.0)
     assert torch.allclose(process_activation_target(DET, PROJ), DET, atol=1e-5)
 
 

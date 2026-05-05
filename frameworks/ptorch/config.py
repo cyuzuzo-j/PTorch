@@ -27,7 +27,7 @@ class Config:
     projection_g: float = 1.0
 
     # ---- muon on activations ------------------------------------------------
-    muon_activations: bool = True
+    use_muon_activations: bool = False
     muon_activations_lr: float = 0.5
     
     # ---- frozen-A weight solve ----------------------------------------------

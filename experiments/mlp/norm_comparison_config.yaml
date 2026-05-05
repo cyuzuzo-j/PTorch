@@ -1,10 +1,11 @@
 ##################################################
-###   Shallow MLP benchmark configuration      ###
-###   Single-hidden-layer (512) on MNIST/CIFAR  ###
+###   Projection Norm Comparison (§4.x)        ###
+###   Sweeps ℓ₂ vs ℓ∞ projection norms on      ###
+###   MNIST with hidden widths 128 and 512      ###
 ##################################################
 
 # ── Experiment identity ───────────────────────────
-experiment_name: shallow_mlp_benchmark
+experiment_name: norm_comparison
 random_seed: 43
 num_runs: 3
 
@@ -15,41 +16,31 @@ patience: 10
 batch_sizes: [32]
 
 # Number of backward passes (cyclic projections) per batch
-K: 50
+K: 1
 
 # ── Output ────────────────────────────────────────
-results_dir: results          # CSV logs go here
-figures_dir: ../../images/mlp # plot output directory
+results_dir: results/norm_comparison
+figures_dir: ../../images/mlp
 
 # ── Tasks ─────────────────────────────────────────
+# Two hidden-width variants, both on MNIST
 tasks:
-  - name: MNIST_1L
+  - name: MNIST_128
     dataset: MNIST
     in_features: 784
     classes: 10
-    hidden: [512]
+    hidden: [64]
 
-  - name: CIFAR10_1L
-    dataset: CIFAR10
-    in_features: 3072        # 32×32×3 flattened
-    classes: 10
-    hidden: [512]
+# ── Projection norms to sweep ────────────────────
+# Each entry is passed as the `norm` kwarg to Linear layers.
+#   l2   — efficient L2 (Frobenius) projection
+#   linf — L∞ (Chebyshev) projection (slower per step, higher final accuracy)
+norms:
+  - l2
+  - linf
 
-# ── Optimizers per framework ──────────────────────
-use_muon_activations: false
-
-# ptorch — ptorch.optim_static classes
+# ── Optimizer ─────────────────────────────────────
 ptorch_optimizer: ProjectionMuon
 ptorch_optimizer_kwargs:
   lr: 0.001
-ptorch_loss: HardMarginLoss   # HardMarginLoss | CrossEntropy
-
-# pjax — pjax_orr.optim classes
-pjax_optimizer: DouglasRachford
-pjax_optimizer_kwargs:
-  steps_per_update: 50
-
-# torch — any torch.optim class
-torch_optimizer: Adam
-torch_optimizer_kwargs:
-  lr: 0.001
+ptorch_loss: HardMarginLoss

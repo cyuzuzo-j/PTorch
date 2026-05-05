@@ -1,0 +1,41 @@
+##################################################
+###   Optimizer Comparison for Torch Baseline  ###
+###   Compares SGD, Adam, and Adadelta         ###
+##################################################
+
+experiment_name: optimizer_comparison_torch
+random_seed: 42
+num_runs: 3
+
+# ── Training ──────────────────────────────────────
+max_steps: 10_000
+eval_every: 100
+patience: 20
+batch_sizes: [64]
+
+# ── Output ────────────────────────────────────────
+results_dir: results/optimizer_comparison_torch
+figures_dir: ../../images/mlp
+
+# ── Tasks ─────────────────────────────────────────
+tasks:
+  - name: MNIST_128x2
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [128, 128]
+
+# ── Optimizers to sweep ───────────────────────────
+optimizers:
+  - name: SGD
+    kwargs:
+      lr: 0.1
+      momentum: 0.9
+  - name: Adam
+    kwargs:
+      lr: 0.001
+      betas: [0.9, 0.999]
+  - name: Adadelta
+    kwargs:
+      lr: 1.0
+      rho: 0.9

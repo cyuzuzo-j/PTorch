@@ -64,7 +64,7 @@ def zeropower_via_polarexpress(G: torch.Tensor, steps: int = 5, eps: float = 1e-
 
 @torch.compile()
 def process_activation_target(A_det, A_proj):
-    if not config.muon_activations:
+    if not config.use_muon_activations:
         return A_proj
 
     orig_shape = A_det.shape
@@ -243,13 +243,7 @@ class MatMulProjectionLinf(torch.autograd.Function):
         ctx.num_steps = num_steps
         ctx.proj_cache = proj_cache  
         ctx.omega = omega
-        ctx.pairwise = pairwise
-        ctx.residual = residual
-        
-        if residual:
-            return (A - A @ B) / omega
-        else:
-            return (A @ B) / omega
+        return (A @ B) / omega
 
     @staticmethod
     def backward(ctx, Z_target):
@@ -259,10 +253,10 @@ class MatMulProjectionLinf(torch.autograd.Function):
         Z_det = Z_target.detach()
 
         eps_init = None
-        if not ctx.pairwise and ctx.proj_cache is not None:
+        if ctx.proj_cache is not None:
             eps_init = ctx.proj_cache.get('eps')
 
-        if not ctx.pairwise and (A_det.ndim > 2 or B_det.ndim > 2):
+        if (A_det.ndim > 2 or B_det.ndim > 2):
             A_2d = A_det.reshape(-1, A_det.shape[-1]).clone()
             Z_2d = Z_det.reshape(-1, Z_det.shape[-1]).clone() * ctx.omega
             B_2d = B_det.reshape(-1, B_det.shape[-2], B_det.shape[-1]).mean(dim=0).clone()
@@ -283,10 +277,10 @@ class MatMulProjectionLinf(torch.autograd.Function):
             A_proj, B_proj, _, eps_new = matmul_proj_linf(
                 A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
                 eps_init=eps_init, g=ctx.g, omega=ctx.omega, 
-                num_steps=ctx.num_steps, residual=ctx.residual
+                num_steps=ctx.num_steps
             )
 
-            if not ctx.pairwise and ctx.proj_cache is not None:
+            if ctx.proj_cache is not None:
                 ctx.proj_cache['eps'] = eps_new
 
         return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None        

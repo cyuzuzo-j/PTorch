@@ -256,7 +256,7 @@ class Dropout(nn.Module):
 
 class CrossEntropy(ProjectionModule):
     def __init__(self):
-        super().__init__()
+        super().__init__(0)
 
     def forward(self, input, target):
         if config.use_projections:
@@ -273,6 +273,25 @@ class HardMarginLoss(ProjectionModule):
             return HardMarginProjection.apply(input, target)
         err1 = torch.where(target == 1, torch.where(input < self.delta, (input - self.delta)**2, torch.tensor(0.0, device=input.device)), torch.tensor(0.0, device=input.device))
         err0 = torch.where(target == 0, torch.where(input > 0, input**2, torch.tensor(0.0, device=input.device)), torch.tensor(0.0, device=input.device))
+        return (err1 + err0).mean()
+
+
+class ProximalHingeMarginLoss(ProjectionModule):
+    """Module wrapper for the ProximalHingeMargin autograd Function.
+
+    Uses a soft hinge proximal operator instead of hard-clipping logits
+    to the margin boundary.
+    """
+    def __init__(self, lambda_val=1.0):
+        super().__init__(0)
+        self.lambda_val = lambda_val
+
+    def forward(self, input, target):
+        if config.use_projections:
+            return ProximalHingeMargin.apply(input, target, self.lambda_val)
+        # Fallback: same hinge-style loss as HardMarginLoss
+        err1 = torch.where(target > 0, torch.where(input < target, (input - target)**2, torch.tensor(0.0, device=input.device)), torch.tensor(0.0, device=input.device))
+        err0 = torch.where(target <= 0, torch.where(input > 0, input**2, torch.tensor(0.0, device=input.device)), torch.tensor(0.0, device=input.device))
         return (err1 + err0).mean()
     
 
