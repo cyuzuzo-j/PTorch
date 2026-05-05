@@ -12,7 +12,7 @@ import torch
 import torch.nn as tnn
 import torch.nn.functional as F
 import pandas as pd
-from experiments.shared.data_loaders import MNISTDataModule, InfiniteCifarDataModule
+from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 import tqdm, time
 
 FRAMEWORK = "torch"
@@ -86,8 +86,8 @@ def run(cfg, task_cfg, batch_size, run_number, device, opt_name=None, opt_kwargs
             if step % cfg["eval_every"] == 0:
                 model.eval()
                 accs = [eval_fn(
-                    x.clone().detach().to(dtype=torch.float32, device=device),
-                    y.clone().detach().to(dtype=torch.long,  device=device))
+                    torch.tensor(x, device=device, dtype=torch.float),
+                    torch.tensor(y, device=device, dtype=torch.long))
                     for x, y in val_loader]
                 val_acc = float(torch.stack(accs).mean())
                 model.train()
@@ -110,8 +110,9 @@ def run(cfg, task_cfg, batch_size, run_number, device, opt_name=None, opt_kwargs
 
             x, y = next(train_iter)
             step_fn(
-                x.clone().detach().to(dtype=torch.float32, device=device),
-                y.clone().detach().to(dtype=torch.long,  device=device))
+                torch.tensor(x, device=device, dtype=torch.float),
+                torch.tensor(y, device=device, dtype=torch.long)
+            )
             step += 1
             pbar.update(1)
             if cfg["max_steps"] and step >= cfg["max_steps"]:
@@ -122,8 +123,8 @@ def run(cfg, task_cfg, batch_size, run_number, device, opt_name=None, opt_kwargs
         model.load_state_dict(best_state)
     model.eval()
     test_accs = [eval_fn(
-        x.clone().detach().to(dtype=torch.float32, device=device),
-        y.clone().detach().to(dtype=torch.long,  device=device))
+        torch.tensor(x, device=device, dtype=torch.float),
+        torch.tensor(y, device=device, dtype=torch.long))
         for x, y in test_loader]
     final_acc = float(torch.stack(test_accs).mean())
     print(f"Test Acc: {final_acc:.4f}  Time: {total_time:.1f}s")

@@ -9,13 +9,15 @@ random_seed: 43
 num_runs: 3
 
 # ── Training ──────────────────────────────────────
-max_steps: 50_000
+max_steps: 5_000
 eval_every: 200
-patience: 10
+patience: 100
 batch_sizes: [32]
 
 # Number of backward passes (cyclic projections) per batch
-K: 50
+K: 1
+norms:
+  - linf
 
 # ── Output ────────────────────────────────────────
 results_dir: results          # CSV logs go here
@@ -23,15 +25,16 @@ figures_dir: ../../images/mlp # plot output directory
 
 # ── Tasks ─────────────────────────────────────────
 tasks:
-  - name: MNIST_1L
-    dataset: MNIST
-    in_features: 784
-    classes: 10
-    hidden: [512]
 
   - name: CIFAR10_1L
     dataset: CIFAR10
     in_features: 3072        # 32×32×3 flattened
+    classes: 10
+    hidden: [512]
+
+  - name: MNIST_1L
+    dataset: MNIST
+    in_features: 784
     classes: 10
     hidden: [512]
 
@@ -42,7 +45,7 @@ use_muon_activations: false
 ptorch_optimizer: ProjectionMuon
 ptorch_optimizer_kwargs:
   lr: 0.001
-ptorch_loss: HardMarginLoss   # HardMarginLoss | CrossEntropy
+ptorch_loss: CrossEntropy   # HardMarginLoss | CrossEntropy
 
 # pjax — pjax_orr.optim classes
 pjax_optimizer: DouglasRachford

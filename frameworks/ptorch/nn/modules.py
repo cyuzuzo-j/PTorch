@@ -13,12 +13,6 @@ class ProjectionModule(nn.Module):
         self.projection_forward_cache = [None for _ in range(outputs)]
     
 class Linear(ProjectionModule):
-    """Projection-only linear layer following the old main-style matmul path.
-
-    Supports optional affine bias via input augmentation and optional residual
-    projection mode. Accepts L2, Linf, L1, and general Lp norms.
-    Fixed to include mathematically correct residual padding and initialization.
-    """
     def __init__(
         self,
         in_features: int,
@@ -28,8 +22,6 @@ class Linear(ProjectionModule):
         g: float = 1.0,
         omega: float = 1.0,
         num_iters: int = 1,
-        residual: bool = False,
-        dtp: bool = False,
         norm = 'l2',
         use_cache=True
     ):
@@ -51,20 +43,17 @@ class Linear(ProjectionModule):
         else:
             self.register_parameter('bias', None)
 
-        # 1. Correct Initialization Variance:
-        # Now matches nn.Linear shape (out_features, in_features) natively
-        nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='leaky_relu')
+        nn.init.kaiming_normal_(self.weight)
         
     def forward(self, input, norm=None):
         norm_type = norm if norm is not None else self.norm
 
-        if not config.use_projections: # Assumes config is in scope
-            # Standard gradient path
+        if not config.use_projections:
+            # gradient path
             b = self.bias.squeeze(0) if self.use_bias else None
             output = F.linear(input, self.weight, b)
             return output / self.omega
 
-        # Speed/Memory Efficiency: Use F.pad instead of torch.cat for input bias augmentation
         projected_input = input
         weight_matrix = self.weight.T
         if not self.use_cache:
@@ -74,7 +63,7 @@ class Linear(ProjectionModule):
             projected_input = F.pad(input, (0, 1), value=1.0)
             weight_matrix = torch.cat([weight_matrix, self.bias], dim=0)
 
-        # Dispatch to the correct projection function
+        # Dispatch to  projection function
         if norm_type == 'linf':
             output = MatMulProjectionLinf.apply(
                 projected_input, weight_matrix, self.num_iters,
@@ -174,12 +163,9 @@ class ReLU(ProjectionModule):
         norm = norm or self.norm
         if config.use_projections:
             if norm == 'linf':
-                return ReLULInfinityProjection.apply(input)
+                return ReLULInfinityProjection.apply(input,  self.projection_forward_cache)
             return ReLUProjection.apply(input,  self.projection_forward_cache)
-        raise ValueError("L∞ projection for ReLU is not supported in gradient mode")
         return super().forward(input)
-
-
 
 class LeakyReLU(nn.LeakyReLU):
     def __init__(self, negative_slope: float = 0.01, inplace: bool = False):

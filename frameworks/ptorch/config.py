@@ -13,12 +13,8 @@ class Config:
     Temporary override:                 with config.projections(enabled=False): ...
     """
 
-    # ---- bilinear projection ------------------------------------------------
-    bilinear_projection_num_newton_steps: int = 10
-
     # ---- cross-entropy constraint -------------------------------------------
-    cross_entropy_method: str = "fixed_point"
-    cross_entropy_num_steps: int = 10
+    cross_entropy_num_steps: int = 5
     cross_entropy_lambda: float = 5.0
 
     # ---- global projection --------------------------------------------------
