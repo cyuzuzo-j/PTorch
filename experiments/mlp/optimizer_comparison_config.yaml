@@ -1,0 +1,55 @@
+##################################################
+###   Optimizer Influence Comparison           ###
+###   Compares SGD, Adam, Adadelta, and Muon   ###
+##################################################
+
+experiment_name: optimizer_comparison
+random_seed: 42
+num_runs: 3
+
+# ── Training ──────────────────────────────────────
+max_steps: 10_000
+eval_every: 100
+patience: 20
+batch_sizes: [256]
+K: 50
+
+# ── Output ────────────────────────────────────────
+results_dir: results/optimizer_comparison
+figures_dir: ../../images/mlp
+
+# ── Tasks ─────────────────────────────────────────
+tasks:
+  - name: MNIST_256
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [256]
+
+# ── Projection norm ───────────────────────────────
+norms:
+  - linf
+
+# ── Loss ──────────────────────────────────────────
+losses:
+  - CrossEntropy
+
+# ── Optimizers to sweep ───────────────────────────
+# We use representative learning rates for each optimizer,
+# but these can be adjusted if a full sweep is desired.
+optimizers:
+  - name: ProjectionSGD
+    kwargs:
+      lr: 1.0
+      momentum: 0.9
+  - name: ProjectionAdam
+    kwargs:
+      lr: 0.001
+      betas: [0.9, 0.999]
+  - name: ProjectionAdadelta
+    kwargs:
+      lr: 1.0
+      rho: 0.9
+  - name: ProjectionMuon
+    kwargs:
+      lr: 0.001

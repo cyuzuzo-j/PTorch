@@ -1,0 +1,42 @@
+##################################################
+###   Loss Modeling Comparison                 ###
+###   Hard constraint vs Proximal operator     ###
+##################################################
+
+experiment_name: loss_comparison
+random_seed: 42
+num_runs: 3
+
+# ── Training ──────────────────────────────────────
+max_steps: 10_000
+eval_every: 100
+patience: 10
+batch_sizes: [32]
+K: 1
+
+# ── Output ────────────────────────────────────────
+results_dir: results/loss_comparison
+figures_dir: ../../images/
+
+# ── Tasks ─────────────────────────────────────────
+tasks:
+  - name: MNIST_1L
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [64]
+
+# ── Projection norm ───────────────────────────────
+norms:
+  - linf
+
+# ── Losses to sweep ───────────────────────────────
+losses:
+  - HardMarginLoss
+  - ProximalHingeMarginLoss
+  - CrossEntropy
+
+# ── Optimizer ─────────────────────────────────────
+ptorch_optimizer: ProjectionMuon
+ptorch_optimizer_kwargs:
+  lr: 0.001

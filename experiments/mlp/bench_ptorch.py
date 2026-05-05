@@ -1,14 +1,10 @@
 ##################################################
 ###   Benchmark — ptorch (cyclic projections)  ###
-###   Single-hidden-layer MLP on MNIST/CIFAR   ###
+###   Supports sweeps over norms & optimizers  ###
 ##################################################
-import sys, os
+import sys, os, argparse
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../frameworks')))
-
-# Keep this benchmark in eager mode to avoid inductor cache/JIT crashes.
-os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
-
 import gc
 import yaml
 import torch
@@ -18,8 +14,9 @@ import torch.fx
 import pandas as pd
 from ptorch.nn.modules import (
     Linear, LinearFrozen, LeakyReLU, ReLU,
-    ProjectionModule, CrossEntropy, HardMarginLoss,
+    ProjectionModule, CrossEntropy, HardMarginLoss, ProximalHingeMarginLoss
 )
+import ptorch.nn.modules as ptorch_modules
 from ptorch import config as ptorch_config
 import ptorch.optim_static as ptorch_optim_static
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
@@ -28,7 +25,6 @@ import tqdm, time
 ptorch_config.use_projections = True
 
 FRAMEWORK = "ptorch"
-CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 OPTIM_MODULES = vars(ptorch_optim_static)
 
 DATASETS = {"MNIST": MNISTDataModule, "CIFAR10": InfiniteCifarDataModule}
@@ -69,7 +65,7 @@ class PropagateCache(torch.fx.Interpreter):
 # ── Model ────────────────────────────────────────────────────────────────────
 
 class MLP(tnn.Module):
-    def __init__(self, hidden, in_features, classes):
+    def __init__(self, hidden, in_features, classes, norm='l2', loss_name='HardMarginLoss'):
         super().__init__()
         last = in_features
         self.hidden_layers = tnn.ModuleList()
@@ -77,11 +73,12 @@ class MLP(tnn.Module):
             if i == 0:
                 self.hidden_layers.append(LinearFrozen(in_features, f, bias=False))
             else:
-                self.hidden_layers.append(Linear(last, f, bias=False, residual=True))
+                self.hidden_layers.append(Linear(last, f, bias=False, residual=True, norm=norm))
             self.hidden_layers.append(LeakyReLU(0.1))
             last = f
-        self.out = Linear(last, classes, bias=False)
-        self.loss = HardMarginLoss()
+        self.out = Linear(last, classes, bias=False, norm=norm)
+        loss_cls = getattr(ptorch_modules, loss_name, HardMarginLoss)
+        self.loss = loss_cls()
 
     def forward(self, x, y_oh):
         x = x.reshape(x.shape[0], -1)
@@ -101,7 +98,21 @@ class MLP(tnn.Module):
 
 # ── Training ─────────────────────────────────────────────────────────────────
 
-def run(cfg, task_cfg, batch_size, run_number, device):
+def run(cfg, task_cfg, batch_size, run_number, device,
+        norm='l2', opt_name=None, opt_kwargs=None, loss_name='HardMarginLoss', use_muon_activations=False):
+    """Single training run.
+
+    Parameters
+    ----------
+    norm : str
+        Projection norm passed to every Linear layer ('l2' or 'linf').
+    opt_name : str | None
+        Override optimizer class name (falls back to cfg['ptorch_optimizer']).
+    opt_kwargs : dict | None
+        Override optimizer kwargs (falls back to cfg['ptorch_optimizer_kwargs']).
+    loss_name : str
+        Name of the loss module to use.
+    """
     seed = cfg["random_seed"]
     run_seed = seed + run_number
     torch.manual_seed(run_seed)
@@ -113,25 +124,26 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     val_loader  = ds.val_dataloader()
     test_loader = ds.test_dataloader()
 
-    model = MLP(task_cfg["hidden"], task_cfg["in_features"], task_cfg["classes"]).to(device)
+    model = MLP(task_cfg["hidden"], task_cfg["in_features"],
+                task_cfg["classes"], norm=norm, loss_name=loss_name).to(device)
+
+    ptorch_config.use_muon_activations = use_muon_activations
 
     # Trace the model once with ProjectionTracer
     tracer = ProjectionTracer()
     graph  = tracer.trace(model)
     traced = torch.fx.GraphModule(model, graph)
 
-    opt_name   = cfg["ptorch_optimizer"]
-    opt_kwargs = cfg.get("ptorch_optimizer_kwargs", {})
+    opt_name   = opt_name   or cfg["ptorch_optimizer"]
+    opt_kwargs = opt_kwargs if opt_kwargs is not None else cfg.get("ptorch_optimizer_kwargs", {})
     optimizer  = OPTIM_MODULES[opt_name](traced.parameters(), **opt_kwargs)
 
-    run_name = (
-        f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}"
-        f"_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}"
-    )
+    # Build a tag that distinguishes this run in the CSV
+    tag = f"{FRAMEWORK}_norm={norm}_opt={opt_name}_loss={loss_name}_muon={use_muon_activations}"
 
     results_dir = os.path.join(os.path.dirname(__file__), cfg.get("results_dir", "results"))
     os.makedirs(results_dir, exist_ok=True)
-    csv_path = os.path.join(results_dir, f"{FRAMEWORK}_{task_cfg['name']}.csv")
+    csv_path = os.path.join(results_dir, f"{tag}_{task_cfg['name']}.csv")
     csv_rows = []
 
     def eval_acc(loader):
@@ -153,7 +165,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     K = cfg.get("K", 1)
 
     step = 0
-    with tqdm.tqdm(total=cfg["max_steps"], unit="step") as pbar:
+    with tqdm.tqdm(total=cfg["max_steps"], unit="step",
+                   desc=f"{task_cfg['name']} | norm={norm} | {opt_name} | {loss_name}") as pbar:
         while step < cfg["max_steps"]:
             # ── Fetch a new batch ─────────────────────────────────────────
             x_np, y_np = next(train_iter)
@@ -184,6 +197,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
                 elapsed = time.time() - t0
                 csv_rows.append({
                     "framework": FRAMEWORK, "task": task_cfg["name"],
+                    "norm": norm, "optimizer": opt_name, "loss": loss_name,
+                    "use_muon_activations": use_muon_activations,
                     "run": run_number, "step": step,
                     "val_acc": val_acc, "wall_time_s": elapsed,
                 })
@@ -214,6 +229,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     print(f"Test Acc: {test_acc:.4f}  Time: {total_time:.1f}s")
     csv_rows.append({
         "framework": FRAMEWORK, "task": task_cfg["name"],
+        "norm": norm, "optimizer": opt_name, "loss": loss_name,
+        "use_muon_activations": use_muon_activations,
         "run": run_number, "step": step,
         "val_acc": test_acc, "wall_time_s": total_time,
     })
@@ -225,15 +242,45 @@ def run(cfg, task_cfg, batch_size, run_number, device):
 
 
 if __name__ == "__main__":
-    cfg    = yaml.safe_load(open(CFG_PATH))
+    parser = argparse.ArgumentParser(description="PTorch MLP benchmark")
+    parser.add_argument("--config", default=os.path.join(os.path.dirname(__file__), "config.yaml"),
+                        help="Path to YAML config file")
+    args = parser.parse_args()
+
+    cfg    = yaml.safe_load(open(args.config))
+        
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
+    # Sweep axes from config (default to single values when absent)
+    norms = cfg.get("norms", ["l2"])
+    losses = cfg.get("losses", [cfg.get("ptorch_loss", "HardMarginLoss")])
+
+    # Optimizer sweep: list of {name, kwargs} dicts, or fall back to the
+    # single ptorch_optimizer / ptorch_optimizer_kwargs pair.
+    optimizers = cfg.get("optimizers", [
+        {"name": cfg["ptorch_optimizer"],
+         "kwargs": cfg.get("ptorch_optimizer_kwargs", {})}
+    ])
+
+    muon_sweeps = cfg.get("use_muon_activations", [False])
+    if not isinstance(muon_sweeps, list):
+        muon_sweeps = [muon_sweeps]
+
     for batch_size in cfg["batch_sizes"]:
         for task_cfg in cfg["tasks"]:
-            print(f"\n{'='*50}\n{FRAMEWORK} | {task_cfg['name']} | bs={batch_size}")
-            for run_number in range(1, cfg["num_runs"] + 1):
-                run(cfg, task_cfg, batch_size, run_number, device)
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+            for norm in norms:
+                for opt_entry in optimizers:
+                    for loss_name in losses:
+                        for muon_act in muon_sweeps:
+                            opt_name   = opt_entry["name"]
+                            opt_kwargs = opt_entry.get("kwargs", {})
+                            header = (f"{FRAMEWORK} | {task_cfg['name']} "
+                                      f"| norm={norm} | opt={opt_name} | loss={loss_name} | muon={muon_act} | bs={batch_size}")
+                            print(f"\n{'='*60}\n{header}")
+                            for run_number in range(1, cfg["num_runs"] + 1):
+                                run(cfg, task_cfg, batch_size, run_number, device,
+                                    norm=norm, opt_name=opt_name, opt_kwargs=opt_kwargs, loss_name=loss_name, use_muon_activations=muon_act)
+                                gc.collect()
+                                if torch.cuda.is_available():
+                                    torch.cuda.empty_cache()

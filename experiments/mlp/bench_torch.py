@@ -38,7 +38,7 @@ class MLP(tnn.Module):
 
 
 # ── Training ─────────────────────────────────────
-def run(cfg, task_cfg, batch_size, run_number, device):
+def run(cfg, task_cfg, batch_size, run_number, device, opt_name=None, opt_kwargs=None):
     seed = cfg["random_seed"]
     run_seed = seed + run_number
     torch.manual_seed(run_seed)
@@ -51,8 +51,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     test_loader = ds.test_dataloader()
 
     model      = MLP(task_cfg["hidden"], task_cfg["in_features"], task_cfg["classes"]).to(device)
-    opt_name   = cfg["torch_optimizer"]
-    opt_kwargs = cfg.get("torch_optimizer_kwargs", {})
+    opt_name   = opt_name or cfg["torch_optimizer"]
+    opt_kwargs = opt_kwargs if opt_kwargs is not None else cfg.get("torch_optimizer_kwargs", {})
     optimizer  = getattr(torch.optim, opt_name)(model.parameters(), **opt_kwargs)
 
     run_name = (
@@ -94,7 +94,7 @@ def run(cfg, task_cfg, batch_size, run_number, device):
                 elapsed = time.time() - t0
                 csv_rows.append({
                     "framework": FRAMEWORK, "task": task_cfg["name"],
-                    "run": run_number, "step": step,
+                    "optimizer": opt_name, "run": run_number, "step": step,
                     "val_acc": val_acc, "wall_time_s": elapsed,
                 })
                 pbar.set_postfix(val_acc=f"{val_acc:.4f}", best=f"{best_val_acc:.4f}")
@@ -129,7 +129,7 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     print(f"Test Acc: {final_acc:.4f}  Time: {total_time:.1f}s")
     csv_rows.append({
         "framework": FRAMEWORK, "task": task_cfg["name"],
-        "run": run_number, "step": step,
+        "optimizer": opt_name, "run": run_number, "step": step,
         "val_acc": final_acc, "wall_time_s": total_time,
     })
 
@@ -140,16 +140,30 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     return final_acc, best_val_acc, best_step, total_time
 
 
+import argparse
+
 if __name__ == "__main__":
-    cfg    = yaml.safe_load(open(CFG_PATH))
+    parser = argparse.ArgumentParser(description="Torch MLP baseline")
+    parser.add_argument("--config", default=CFG_PATH, help="Path to YAML config file")
+    args = parser.parse_args()
+
+    cfg    = yaml.safe_load(open(args.config))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
+    optimizers = cfg.get("optimizers", [
+        {"name": cfg.get("torch_optimizer", "Adam"),
+         "kwargs": cfg.get("torch_optimizer_kwargs", {})}
+    ])
+
     for batch_size in cfg["batch_sizes"]:
         for task_cfg in cfg["tasks"]:
-            print(f"\n{'='*50}\n{FRAMEWORK} | {task_cfg['name']} | bs={batch_size}")
-            for run_number in range(1, cfg["num_runs"] + 1):
-                run(cfg, task_cfg, batch_size, run_number, device)
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+            for opt_entry in optimizers:
+                opt_name = opt_entry["name"]
+                opt_kwargs = opt_entry.get("kwargs", {})
+                print(f"\n{'='*50}\n{FRAMEWORK} | {task_cfg['name']} | bs={batch_size} | opt={opt_name}")
+                for run_number in range(1, cfg["num_runs"] + 1):
+                    run(cfg, task_cfg, batch_size, run_number, device, opt_name=opt_name, opt_kwargs=opt_kwargs)
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
