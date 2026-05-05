@@ -18,7 +18,6 @@ from ptorch.nn.modules import (
 )
 from ptorch import config as ptorch_config
 import ptorch.optim_static as ptorch_optim_static
-import ptorch.nn.experimental_modules as pem
 from experiments.cnn_benchmarks.models import SimpleCNN_PTorch
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 import tqdm, time

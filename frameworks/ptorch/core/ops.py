@@ -915,7 +915,7 @@ class MaxPool2DProjection(torch.autograd.Function):
         return a_proj, None, None, None
 
 
-def extract_patches(input: torch.Tensor, kernel_size: Tuple[int, int], stride: Tuple[int, int], padding: Tuple[int, int]) -> torch.Tensor:
+def extract_patches(input, kernel_size, stride, padding) -> torch.Tensor:
     """Unfolds inputs into spatial patches and permutes for dense layers."""
     patches = F.unfold(input, kernel_size, dilation=1, padding=padding, stride=stride)
     
