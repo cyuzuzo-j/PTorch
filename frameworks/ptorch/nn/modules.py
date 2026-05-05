@@ -78,82 +78,7 @@ class Linear(ProjectionModule):
                 self.proj_cache, False, self.projection_forward_cache)
             
         return output
-        
-class LinearFrozen(ProjectionModule):
-    """Projection-only linear layer with frozen input A.
-    Only the weights (B) are updated to satisfy A @ B = Z.
-    """
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-        bias: bool = True,
-        g: float = 1.0,
-        omega: float = 1.0,
-        residual: bool = False,
-    ):
-        super().__init__(outputs=1)
-        self.in_features = in_features
-        self.out_features = out_features
-        self.g = g
-        self.omega = omega
-        self.use_bias = bias
-        self.residual = residual
 
-        self.weight = nn.Parameter(torch.empty(out_features, in_features))
-        if self.use_bias:
-            self.bias = nn.Parameter(torch.zeros(1, out_features))
-        else:
-            self.register_parameter('bias', None)
-
-        nn.init.normal_(self.weight, mean=0, std=0.001)
-        
-        if self.residual:
-            with torch.no_grad():
-                identity = torch.eye(
-                    out_features, in_features, 
-                    device=self.weight.device, 
-                    dtype=self.weight.dtype
-                )
-                self.weight.copy_(identity - self.weight)
-
-    def forward(self, input):
-        if not config.use_projections:
-            b = self.bias.squeeze(0) if self.use_bias else None
-            output = F.linear(input, self.weight, b)
-            return output / self.omega
-
-        projected_input = input
-        weight_matrix = self.weight.T
-
-        if self.use_bias:
-            projected_input = F.pad(input, (0, 1), value=1.0)
-            weight_matrix = torch.cat([weight_matrix, self.bias], dim=0)
-
-        if self.residual:
-            in_dim = projected_input.shape[-1]
-            out_dim = weight_matrix.shape[-1]
-            padded_dim = max(in_dim, out_dim)
-
-            if padded_dim > in_dim:
-                projected_input = F.pad(projected_input, (0, padded_dim - in_dim), value=0.0)
-
-            if padded_dim != in_dim or padded_dim != out_dim:
-                padded_weight = weight_matrix.new_zeros((padded_dim, padded_dim))
-                padded_weight[:in_dim, :out_dim] = weight_matrix
-                weight_matrix = padded_weight
-
-        output = MatMulProjectionFrozenA.apply(
-            projected_input, weight_matrix,
-            self.g * config.projection_g, self.omega,
-            self.residual, self.projection_forward_cache
-        )
-
-        if self.residual:
-            return output[..., :self.out_features]
-            
-        return output
-        
 class ReLU(ProjectionModule):
     def __init__(self, norm="l2"):
         super().__init__(1)
@@ -177,7 +102,7 @@ class LeakyReLU(nn.LeakyReLU):
         return super().forward(input)
 
 
-class Step(nn.Module):
+class Step(ProjectionModule):
     """Step activation function."""
     def __init__(self):
         super().__init__()
@@ -195,7 +120,7 @@ class CrossEntropy(ProjectionModule):
     def forward(self, input, data_target):
         return CrossEntropyProjection.apply(input, data_target)
 
-class GappedStep(nn.Module):
+class GappedStep(ProjectionModule):
     """Step activation function with a dead zone.
     
     Like the regular Step activation but with a gap of width `delta`
@@ -220,7 +145,7 @@ class GappedStep(nn.Module):
                torch.where(input <= -half, torch.tensor(-1.0, dtype=input.dtype, device=input.device),
                             torch.tensor(0.0, dtype=input.dtype, device=input.device)))
 
-class Dropout(nn.Module):
+class Dropout(ProjectionModule):
     """Projection-aware dropout.
 
     Forward: standard inverted dropout (zero with probability *p*,
@@ -280,93 +205,6 @@ class ProximalHingeMarginLoss(ProjectionModule):
         err0 = torch.where(target <= 0, torch.where(input > 0, input**2, torch.tensor(0.0, device=input.device)), torch.tensor(0.0, device=input.device))
         return (err1 + err0).mean()
     
-
-def extract_patches(input: torch.Tensor, kernel_size: Tuple[int, int], stride: Tuple[int, int], padding: Tuple[int, int]) -> torch.Tensor:
-    """Unfolds inputs into spatial patches and permutes for dense layers."""
-    patches = F.unfold(input, kernel_size, dilation=1, padding=padding, stride=stride)
-    
-    H_out = (input.shape[2] + 2 * padding[0] - kernel_size[0]) // stride[0] + 1
-    W_out = (input.shape[3] + 2 * padding[1] - kernel_size[1]) // stride[1] + 1
-    
-    # Reshape to (N, C*kH*kW, H_out, W_out) then permute to (N, H_out, W_out, C*kH*kW)
-    return patches.view(input.shape[0], -1, H_out, W_out).permute(0, 2, 3, 1)
-
-
-class ConvPatchProjection(torch.autograd.Function):
-    """
-    Handles the Spatial Consensus for Convolutional Activations.
-    As proven in consensus_math.md, activations must NEVER be averaged 
-    across the batch. This projection uses F.fold to perfectly sum overlapping 
-    patches and divide by their local spatial overlaps.
-    """
-    @staticmethod
-    def forward(ctx, input, kernel_size, stride, padding):
-        ctx.save_for_backward(input)
-        ctx.kernel_size = kernel_size
-        ctx.stride = stride
-        ctx.padding = padding
-        
-        # Unfold extracts spatial patches: (N, C*kH*kW, L)
-        patches = F.unfold(input, kernel_size, dilation=1, padding=padding, stride=stride)
-        
-        kH = kernel_size[0] if isinstance(kernel_size, tuple) else kernel_size
-        kW = kernel_size[1] if isinstance(kernel_size, tuple) else kernel_size
-        sH = stride[0] if isinstance(stride, tuple) else stride
-        sW = stride[1] if isinstance(stride, tuple) else stride
-        pad_h = padding[0] if isinstance(padding, tuple) else padding
-        pad_w = padding[1] if isinstance(padding, tuple) else padding
-        
-        H_out = (input.shape[2] + 2 * pad_h - kH) // sH + 1
-        W_out = (input.shape[3] + 2 * pad_w - kW) // sW + 1
-        ctx.H_out = H_out
-        ctx.W_out = W_out
-        
-        # Reshape and permute into a dense-compatible format: (N, H_out, W_out, C*kH*kW)
-        return patches.view(input.shape[0], -1, H_out, W_out).permute(0, 2, 3, 1)
-
-    @staticmethod
-    def backward(ctx, z_target):
-        input, = ctx.saved_tensors
-        N, C, H, W = input.shape
-        
-        kH = ctx.kernel_size[0] if isinstance(ctx.kernel_size, tuple) else ctx.kernel_size
-        kW = ctx.kernel_size[1] if isinstance(ctx.kernel_size, tuple) else ctx.kernel_size
-        
-        L = ctx.H_out * ctx.W_out
-        
-        # 1. Revert permutation back to fold format: (N, C*kH*kW, L)
-        z_patches = z_target.permute(0, 3, 1, 2).reshape(N, -1, L)
-        
-        # 2. Fold the patches to sum the overlapping proposals at each spatial pixel
-        target_sum = F.fold(
-            z_patches, 
-            output_size=(H, W), 
-            kernel_size=ctx.kernel_size, 
-            padding=ctx.padding, 
-            stride=ctx.stride
-        )
-        
-        # 3. Memory-Optimized Overlap Counting
-        # Overlap geometry is purely spatial and identical for all batches and channels.
-        # We fold a dummy 1-channel tensor to generate the overlap mask in (1, 1, H, W).
-        # This prevents an O(N * C_in * kH * kW) memory spike!
-        dummy_ones = torch.ones(1, kH * kW, L, device=input.device, dtype=input.dtype)
-        overlap_counts = F.fold(
-            dummy_ones, 
-            output_size=(H, W), 
-            kernel_size=ctx.kernel_size, 
-            padding=ctx.padding, 
-            stride=ctx.stride
-        )
-        
-        # 4. Consensus Projection (PyTorch broadcasts the (1,1,H,W) counts perfectly)
-        target_img = target_sum / torch.clamp(overlap_counts, min=1.0)
-        
-        # Apply the framework's target-residual update mechanism
-        grad_input = process_activation_target(input, target_img)
-        
-        return grad_input, None, None, None
-
 
 class Conv2D(ProjectionModule):
     def __init__(

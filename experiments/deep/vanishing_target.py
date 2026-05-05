@@ -46,7 +46,7 @@ class IdentityMLP(nn.Module):
         self.layers = nn.ModuleList()
 
         for i in range(depth):
-            self.layers.append(Linear(d, d, bias=True, residual=False))
+            self.layers.append(Linear(d, d, bias=True))
 
         self.captured_deltas = {}
         self._setup_hooks()
@@ -118,12 +118,13 @@ def run_experiment(device):
     return results_deltas, results_final_loss
 
 
-def plot_results(results_deltas, results_final_loss, out_dir="figures"):
+def plot_results(results_deltas, results_final_loss, out_dir="images"):
     os.makedirs(out_dir, exist_ok=True)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
     t_plot = 1
+    
     colors = sns.color_palette("viridis", len(DEPTHS))
 
     for i, depth in enumerate(DEPTHS):
@@ -158,7 +159,7 @@ def plot_results(results_deltas, results_final_loss, out_dir="figures"):
     ax2.set_title(r"(b) Final Loss vs. Depth $L$")
 
     plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "vanishing_combined.png"), dpi=300, bbox_inches="tight")
+    plt.savefig(os.path.join(out_dir, "vanishing_combined.pdf"), dpi=300, bbox_inches="tight")
     print(f"\nSaved figures to {out_dir}/")
 
 

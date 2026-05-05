@@ -4,10 +4,10 @@ Plot CNN Benchmark Results
 Reads CSV logs produced by bench_ptorch.py, bench_torch.py, and bench_pjax_combined.py,
 then produces four publication-quality figures:
 
-  MNIST_STEP.png   — Validation accuracy vs. optimization step (MNIST)
-  MNIST_TIME.png   — Validation accuracy vs. wall-clock time  (MNIST)
-  CIFAR10_STEP.png — Validation accuracy vs. optimization step (CIFAR-10)
-  CIFAR10_TIME.png — Validation accuracy vs. wall-clock time  (CIFAR-10)
+  MNIST_STEP.pdf   — Validation accuracy vs. optimization step (MNIST)
+  MNIST_TIME.pdf   — Validation accuracy vs. wall-clock time  (MNIST)
+  CIFAR10_STEP.pdf — Validation accuracy vs. optimization step (CIFAR-10)
+  CIFAR10_TIME.pdf — Validation accuracy vs. wall-clock time  (CIFAR-10)
 
 Uses the same seaborn style as experiments/mlp/plot_results.py.
 """
