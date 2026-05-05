@@ -1,1 +1,0 @@
-- Always use `model="Gemini 3.1 Pro (Preview) (copilot)"` when invoking a subagent.

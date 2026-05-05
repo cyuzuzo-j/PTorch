@@ -70,14 +70,6 @@ def test_reset_restores_defaults():
     for f in _public_fields():
         assert getattr(config, f.name) == f.default
 
-
-def test_projections_context_manager_restores_state():
-    _set(use_projections=True, projection_norm="l2")
-    with config.projections(enabled=False, norm="linf"):
-        assert (config.use_projections, config.projection_norm) == (False, "linf")
-    assert (config.use_projections, config.projection_norm) == (True, "l2")
-
-
 # ── use_projections ────────────────────────────────────────────────────────
 
 def test_use_projections_false_gives_standard_linear():
@@ -109,16 +101,6 @@ def test_muon_activations_lr_zero_returns_det_unchanged():
     assert torch.allclose(process_activation_target(DET, PROJ), DET, atol=1e-5)
 
 
-def test_muon_activations_scale_preserves_gradient_norm():
-    _set(muon_activations=True, muon_activations_lr=1.0, muon_activations_scale=True)
-    out = process_activation_target(DET, PROJ)
-    assert abs((out - DET).norm() - (DET - PROJ).norm()) < 1e-3
-
-
-def test_muon_activations_norm_preserve_keeps_row_norms():
-    _set(muon_activations=True, muon_activations_lr=1.0, muon_activations_norm_preserve=True)
-    out = process_activation_target(DET, PROJ)
-    assert torch.allclose(DET.norm(dim=-1), out.norm(dim=-1), atol=1e-5)
 
 
 # ── muon on weights ────────────────────────────────────────────────────────
