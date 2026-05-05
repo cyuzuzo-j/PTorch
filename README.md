@@ -1,4 +1,4 @@
-# Learning with Projections
+# PTorch
 
 > **Attribution:** A significant portion of this code is based on or directly copied from [AndreasBergmeister/pjax](https://github.com/AndreasBergmeister/pjax).
 
