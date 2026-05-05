@@ -632,8 +632,10 @@ class ReLULInfinityProjection(torch.autograd.Function):
     projecting onto the ReLU graph using the L-infinity norm.
     """
     @staticmethod
-    def forward(ctx, x):
+    def forward(ctx, x, forward_cache=None):
         ctx.save_for_backward(x)
+        ctx.forward_cache = forward_cache
+
         return torch.relu(x)
 
     @staticmethod
@@ -652,7 +654,11 @@ class ReLULInfinityProjection(torch.autograd.Function):
 
         # Select solution minimizing L-infinity distance
         result = torch.where(dist_1 < dist_2, x_1, x_2)
-        return process_activation_target(x, result)
+        
+        result_forwards = torch.where(dist_1 < dist_2, torch.zeros_like(x), x_2)
+        ctx.forward_cache[0] = result_forwards        
+
+        return process_activation_target(x, result), None
     
 class ReLUProjection(torch.autograd.Function):
     """

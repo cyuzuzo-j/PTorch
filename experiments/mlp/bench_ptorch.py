@@ -13,7 +13,7 @@ import torch.nn.functional as F
 import torch.fx
 import pandas as pd
 from ptorch.nn.modules import (
-    Linear, LinearFrozen, LeakyReLU, ReLU,
+    Linear, LinearFrozen, ReLU,
     ProjectionModule, CrossEntropy, HardMarginLoss, ProximalHingeMarginLoss
 )
 import ptorch.nn.modules as ptorch_modules
@@ -34,7 +34,7 @@ DATASETS = {"MNIST": MNISTDataModule, "CIFAR10": InfiniteCifarDataModule}
 
 class ProjectionTracer(torch.fx.Tracer):
     def is_leaf_module(self, m: tnn.Module, module_qualified_name: str) -> bool:
-        if isinstance(m, (ProjectionModule, ReLU, LeakyReLU)):
+        if isinstance(m, (ProjectionModule)):
             return True
         return super().is_leaf_module(m, module_qualified_name)
 
@@ -69,14 +69,15 @@ class MLP(tnn.Module):
         super().__init__()
         last = in_features
         self.hidden_layers = tnn.ModuleList()
+        
         for i, f in enumerate(hidden):
             if i == 0:
-                self.hidden_layers.append(LinearFrozen(in_features, f, bias=False))
+                self.hidden_layers.append(Linear(in_features, f))
             else:
-                self.hidden_layers.append(Linear(last, f, bias=False, residual=True, norm=norm))
-            self.hidden_layers.append(LeakyReLU(0.1))
+                self.hidden_layers.append(Linear(last, f, norm=norm))
+            self.hidden_layers.append(ReLU( norm=norm))
             last = f
-        self.out = Linear(last, classes, bias=False, norm=norm)
+        self.out = Linear(last, classes, norm=norm)
         loss_cls = getattr(ptorch_modules, loss_name, HardMarginLoss)
         self.loss = loss_cls()
 
