@@ -11,11 +11,9 @@ import yaml
 import torch
 import torch.nn as tnn
 import torch.nn.functional as F
+import pandas as pd
 from experiments.shared.data_loaders import MNISTDataModule, InfiniteCifarDataModule
 import tqdm, time
-import wandb
-from experiments.shared.hash_utils import get_code_hash
-code_hash = get_code_hash()
 
 FRAMEWORK = "torch"
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
@@ -57,23 +55,15 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     opt_kwargs = cfg.get("torch_optimizer_kwargs", {})
     optimizer  = getattr(torch.optim, opt_name)(model.parameters(), **opt_kwargs)
 
-    run_name = f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}"
-    run = wandb.init(project="pjax", name=run_name)
-    wandb.config.update({
-        "framework": FRAMEWORK,
-        "task": task_cfg["name"],
-        "hidden": task_cfg["hidden"],
-        "optimizer": opt_name,
-        "code_hash": code_hash,
-        **{f"opt_{k}": v for k, v in opt_kwargs.items()},
-        "batch_size": batch_size,
-        "seed": run_seed,
-        "base_seed": seed,
-        "run_number": run_number,
-        "max_steps": cfg["max_steps"],
-        "eval_every": cfg["eval_every"],
-        "patience": cfg["patience"],
-    })
+    run_name = (
+        f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}"
+        f"_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}"
+    )
+
+    results_dir = os.path.join(os.path.dirname(__file__), cfg.get("results_dir", "results"))
+    os.makedirs(results_dir, exist_ok=True)
+    csv_path = os.path.join(results_dir, f"{FRAMEWORK}_{task_cfg['name']}.csv")
+    csv_rows = []
 
     def step_fn(x, y):
         optimizer.zero_grad()
@@ -101,8 +91,12 @@ def run(cfg, task_cfg, batch_size, run_number, device):
                     for x, y in val_loader]
                 val_acc = float(torch.stack(accs).mean())
                 model.train()
-                wandb.log({"val/val_acc": val_acc}, step=step)
-                wandb.log({"training_time_s": time.time() - t0}, step=step)
+                elapsed = time.time() - t0
+                csv_rows.append({
+                    "framework": FRAMEWORK, "task": task_cfg["name"],
+                    "run": run_number, "step": step,
+                    "val_acc": val_acc, "wall_time_s": elapsed,
+                })
                 pbar.set_postfix(val_acc=f"{val_acc:.4f}", best=f"{best_val_acc:.4f}")
                 if val_acc > best_val_acc:
                     best_val_acc, best_step = val_acc, step
@@ -115,10 +109,9 @@ def run(cfg, task_cfg, batch_size, run_number, device):
                     break
 
             x, y = next(train_iter)
-            loss = step_fn(
+            step_fn(
                 x.clone().detach().to(dtype=torch.float32, device=device),
                 y.clone().detach().to(dtype=torch.long,  device=device))
-            wandb.log({"train/loss": float(loss)}, step=step)
             step += 1
             pbar.update(1)
             if cfg["max_steps"] and step >= cfg["max_steps"]:
@@ -134,9 +127,16 @@ def run(cfg, task_cfg, batch_size, run_number, device):
         for x, y in test_loader]
     final_acc = float(torch.stack(test_accs).mean())
     print(f"Test Acc: {final_acc:.4f}  Time: {total_time:.1f}s")
-    wandb.log({"test/test_acc": final_acc}, step=step)
-    wandb.log({"total_training_time_s": total_time}, step=step)
-    wandb.finish()
+    csv_rows.append({
+        "framework": FRAMEWORK, "task": task_cfg["name"],
+        "run": run_number, "step": step,
+        "val_acc": final_acc, "wall_time_s": total_time,
+    })
+
+    # Write / append CSV
+    df = pd.DataFrame(csv_rows)
+    df.to_csv(csv_path, mode="a", header=not os.path.exists(csv_path), index=False)
+    print(f"Results appended to {csv_path}")
     return final_acc, best_val_acc, best_step, total_time
 
 
