@@ -40,7 +40,8 @@ def plot_optimizer_comparison(results_dir: str, output_path: str):
     ax.set_ylabel("Validation Accuracy")
     ax.set_title("Optimizer Comparison")
     ax.legend(title="Optimizer", loc="lower right", fontsize=12, frameon=False)
-    
+    ax.set(ylim=(0.75, 1.0))
+
     plt.tight_layout()
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -49,5 +50,5 @@ def plot_optimizer_comparison(results_dir: str, output_path: str):
 
 if __name__ == "__main__":
     results_dir = os.path.join(os.path.dirname(__file__), "results", "optimizer_comparison")
-    output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../images/optimizer_comparison.png"))
+    output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../images/optimizer_comparison.pdf"))
     plot_optimizer_comparison(results_dir, output_path)

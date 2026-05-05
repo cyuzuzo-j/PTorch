@@ -4,10 +4,10 @@ Plot Shallow MLP Benchmark Results
 Reads CSV logs produced by bench_ptorch.py, bench_torch.py, and bench_pjax.py,
 then produces four publication-quality figures:
 
-  MNIST_1L_STEP.png   — Validation accuracy vs. optimization step (MNIST)
-  MNIST_1L_TIME.png   — Validation accuracy vs. wall-clock time  (MNIST)
-  CIFAR10_1L_STEP.png — Validation accuracy vs. optimization step (CIFAR-10)
-  CIFAR10_1L_TIME.png — Validation accuracy vs. wall-clock time  (CIFAR-10)
+  MNIST_1L_STEP.pdf   — Validation accuracy vs. optimization step (MNIST)
+  MNIST_1L_TIME.pdf   — Validation accuracy vs. wall-clock time  (MNIST)
+  CIFAR10_1L_STEP.pdf — Validation accuracy vs. optimization step (CIFAR-10)
+  CIFAR10_1L_TIME.pdf — Validation accuracy vs. wall-clock time  (CIFAR-10)
 
 Uses the same seaborn style as experiments/deep/vanishing_target.py.
 """
@@ -81,9 +81,9 @@ def plot_task(df: pd.DataFrame, task_name: str, output_dir: str):
 
     ax.set_title(f"{dataset_label} — Accuracy vs. Step")
     ax.legend(loc="lower right", fontsize=12, frameon=False)
-
+    ax.set(ylim=(0.9, 1.0))
     plt.tight_layout()
-    out_path = os.path.join(output_dir, f"{task_name}_STEP.png")
+    out_path = os.path.join(output_dir, f"{task_name}_STEP.pdf")
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {out_path}")
@@ -94,7 +94,7 @@ def plot_task(df: pd.DataFrame, task_name: str, output_dir: str):
     # Bin unaligned wall-clock times into uniform intervals for clean averaging
     time_data = df.dropna(subset=["wall_time_s", "val_acc"]).copy()
     if not time_data.empty:
-        n_bins = 10000
+        n_bins = 500
         time_data["time_bin"] = pd.cut(time_data["wall_time_s"], bins=n_bins)
         time_data["time_mid"] = time_data["time_bin"].apply(
             lambda iv: iv.mid if iv is not None else None
@@ -113,7 +113,7 @@ def plot_task(df: pd.DataFrame, task_name: str, output_dir: str):
     ax.legend(loc="lower right", fontsize=12, frameon=False)
 
     plt.tight_layout()
-    out_path = os.path.join(output_dir, f"{task_name}_TIME.png")
+    out_path = os.path.join(output_dir, f"{task_name}_TIME.pdf")
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {out_path}")

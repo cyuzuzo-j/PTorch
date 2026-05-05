@@ -222,7 +222,6 @@ def matmul_proj_linf(A, B, Z, eps_init=None, g=1.0, omega=1.0, num_steps=5):
     return A_proj, B_proj, Z_proj, eps.detach()
 
 
-# ─── autograd.Function wrapper ────────────────────────────────────────────────
 class MatMulProjectionLinf(torch.autograd.Function):
     """
     Minimize || A_{new} - A_{old} ||_inf + || B_{new} - B_{old} ||_inf + g * || Z_{new} - Z_{old} ||_inf
@@ -365,8 +364,8 @@ class MatMulProjection(torch.autograd.Function):
         ctx.alpha = alpha
         ctx.g = g
         ctx.num_steps = num_steps
-        ctx.proj_cache = proj_cache  # Store reference to the mutable dictionary
-        ctx.forward_cache = forward_cache  # Store reference to the mutable dictionary for forward pass caching
+        ctx.proj_cache = proj_cache  
+        ctx.forward_cache = forward_cache 
         ctx.omega = omega
         ctx.pairwise = pairwise
         return (A @ B) / omega
@@ -378,14 +377,11 @@ class MatMulProjection(torch.autograd.Function):
         B_det = B.detach()
         Z_det = Z_target.detach()
 
-        # Retrieve the cached t from previous runs if available and not pairwise
         t_init = None
         if not ctx.pairwise and ctx.proj_cache is not None:
             t_init = ctx.proj_cache.get('t')
 
         if not ctx.pairwise and (A_det.ndim > 2 or B_det.ndim > 2):
-            # .clone() breaks the view chain so torch.compile doesn't
-            # guard on the original 4D _base strides (which vary per layer)
             A_2d = A_det.reshape(-1, A_det.shape[-1]).clone()
             Z_2d = Z_det.reshape(-1, Z_det.shape[-1]).clone() * ctx.omega
             B_2d = B_det.reshape(-1, B_det.shape[-2], B_det.shape[-1]).mean(dim=0).clone()
@@ -431,86 +427,6 @@ class MatMulProjection(torch.autograd.Function):
         if ctx.forward_cache is not None:
             ctx.forward_cache[0] = Z_proj
         return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None, None, None
-
-
-@torch.compile()
-def matmul_proj_fixed_A(A, B, Z, g=1.0, omega=1.0, residual=False):
-    """
-    Exact projection onto {A, B, Z : A @ B = Z} with A held fixed.
-    A: (..., M, K)
-    B: (..., K, N)
-    Z: (..., M, N)
-    """
-    M = A.size(-2)
-    N = B.size(-1)
-
-    if residual:
-        I_res = torch.eye(B.size(-2), B.size(-1), device=B.device, dtype=B.dtype)
-        B_eff = I_res - B
-    else:
-        B_eff = B
-
-    lam = (omega ** 2) / (g ** 2)
-    P = A @ B_eff  # (..., M, N)
-    Z0 = Z * omega # (..., M, N)
-
-    S = A @ A.transpose(-1, -2) # (..., M, M)
-    I = torch.eye(M, device=A.device, dtype=A.dtype)
-    system_matrix = I + lam * S
-
-    rhs = P + lam * (S @ Z0)
-
-    # Solve (I + lam*S) Z_proj = rhs
-    Z_proj = torch.linalg.solve(system_matrix, rhs)
-
-    T = lam * (Z_proj - Z0)
-    B_eff_proj = B_eff - A.transpose(-1, -2) @ T
-
-    Z_proj = Z_proj / omega
-
-    if residual:
-        B_proj = I_res - B_eff_proj
-    else:
-        B_proj = B_eff_proj
-
-    return A, B_proj, Z_proj, None
-
-
-class MatMulProjectionFrozenA(torch.autograd.Function):
-    """
-    Minimize || B_{new} - B_{old} ||_F^2 + g * || Z_{new} - Z_{old} ||_F^2
-    subject to A_{old} @ B_{new} = Z_{new} (A is held fixed)
-    """
-    @staticmethod
-    def forward(ctx, A, B, g, omega, residual=False, forward_cache=None):
-        ctx.save_for_backward(A, B)
-        ctx.g = g
-        ctx.omega = omega
-        ctx.residual = residual
-        ctx.forward_cache = forward_cache
-        
-        if residual:
-            return (A - A @ B) / omega
-        else:
-            return (A @ B) / omega
-
-    @staticmethod
-    def backward(ctx, Z_target):
-        A, B = ctx.saved_tensors
-        A_det = A.detach()
-        B_det = B.detach()
-        Z_det = Z_target.detach()
-
-        g_frozen = ctx.g * config.frozen_a_g
-        A_proj, B_proj, Z_proj, _ = matmul_proj_fixed_A(
-            A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
-            g=g_frozen, omega=ctx.omega, residual=ctx.residual
-        )
-
-        if ctx.forward_cache is not None:
-            ctx.forward_cache[0] = Z_proj
-
-        return process_activation_target(A_det, A_proj),  B_proj, None, None, None, None
 
 
 class MSEProjection(torch.autograd.Function):
@@ -940,7 +856,6 @@ class MaxPool2DProjection(torch.autograd.Function):
         if stride is None:
             stride = kernel_size
         
-        # PJAX enforces non-overlapping windows for projection validity
         k_tuple = (kernel_size, kernel_size) if isinstance(kernel_size, int) else tuple(kernel_size)
         s_tuple = (stride, stride) if isinstance(stride, int) else tuple(stride)
         
@@ -984,13 +899,10 @@ class MaxPool2DProjection(torch.autograd.Function):
         a_proj_batch = max_proj_pt_batch(a_batch, z_batch)
 
         # 4. Reconstruct the image
-        # Unflatten back to (N, C, L, kH * kW)
         a_proj_patches = a_proj_batch.view(N, C, L, kH * kW)
         
-        # Permute to (N, C, kH * kW, L) and collapse C and spatial patch dims
         a_proj_unfolded = a_proj_patches.permute(0, 1, 3, 2).contiguous().view(N, C * kH * kW, L)
 
-        # F.fold restores the image geometry. Because stride == kernel_size, there's no overlap.
         a_proj = F.fold(
             a_proj_unfolded, 
             output_size=(H_in, W_in), 
@@ -1001,3 +913,79 @@ class MaxPool2DProjection(torch.autograd.Function):
 
         
         return a_proj, None, None, None
+
+
+def extract_patches(input: torch.Tensor, kernel_size: Tuple[int, int], stride: Tuple[int, int], padding: Tuple[int, int]) -> torch.Tensor:
+    """Unfolds inputs into spatial patches and permutes for dense layers."""
+    patches = F.unfold(input, kernel_size, dilation=1, padding=padding, stride=stride)
+    
+    H_out = (input.shape[2] + 2 * padding[0] - kernel_size[0]) // stride[0] + 1
+    W_out = (input.shape[3] + 2 * padding[1] - kernel_size[1]) // stride[1] + 1
+    
+    # Reshape to (N, C*kH*kW, H_out, W_out) then permute to (N, H_out, W_out, C*kH*kW)
+    return patches.view(input.shape[0], -1, H_out, W_out).permute(0, 2, 3, 1)
+
+
+class ConvPatchProjection(torch.autograd.Function):
+    """
+    Handles the Spatial Consensus for Convolutional Activations.
+    """
+    @staticmethod
+    def forward(ctx, input, kernel_size, stride, padding):
+        ctx.save_for_backward(input)
+        ctx.kernel_size = kernel_size
+        ctx.stride = stride
+        ctx.padding = padding
+        
+        patches = F.unfold(input, kernel_size, dilation=1, padding=padding, stride=stride)
+        
+        kH = kernel_size[0] if isinstance(kernel_size, tuple) else kernel_size
+        kW = kernel_size[1] if isinstance(kernel_size, tuple) else kernel_size
+        sH = stride[0] if isinstance(stride, tuple) else stride
+        sW = stride[1] if isinstance(stride, tuple) else stride
+        pad_h = padding[0] if isinstance(padding, tuple) else padding
+        pad_w = padding[1] if isinstance(padding, tuple) else padding
+        
+        H_out = (input.shape[2] + 2 * pad_h - kH) // sH + 1
+        W_out = (input.shape[3] + 2 * pad_w - kW) // sW + 1
+        ctx.H_out = H_out
+        ctx.W_out = W_out
+        
+        return patches.view(input.shape[0], -1, H_out, W_out).permute(0, 2, 3, 1)
+
+    @staticmethod
+    def backward(ctx, z_target):
+        input, = ctx.saved_tensors
+        N, C, H, W = input.shape
+        
+        kH = ctx.kernel_size[0] if isinstance(ctx.kernel_size, tuple) else ctx.kernel_size
+        kW = ctx.kernel_size[1] if isinstance(ctx.kernel_size, tuple) else ctx.kernel_size
+        
+        L = ctx.H_out * ctx.W_out
+        
+        z_patches = z_target.permute(0, 3, 1, 2).reshape(N, -1, L)
+        
+        target_sum = F.fold(
+            z_patches, 
+            output_size=(H, W), 
+            kernel_size=ctx.kernel_size, 
+            padding=ctx.padding, 
+            stride=ctx.stride
+        )
+        
+        dummy_ones = torch.ones(1, kH * kW, L, device=input.device, dtype=input.dtype)
+        overlap_counts = F.fold(
+            dummy_ones, 
+            output_size=(H, W), 
+            kernel_size=ctx.kernel_size, 
+            padding=ctx.padding, 
+            stride=ctx.stride
+        )
+        
+        target_img = target_sum / torch.clamp(overlap_counts, min=1.0)
+        
+        target = process_activation_target(input, target_img)
+        
+        return target, None, None, None
+
+

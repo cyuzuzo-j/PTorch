@@ -47,7 +47,9 @@ def plot_effect_of_loss(results_dir: str, output_path: str):
     
     ax.set_xlabel("Optimization Step")
     ax.set_ylabel("Validation Accuracy")
-    ax.set(ylim=(0.7, 1.05))
+    ax.set(ylim=(0.9, 1.0))
+    ax.set(xlim=(500, 6000))
+
     ax.set_title("Effect of Loss Formulation")
     ax.legend(loc="lower right", fontsize=12, frameon=False)
     
@@ -59,5 +61,5 @@ def plot_effect_of_loss(results_dir: str, output_path: str):
 
 if __name__ == "__main__":
     results_dir = os.path.join(os.path.dirname(__file__), "results", "loss_comparison")
-    output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../images/effect_of_loss.png"))
+    output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../images/effect_of_loss.pdf"))
     plot_effect_of_loss(results_dir, output_path)
