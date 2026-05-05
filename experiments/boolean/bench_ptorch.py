@@ -4,23 +4,17 @@
 import sys, os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../frameworks')))
-
-# Keep this benchmark in eager mode to avoid inductor cache/JIT crashes.
-os.environ.setdefault("TORCHDYNAMO_DISABLE", "1")
-
 import yaml
 import torch
 import torch.nn as tnn
-import torch.nn.functional as F
 import torch.fx
 from ptorch.nn.modules import Linear, LinearFrozen, ReLU, LeakyReLU, ProjectionModule, CrossEntropy, HardMarginLoss
 from ptorch import config
 import ptorch.optim_static as ptorch_optim_static
 import tqdm, time
-import wandb
+import pandas as pd
 
-FRAMEWORK = "ptorch_cyclic"
-XOR_BITS = 2
+FRAMEWORK = "ptorch_cy"
 
 OPTIM_MODULES = vars(ptorch_optim_static)
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
@@ -32,9 +26,6 @@ def make_xor_truth_table(num_bits):
     bits = ((rows.unsqueeze(1) >> torch.arange(num_bits - 1, -1, -1)) & 1)
     labels = (bits.sum(dim=1) % 2).long()
     return bits.float(), labels
-
-
-X_XOR, Y_XOR = make_xor_truth_table(XOR_BITS)
 
 class ProjectionTracer(torch.fx.Tracer):
     def is_leaf_module(self, m: tnn.Module, module_qualified_name: str) -> bool:
@@ -60,7 +51,6 @@ class PropagateCache(torch.fx.Interpreter):
         result = super().run_node(n)
         
         if cache_to_apply is not None:
-            print(f"set node {n} to {cache_to_apply.data}")
             result.data.copy_(cache_to_apply.data) 
         return result
 
@@ -72,16 +62,15 @@ class MLP(tnn.Module):
         last = in_features
         self.hidden_layers = tnn.ModuleList()
         for i, f in enumerate(hidden):
-            # Using bias=False to match JAX implementation
             if i == 0:
                 self.hidden_layers.append(LinearFrozen(last, f, bias=False, g=1.0))
             else:
-                self.hidden_layers.append(Linear(last, f, bias=False, g=1.0, alpha=1.0, num_iters=10))
+                self.hidden_layers.append(Linear(last, f, bias=False, g=1.0, alpha=1.0))
             self.hidden_layers.append(LeakyReLU(0.1))
             last = f
         self.n_hidden = len(hidden)
-        # Using bias=False and 1 output class to match JAX implementation
-        self.out = Linear(last, 1, bias=False, g=1.0, alpha=1.0, num_iters=10)
+
+        self.out = Linear(last, 1, bias=False, g=1.0, alpha=1.0)
         self.loss = HardMarginLoss()
 
     def forward(self, x, y):
@@ -89,7 +78,7 @@ class MLP(tnn.Module):
             x = self.hidden_layers[i](x) 
             x = self.hidden_layers[i+1](x)
         x = self.out(x)
-        # JAX target shape is (batch_size, 1)
+
         return self.loss(x, y.view(-1, 1).float())
 
     def forward_eval(self, x):
@@ -106,6 +95,9 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     seed = cfg["random_seed"]
     torch.manual_seed(seed + run_number)
 
+    xor_bits = cfg.get("xor_bits", 2)
+    X_XOR, Y_XOR = make_xor_truth_table(xor_bits)
+
     model      = MLP(task_cfg["hidden"], X_XOR.shape[1], task_cfg["classes"]).to(device)
 
     opt_name   = cfg["ptorch_optimizer"]
@@ -113,21 +105,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     optimizer  = OPTIM_MODULES[opt_name](model.parameters(), **opt_kwargs)
 
     run_name = f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}"
-    run = wandb.init(project="pjax", name=run_name)
-    wandb.config.update({
-        "framework": FRAMEWORK,
-        "task": task_cfg["name"],
-        "architecture": str(model),
-        "hidden": task_cfg["hidden"],
-        "optimizer": opt_name,
-        **{f"opt_{k}": v for k, v in opt_kwargs.items()},
-        "batch_size": batch_size,
-        "seed": seed,
-        "run_number": run_number,
-        "max_steps": cfg["max_steps"],
-        "eval_every": cfg["eval_every"],
-        "patience": cfg["patience"],
-    })
+    csv_path = os.path.join(os.path.dirname(__file__), f"{cfg.get('experiment_name', 'run')}_results.csv")
+    csv_rows = []
 
     def eval_fn(x, y):
         with torch.no_grad():
@@ -153,11 +132,8 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     def step_fn():
         nonlocal output
         optimizer.zero_grad()
-        # Projection losses return logits (non-scalar), so seed backward explicitly.
-        print("--------------------------")
         output.sum().backward()
         optimizer.step()
-        print("-------------------------------")
 
         # Keep a scalar metric for logging that matches the hard-margin objective.
         with torch.no_grad():
@@ -177,8 +153,7 @@ def run(cfg, task_cfg, batch_size, run_number, device):
                 model.eval()
                 val_acc = float(eval_fn(x_train, y_train))
                 model.train()
-                wandb.log({"val/val_acc": val_acc}, step=step)
-                wandb.log({"training_time_s": time.time() - t0}, step=step)
+                csv_rows.append({"run_name": run_name, "step": step, "metric": "val_acc", "value": val_acc, "wall_time_s": time.time() - t0})
                 pbar.set_postfix(val_acc=f"{val_acc:.4f}", best=f"{best_val_acc:.4f}")
                 if val_acc >= best_val_acc:
                     best_val_acc, best_step = val_acc, step
@@ -191,7 +166,7 @@ def run(cfg, task_cfg, batch_size, run_number, device):
                     break
 
             loss = step_fn()
-            wandb.log({"train/loss": float(loss)}, step=step)
+            csv_rows.append({"run_name": run_name, "step": step, "metric": "train_loss", "value": float(loss), "wall_time_s": time.time() - t0})
             step += 1
             pbar.update(1)
             if cfg["max_steps"] and step >= cfg["max_steps"]:
@@ -203,9 +178,12 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     model.eval()
     final_acc = float(eval_fn(x_train, y_train))
     print(f"Test Acc: {final_acc:.4f}  Time: {total_time:.1f}s")
-    wandb.log({"test/test_acc": final_acc}, step=step)
-    wandb.log({"total_training_time_s": total_time}, step=step)
-    wandb.finish()
+    csv_rows.append({"run_name": run_name, "step": step, "metric": "test_acc", "value": final_acc, "wall_time_s": total_time})
+
+    # Write / append CSV
+    df = pd.DataFrame(csv_rows)
+    df.to_csv(csv_path, mode="a", header=not os.path.exists(csv_path), index=False)
+    print(f"Results appended to {csv_path}")
     return final_acc
 
 

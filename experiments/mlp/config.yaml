@@ -1,45 +1,54 @@
 ##################################################
-###   Shared experiment configuration          ###
-###   Used by all 4 benchmark scripts         ###
+###   Shallow MLP benchmark configuration      ###
+###   Single-hidden-layer (512) on MNIST/CIFAR  ###
 ##################################################
 
 # ── Experiment identity ───────────────────────────
-experiment_name: mlp_benchmark_final_actually_final
+experiment_name: shallow_mlp_benchmark
 random_seed: 43
-max_steps: 50_000
 num_runs: 3
+
+# ── Training ──────────────────────────────────────
+max_steps: 50_000
 eval_every: 200
 patience: 10
-ptorch_norm_sweep: [2]  # restricted to linf as per paper
-# ── Batch sizes to sweep ─────────────────────────
 batch_sizes: [32]
 
 # Number of backward passes (cyclic projections) per batch
-K: 1
-# ── Tasks (comment out to disable) ───────────────
-tasks:
+K: 50
 
+# ── Output ────────────────────────────────────────
+results_dir: results          # CSV logs go here
+figures_dir: ../../images/mlp # plot output directory
+
+# ── Tasks ─────────────────────────────────────────
+tasks:
   - name: MNIST_1L
     dataset: MNIST
     in_features: 784
     classes: 10
     hidden: [512]
 
+  - name: CIFAR10_1L
+    dataset: CIFAR10
+    in_features: 3072        # 32×32×3 flattened
+    classes: 10
+    hidden: [512]
 
 # ── Optimizers per framework ──────────────────────
 
+# ptorch — ptorch.optim_static classes
+ptorch_optimizer: ProjectionMuon
+ptorch_optimizer_kwargs:
+  lr: 0.001
+ptorch_loss: HardMarginLoss   # HardMarginLoss | CrossEntropy
 
-# pjax (original) — optim classes
-pjax_orr_optimizer: DouglasRachford  # AlternatingProjections | AlternatingReflections | DouglasRachford | DifferenceMap | CyclicProjections | CyclicDouglasRachford
-pjax_orr_optimizer_kwargs:
+# pjax — pjax_orr.optim classes
+pjax_optimizer: DouglasRachford
+pjax_optimizer_kwargs:
   steps_per_update: 50
 
-# ptorch — ptorch.optim_static classes
-ptorch_optimizer: AlternatingProjections  # AlternatingProjections | AlternatingProjectionsMomentum | ProjectionSGD | ProjectionAdam | ProjectionAdagrad | ProjectionAdadelta
-ptorch_optimizer_kwargs: {lr: 1.à}
-ptorch_loss_projection: HardMarginProjection  # CrossEntropyProjection | HardMarginProjection | ProximalHingeMargin
-
 # torch — any torch.optim class
-torch_optimizer: Adam           # Adam | SGD | AdamW | ...
+torch_optimizer: Adam
 torch_optimizer_kwargs:
   lr: 0.001

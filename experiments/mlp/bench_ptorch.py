@@ -1,7 +1,6 @@
 ##################################################
 ###   Benchmark — ptorch (cyclic projections)  ###
-###   Exact strategy from boolean/bench_ptorch ###
-###   applied to MNIST / CIFAR-10              ###
+###   Single-hidden-layer MLP on MNIST/CIFAR   ###
 ##################################################
 import sys, os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
@@ -16,28 +15,30 @@ import torch
 import torch.nn as tnn
 import torch.nn.functional as F
 import torch.fx
-from ptorch.nn.modules import Linear, LinearFrozen, LeakyReLU,ReLU, ProjectionModule, CrossEntropy, HardMarginLoss
+import pandas as pd
+from ptorch.nn.modules import (
+    Linear, LinearFrozen, LeakyReLU, ReLU,
+    ProjectionModule, CrossEntropy, HardMarginLoss,
+)
 from ptorch import config as ptorch_config
 import ptorch.optim_static as ptorch_optim_static
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 import tqdm, time
-import wandb
 
 ptorch_config.use_projections = True
 
-
-FRAMEWORK = "ptorch_cyclic"
+FRAMEWORK = "ptorch"
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 OPTIM_MODULES = vars(ptorch_optim_static)
 
 DATASETS = {"MNIST": MNISTDataModule, "CIFAR10": InfiniteCifarDataModule}
 
 
-# ── FX Tracer / Interpreter (same as boolean/bench_ptorch.py) ────────────────
+# ── FX Tracer / Interpreter ─────────────────────────────────────────────────
 
 class ProjectionTracer(torch.fx.Tracer):
     def is_leaf_module(self, m: tnn.Module, module_qualified_name: str) -> bool:
-        if isinstance(m, (ProjectionModule, ReLU , LeakyReLU)):
+        if isinstance(m, (ProjectionModule, ReLU, LeakyReLU)):
             return True
         return super().is_leaf_module(m, module_qualified_name)
 
@@ -65,12 +66,8 @@ class PropagateCache(torch.fx.Interpreter):
         return result
 
 
-# ── Model ────────────────────────────────────────
-# Same architecture pattern as boolean/bench_ptorch.py:
-#   - LinearFrozen for first layer (no gradient)
-#   - Linear with alpha/num_iters for remaining hidden + output
-#   - LeakyReLU activations
-#   - CrossEntropy projection loss (multi-class equivalent of HardMarginLoss)
+# ── Model ────────────────────────────────────────────────────────────────────
+
 class MLP(tnn.Module):
     def __init__(self, hidden, in_features, classes):
         super().__init__()
@@ -80,7 +77,7 @@ class MLP(tnn.Module):
             if i == 0:
                 self.hidden_layers.append(LinearFrozen(in_features, f, bias=False))
             else:
-                self.hidden_layers.append(Linear(last,f, bias=False, residual=True))
+                self.hidden_layers.append(Linear(last, f, bias=False, residual=True))
             self.hidden_layers.append(LeakyReLU(0.1))
             last = f
         self.out = Linear(last, classes, bias=False)
@@ -102,10 +99,8 @@ class MLP(tnn.Module):
         return self.out(x)
 
 
-# ── Training ─────────────────────────────────────
-# Exact optimisation strategy from boolean/bench_ptorch.py:
-#   - Single initial forward pass
-#   - Then backward + PropagateCache each step (no new forward pass)
+# ── Training ─────────────────────────────────────────────────────────────────
+
 def run(cfg, task_cfg, batch_size, run_number, device):
     seed = cfg["random_seed"]
     run_seed = seed + run_number
@@ -133,22 +128,11 @@ def run(cfg, task_cfg, batch_size, run_number, device):
         f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}"
         f"_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}"
     )
-    run_wandb = wandb.init(project="pjax", name=run_name)
-    wandb.config.update({
-        "framework": FRAMEWORK,
-        "task": task_cfg["name"],
-        "hidden": task_cfg["hidden"],
-        "optimizer": opt_name,
 
-        **{f"opt_{k}": v for k, v in opt_kwargs.items()},
-        "batch_size": batch_size,
-        "K": cfg.get("K", 1),
-        "seed": run_seed,
-        "run_number": run_number,
-        "max_steps": cfg["max_steps"],
-        "eval_every": cfg["eval_every"],
-        "patience": cfg["patience"],
-    })
+    results_dir = os.path.join(os.path.dirname(__file__), cfg.get("results_dir", "results"))
+    os.makedirs(results_dir, exist_ok=True)
+    csv_path = os.path.join(results_dir, f"{FRAMEWORK}_{task_cfg['name']}.csv")
+    csv_rows = []
 
     def eval_acc(loader):
         model.eval()
@@ -171,7 +155,7 @@ def run(cfg, task_cfg, batch_size, run_number, device):
     step = 0
     with tqdm.tqdm(total=cfg["max_steps"], unit="step") as pbar:
         while step < cfg["max_steps"]:
-            # ── Fetch a new batch ─────────────────────────────────────────────
+            # ── Fetch a new batch ─────────────────────────────────────────
             x_np, y_np = next(train_iter)
             x_batch = torch.tensor(x_np, dtype=torch.float32, device=device)
             y_batch = torch.tensor(y_np, dtype=torch.long, device=device)
@@ -181,24 +165,28 @@ def run(cfg, task_cfg, batch_size, run_number, device):
             # Initial real forward pass for this batch
             output = traced(x_batch, y_oh)
 
-
             for _ in range(K):
                 if step >= cfg["max_steps"]:
                     break
 
-                # ── Backward + weight update ───────────────────────────────────
+                # ── Backward + weight update ──────────────────────────────
                 optimizer.zero_grad()
                 output.sum().backward()
                 optimizer.step()
 
-                # ── Propagate projections (no new forward pass) ───────────────
+                # ── Propagate projections (no new forward pass) ───────────
                 interpreter = PropagateCache(traced, skip_modules={'out'})
                 output = interpreter.run(x_batch, y_oh)
-                
-            # ── Eval ──────────────────────────────────────────────────────────
+
+            # ── Eval ──────────────────────────────────────────────────────
             if step % cfg["eval_every"] == 0:
                 val_acc = eval_acc(val_loader)
-                wandb.log({"val/val_acc": val_acc, "training_time_s": time.time() - t0}, step=step)
+                elapsed = time.time() - t0
+                csv_rows.append({
+                    "framework": FRAMEWORK, "task": task_cfg["name"],
+                    "run": run_number, "step": step,
+                    "val_acc": val_acc, "wall_time_s": elapsed,
+                })
                 pbar.set_postfix(val_acc=f"{val_acc:.4f}", best=f"{best_val_acc:.4f}")
 
                 if val_acc > best_val_acc:
@@ -211,16 +199,10 @@ def run(cfg, task_cfg, batch_size, run_number, device):
                 if no_improve >= cfg["patience"]:
                     print(f"Early stop at step {step}")
                     break
-                
-            with torch.no_grad():
-                logits = model.forward_eval(x_batch)
-            ce_loss   = float(F.cross_entropy(logits, y_batch))
-            train_acc = float((logits.argmax(dim=-1) == y_batch).float().mean())
-            wandb.log({"train/loss": ce_loss, "train/train_acc": train_acc}, step=step)
 
             pbar.update(1)
             step += 1
-            
+
             if no_improve >= cfg["patience"]:
                 break
 
@@ -230,8 +212,16 @@ def run(cfg, task_cfg, batch_size, run_number, device):
 
     test_acc = eval_acc(test_loader)
     print(f"Test Acc: {test_acc:.4f}  Time: {total_time:.1f}s")
-    wandb.log({"test/test_acc": test_acc, "total_training_time_s": total_time}, step=step)
-    wandb.finish()
+    csv_rows.append({
+        "framework": FRAMEWORK, "task": task_cfg["name"],
+        "run": run_number, "step": step,
+        "val_acc": test_acc, "wall_time_s": total_time,
+    })
+
+    # Write / append CSV
+    df = pd.DataFrame(csv_rows)
+    df.to_csv(csv_path, mode="a", header=not os.path.exists(csv_path), index=False)
+    print(f"Results appended to {csv_path}")
 
 
 if __name__ == "__main__":

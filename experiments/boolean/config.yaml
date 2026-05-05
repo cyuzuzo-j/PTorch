@@ -5,33 +5,59 @@
 # ── Experiment identity ───────────────────────────
 experiment_name: xor_benchmark
 random_seed: 42
-max_steps: 20000000
 num_runs: 1
-eval_every: 1
-patience: 100000
 
-# ── Batch sizes to sweep ─────────────────────────
+# ── Training ──────────────────────────────────────
+max_steps: 20_000
+eval_every: 1
+patience: 100
+
+# ── Data ──────────────────────────────────────────
+xor_bits: 2
 batch_sizes: [4]
 
-# ── Tasks ────────────────────────────────────────
+# ── Network architecture ─────────────────────────
 tasks:
   - name: XOR
     in_features: 2
     classes: 1
     hidden: [6]
 
-# ── Optimizers per framework ──────────────────────
-pjax_optimizer: CyclicProjections
-pjax_optimizer_kwargs:
-  steps_per_update: 20
+# ── Activation functions to sweep ────────────────
+# Each entry maps to a class in ptorch.nn.modules.
+# The benchmark will run every (task × batch_size × activation × run) combo.
+#
+# Available activations:
+#   - LeakyReLU   (params: negative_slope)
+#   - ReLU        (params: none)
+#   - Step        (params: none)
+#   - GappedStep  (params: delta)
+#
+activations:
+  - name: LeakyReLU
+    params:
+      negative_slope: 0.1
+  # Uncomment to sweep over more activations:
+  # - name: ReLU
+  #   params: {}
+  # - name: Step
+  #   params: {}
+  - name: GappedStep
+    params:
+      delta: 2.0
 
-pjax_orr_optimizer: DouglasRachford
-pjax_orr_optimizer_kwargs:
-  steps_per_update: 20
-
+# ── Optimizer ─────────────────────────────────────
+# Available: AlternatingProjections, ProjectionSGD,
+#            ProjectionAdam, ProjectionAdagrad,
+#            ProjectionAdadelta, ProjectionMuon
 ptorch_optimizer: ProjectionMuon
-ptorch_optimizer_kwargs: {lr: 0.001}
+ptorch_optimizer_kwargs:
+  lr: 0.001
 
-torch_optimizer: Adam
-torch_optimizer_kwargs:
-  lr: 0.05
+# ── Layer defaults ────────────────────────────────
+# These are forwarded to every Linear / LinearFrozen layer.
+layer_defaults:
+  bias: false
+  g: 1.0
+  alpha: 1.0
+  num_iters: 10
