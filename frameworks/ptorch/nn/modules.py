@@ -36,18 +36,15 @@ class Linear(ProjectionModule):
         super().__init__(outputs=1)
         self.in_features = in_features
         self.out_features = out_features
-        self.alpha = alpha
-        self.g = g
+        self.alpha = alpha*config.projection_alpha
+        self.g = g*config.projection_g
         self.omega = omega
         self.num_iters = int(num_iters)
         self.use_bias = bias
-        self.residual = residual
-        self.dtp = dtp
         self.norm = norm
         self.proj_cache: dict = {}
         self.use_cache = use_cache
 
-        # Separate parameters to ensure optimizers (e.g., AdamW) can exclude bias from weight decay
         self.weight = nn.Parameter(torch.empty(out_features, in_features))
         if self.use_bias:
             self.bias = nn.Parameter(torch.zeros(1, out_features))
@@ -56,19 +53,8 @@ class Linear(ProjectionModule):
 
         # 1. Correct Initialization Variance:
         # Now matches nn.Linear shape (out_features, in_features) natively
-
-        nn.init.kaiming_normal_(self.weight, a=0.1, mode='fan_in', nonlinearity='leaky_relu')
+        nn.init.kaiming_normal_(self.weight, mode='fan_in', nonlinearity='leaky_relu')
         
-        # 2. Residual Identity mapping
-        if self.residual:
-            with torch.no_grad():
-                identity = torch.eye(
-                    out_features, in_features, 
-                    device=self.weight.device, 
-                    dtype=self.weight.dtype
-                )
-                self.weight.copy_(identity - self.weight)
-
     def forward(self, input, norm=None):
         norm_type = norm if norm is not None else self.norm
 
@@ -88,45 +74,19 @@ class Linear(ProjectionModule):
             projected_input = F.pad(input, (0, 1), value=1.0)
             weight_matrix = torch.cat([weight_matrix, self.bias], dim=0)
 
-        # Mathematically Correct Residual Padding
-        if self.residual:
-            in_dim = projected_input.shape[-1]
-            out_dim = weight_matrix.shape[-1]
-            padded_dim = max(in_dim, out_dim)
-
-            if padded_dim > in_dim:
-                projected_input = F.pad(projected_input, (0, padded_dim - in_dim), value=0.0)
-
-            if padded_dim != in_dim or padded_dim != out_dim:
-                padded_weight = weight_matrix.new_zeros((padded_dim, padded_dim))
-                padded_weight[:in_dim, :out_dim] = weight_matrix
-                weight_matrix = padded_weight
-
         # Dispatch to the correct projection function
         if norm_type == 'linf':
             output = MatMulProjectionLinf.apply(
                 projected_input, weight_matrix, self.num_iters,
-                self.g, self.omega, # Aligned with LinearLinf (ignores config.projection_g)
-                self.proj_cache, False, self.residual,
+                self.g, self.omega,
+                self.proj_cache,
             )
-        elif self.dtp:
-            output = MatMulProjectionDTP.apply(
-                projected_input, weight_matrix, self.num_iters,
-                self.alpha * config.projection_alpha,
-                self.g * config.projection_g, self.omega,
-                self.proj_cache, False, self.residual,
-            )                
         else:
             output = MatMulProjection.apply(
                 projected_input, weight_matrix, self.num_iters,
-                self.alpha * config.projection_alpha,
-                self.g * config.projection_g, self.omega,
-                self.proj_cache, False, self.residual, self.projection_forward_cache)
-            
-
-        # Slice back to correct output dimension if padding occurred
-        if self.residual:
-            return output[..., :self.out_features]
+                self.alpha ,
+                self.g, self.omega,
+                self.proj_cache, False, self.projection_forward_cache)
             
         return output
         

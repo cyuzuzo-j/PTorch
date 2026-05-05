@@ -15,33 +15,29 @@ ptorch_norm_sweep: [2]  # restricted to linf as per paper
 batch_sizes: [32]
 
 # Number of backward passes (cyclic projections) per batch
-K: 10
+K: 1
 # ── Tasks (comment out to disable) ───────────────
 tasks:
-
 
   - name: MNIST_1L
     dataset: MNIST
     in_features: 784
     classes: 10
-    hidden: [512, 512]
+    hidden: [512]
 
 
 # ── Optimizers per framework ──────────────────────
-# pjax (new) — optim_static or optim classes
-pjax_optimizer: CyclicProjections  # AlternatingProjections
-pjax_optimizer_kwargs:
-  steps_per_update: 50
 
-# pjax_orr (original) — optim classes
+
+# pjax (original) — optim classes
 pjax_orr_optimizer: DouglasRachford  # AlternatingProjections | AlternatingReflections | DouglasRachford | DifferenceMap | CyclicProjections | CyclicDouglasRachford
 pjax_orr_optimizer_kwargs:
   steps_per_update: 50
 
 # ptorch — ptorch.optim_static classes
 ptorch_optimizer: AlternatingProjections  # AlternatingProjections | AlternatingProjectionsMomentum | ProjectionSGD | ProjectionAdam | ProjectionAdagrad | ProjectionAdadelta
-ptorch_optimizer_kwargs: {lr: 1.0}
-ptorch_loss_projection: HardMarginProjection  # CrossEntropyProjection | HardMarginProjection | ProximalHingeMargin | SmoothSoftMargin
+ptorch_optimizer_kwargs: {lr: 1.à}
+ptorch_loss_projection: HardMarginProjection  # CrossEntropyProjection | HardMarginProjection | ProximalHingeMargin
 
 # torch — any torch.optim class
 torch_optimizer: Adam           # Adam | SGD | AdamW | ...

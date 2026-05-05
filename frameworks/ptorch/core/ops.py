@@ -79,48 +79,10 @@ def process_activation_target(A_det, A_proj):
 
     g_muon = zeropower_via_polarexpress(g)
 
-    if config.muon_activations_scale:
-        scale = g.norm() / (g_muon.norm() + 1e-8)
-        g_muon = g_muon * scale
-
     A_proj_new = A_2d - config.muon_activations_lr * g_muon
-
-    if config.muon_activations_norm_preserve:
-        row_norm_orig = A_2d.norm(dim=-1, keepdim=True).clamp(min=1e-8)
-        row_norm_new = A_proj_new.norm(dim=-1, keepdim=True).clamp(min=1e-8)
-        A_proj_new = A_proj_new * (row_norm_orig / row_norm_new)
 
     return A_proj_new.reshape(orig_shape)
 
-
-@torch.compile()
-def process_weight_target(B_det, B_proj):
-    if config.muon_weights:
-        if B_det.numel() == 0:
-            return B_proj
-
-        is_1d = B_det.ndim == 1
-        if is_1d:
-            B_det = B_det.unsqueeze(0)
-            B_proj = B_proj.unsqueeze(0)
-
-        orig_shape = B_det.shape
-        B_2d = B_det.reshape(-1, orig_shape[-1])
-        B_proj_2d = B_proj.reshape(-1, orig_shape[-1])
-        g = B_2d - B_proj_2d
-
-        g_muon = zeropower_via_polarexpress(g)
-
-        if config.muon_weights_scale:
-            scale = g.norm() / (g_muon.norm() + 1e-8)
-            g_muon = g_muon * scale
-
-        B_new = B_2d - config.muon_weights_lr * g_muon
-        result = B_new.reshape(orig_shape)
-        if is_1d:
-            result = result.squeeze(0)
-        return result
-    return B_proj
 
 
 def compute_weight_target_frozen_a(A, B, Z_target_scaled, g=1.0, omega=1.0, residual=False):
@@ -148,29 +110,10 @@ def compute_weight_target_frozen_a(A, B, Z_target_scaled, g=1.0, omega=1.0, resi
         return I_B - B_eff_new
     return B_eff_new
 
-
-class AverageGradient(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, x, num_paths=2):
-        ctx.num_paths = num_paths
-        
-        # .clone() is critical here. It creates a distinct new node in the 
-        # computational graph to accumulate the summed gradients from the split.
-        return x.clone()
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        # grad_output is the sum of the gradients from all paths.
-        # We divide it to get the average.
-        grad_input = grad_output / ctx.num_paths
-        
-        # Return a gradient for every input to forward().
-        # num_paths is an int, so it requires no gradient (None).
-        return grad_input, None
         
 
 @torch.compile()
-def matmul_proj_linf(A, B, Z, eps_init=None, g=1.0, omega=1.0, num_steps=5, residual=False):
+def matmul_proj_linf(A, B, Z, eps_init=None, g=1.0, omega=1.0, num_steps=5):
     """
     Exact independent bilinear projection for A @ B = Z using the L_infinity (Chebyshev) norm.
     
@@ -185,15 +128,8 @@ def matmul_proj_linf(A, B, Z, eps_init=None, g=1.0, omega=1.0, num_steps=5, resi
     M = A.size(-2)
     N = B.size(-1)
 
-    # Apply isomorphism transformation for residual constraint
-    if residual:
-        I = torch.eye(B.size(-2), B.size(-1), device=B.device, dtype=B.dtype)
-        B_eff = I - B
-    else:
-        B_eff = B
-
     # 1. Base pairwise projection
-    P = A @ B_eff  # (..., M, N)
+    P = A @ B  # (..., M, N)
     Z_target = Z * omega
     
     # Determine the direction of projection for each (m, n) pair
@@ -211,7 +147,7 @@ def matmul_proj_linf(A, B, Z, eps_init=None, g=1.0, omega=1.0, num_steps=5, resi
     # 2. Precompute coordinate rotations (M, 1, K) and (1, N, K) 
     # Expanded implicitly to (M, N, K) during fused operations
     A_ext = A.unsqueeze(-1)       # (..., M, K, 1)
-    B_ext = B_eff.unsqueeze(-3)   # (..., 1, K, N)
+    B_ext = B.unsqueeze(-3)   # (..., 1, K, N)
     S_ext = S.unsqueeze(-2)       # (..., M, 1, N)
     
     U_sum = A_ext + B_ext
@@ -287,16 +223,10 @@ def matmul_proj_linf(A, B, Z, eps_init=None, g=1.0, omega=1.0, num_steps=5, resi
     
     # Average the independent point-wise proposals
     A_proj = A + dA.mean(dim=-1)
-    B_eff_proj = B_eff + dB.mean(dim=-3)
+    B_proj = B + dB.mean(dim=-3)
     
     Z_proj = Z - S * (eps / (g * omega))
-    
-    # Revert isomorphism transformation to get the actual B_proj
-    if residual:
-        B_proj = I - B_eff_proj
-    else:
-        B_proj = B_eff_proj
-        
+            
     return A_proj, B_proj, Z_proj, eps.detach()
 
 
@@ -307,7 +237,7 @@ class MatMulProjectionLinf(torch.autograd.Function):
     subject to A_{new} @ B_{new} = Z_{new} (or A_{new} - A_{new} @ B_{new} = Z_{new} if residual)
     """
     @staticmethod
-    def forward(ctx, A, B, num_steps, g, omega, proj_cache=None, pairwise=False, residual=True):
+    def forward(ctx, A, B, num_steps, g, omega, proj_cache=None):
         ctx.save_for_backward(A, B)
         ctx.g = g
         ctx.num_steps = num_steps
@@ -359,31 +289,21 @@ class MatMulProjectionLinf(torch.autograd.Function):
             if not ctx.pairwise and ctx.proj_cache is not None:
                 ctx.proj_cache['eps'] = eps_new
 
-        # Note: the alpha scalar weighting is intentionally removed for L_inf
         return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None        
 
 @torch.compile()
 def matmul_proj(A, B, Z, t_init=None, alpha=1.0, g=1.0, omega=1.0, num_steps=1, residual=False):
     """
-    Exact independent bilinear projection for A @ B = Z (or A - A @ B = Z if residual=True).
-    
-    Analytically optimized to avoid O(M*N*K) memory expansions. 
-    Pointwise Newton method runs in O(M*N) with numerical safeguards for mixed precision.
+    Exact bilinear projection for A @ B = Z (or A - A @ B = Z if residual=True).
     """
     M = A.size(-2)
     N = B.size(-1)
 
-    # Apply isomorphism transformation for residual constraint
-    if residual:
-        I = torch.eye(B.size(-2), B.size(-1), device=B.device, dtype=B.dtype)
-        B_eff = I - B
-    else:
-        B_eff = B
 
     # 1. Compute pairwise operations in O(M*N) without 3D expansion
-    p = A @ B_eff  # (..., M, N)
+    p = A @ B # (..., M, N)
     qa = (A * A).sum(dim=-1, keepdim=True)  # (..., M, 1)
-    qb = (B_eff * B_eff).sum(dim=-2, keepdim=True)  # (..., 1, N)
+    qb = (B * B).sum(dim=-2, keepdim=True)  # (..., 1, N)
     q_eff = qa + alpha * qb  # (..., M, N)
 
     # 2. Caching logic for t
@@ -437,20 +357,14 @@ def matmul_proj(A, B, Z, t_init=None, alpha=1.0, g=1.0, omega=1.0, num_steps=1, 
 
     # A_proj analytically averages over N proposals via Matrix Math
     sum_inv_denom_j = inv_denom.sum(dim=-1, keepdim=True) # (..., M, 1)
-    A_proj = (alpha / N) * (A * sum_inv_denom_j + t_inv_denom @ B_eff.transpose(-2, -1))
+    A_proj = (alpha / N) * (A * sum_inv_denom_j + t_inv_denom @ B.transpose(-2, -1))
 
     # B_proj analytically averages over M proposals via Matrix Math
     sum_inv_denom_i = inv_denom.sum(dim=-2, keepdim=True) # (..., 1, N)
-    B_eff_proj = (1.0 / M) * (alpha * B_eff * sum_inv_denom_i + A.transpose(-2, -1) @ t_inv_denom)
+    B_proj = (1.0 / M) * (alpha * B * sum_inv_denom_i + A.transpose(-2, -1) @ t_inv_denom)
 
     Z_proj = Z - t * target_penalty
-
-    # Revert isomorphism transformation to get the actual B_proj
-    if residual:
-        B_proj = I - B_eff_proj
-    else:
-        B_proj = B_eff_proj
-
+    
     return A_proj, B_proj, Z_proj, t.detach()
 
 # ─── autograd.Function wrappers ───────────────────────────────────────────────
@@ -460,7 +374,7 @@ class MatMulProjection(torch.autograd.Function):
     subject to A_{new} @ B_{new} = Z_{new} (or A_{new} - A_{new} @ B_{new} = Z_{new} if residual)
     """
     @staticmethod
-    def forward(ctx, A, B, num_steps, alpha, g, omega, proj_cache=None, pairwise=False, residual=True, forward_cache=None):
+    def forward(ctx, A, B, num_steps, alpha, g, omega, proj_cache=None, pairwise=False, forward_cache=None):
         ctx.save_for_backward(A, B)
         ctx.alpha = alpha
         ctx.g = g
@@ -469,12 +383,7 @@ class MatMulProjection(torch.autograd.Function):
         ctx.forward_cache = forward_cache  # Store reference to the mutable dictionary for forward pass caching
         ctx.omega = omega
         ctx.pairwise = pairwise
-        ctx.residual = residual
-        
-        if residual:
-            return (A - A @ B) / omega
-        else:
-            return (A @ B) / omega
+        return (A @ B) / omega
 
     @staticmethod
     def backward(ctx, Z_target):
@@ -499,14 +408,14 @@ class MatMulProjection(torch.autograd.Function):
             
             A_proj_2d, B_proj_2d, Z_proj_2d, t_new = matmul_proj(
                 A_2d, B_2d, Z_2d, t_init=t_init_2d, alpha=ctx.alpha, g=ctx.g, 
-                omega=ctx.omega, num_steps=ctx.num_steps, residual=ctx.residual
+                omega=ctx.omega, num_steps=ctx.num_steps
             )
             
             A_proj = A_proj_2d.reshape(A_det.shape)
             if config.frozen_a_weights:
                 B_proj_2d = compute_weight_target_frozen_a(
-                    A_2d, B_2d, Z_2d, g=ctx.g, omega=ctx.omega, residual=ctx.residual)
-            B_proj_2d = process_weight_target(B_2d, B_proj_2d)
+                    A_2d, B_2d, Z_2d, g=ctx.g, omega=ctx.omega)
+            B_proj_2d = B_proj_2d
             B_proj = B_proj_2d.reshape(B_det.shape[-2], B_det.shape[-1]).expand(B_det.shape)
             Z_proj = Z_proj_2d.reshape(Z_det.shape)
 
@@ -518,7 +427,7 @@ class MatMulProjection(torch.autograd.Function):
             A_proj, B_proj, Z_proj, t_new = matmul_proj(
                 A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
                 t_init=t_init, alpha=ctx.alpha, g=ctx.g, omega=ctx.omega,
-                num_steps=ctx.num_steps, residual=ctx.residual
+                num_steps=ctx.num_steps
             )
 
             # Update the cache for the next iteration if not pairwise
@@ -530,8 +439,8 @@ class MatMulProjection(torch.autograd.Function):
                 Z_2d_fb = Z_det.contiguous().clone() * ctx.omega
                 B_proj = compute_weight_target_frozen_a(
                     A_2d_fb, B_det.contiguous().clone(), Z_2d_fb,
-                    g=ctx.g, omega=ctx.omega, residual=ctx.residual)
-            B_proj = process_weight_target(B_det, B_proj)
+                    g=ctx.g, omega=ctx.omega)
+            B_proj = B_proj
 
         if ctx.forward_cache is not None:
             ctx.forward_cache[0] = Z_proj
@@ -615,7 +524,7 @@ class MatMulProjectionFrozenA(torch.autograd.Function):
         if ctx.forward_cache is not None:
             ctx.forward_cache[0] = Z_proj
 
-        return process_activation_target(A_det, A_proj), process_weight_target(B_det, B_proj), None, None, None, None
+        return process_activation_target(A_det, A_proj),  B_proj, None, None, None, None
 
 
 class MSEProjection(torch.autograd.Function):
@@ -638,7 +547,6 @@ class CrossEntropyProjection(torch.autograd.Function):
     """
     prox_{lambda * l_CE(., y)}(x_0) = arg min_{x} (lambda * l_CE(x, y) + 1/2 * ||x - x_0||^2)
     """
-    
     @staticmethod
     def forward(ctx, logits, labels, num_steps=5, lmbda = 1.0):
         ctx.save_for_backward(logits, labels)
@@ -656,14 +564,12 @@ class CrossEntropyProjection(torch.autograd.Function):
         for _ in range(steps):
             x = x + lmbda * (labels - F.softmax(x, dim=-1))
 
-        #print(f"DEBUG CrossEntropyProjection.backward returning x of shape {x.shape}")
         return x, labels
 
 class HardMarginProjection(torch.autograd.Function):
     """
     Your original implementation: The 'Strict Teacher'.
     Hard-clips logits to the boundary immediately. 
-    (Equivalent to the proximal operator of an indicator/constraint function).
     """
     @staticmethod
     def forward(ctx, logits, labels):
@@ -680,7 +586,6 @@ class HardMarginProjection(torch.autograd.Function):
         new_logits[cond_0] = 0.0
         new_logits[cond_1] = labels[cond_1]
 
-        # Note: returning None for labels since we don't need gradients for targets
         return new_logits, None 
 
 
@@ -706,42 +611,10 @@ class ProximalHingeMargin(torch.autograd.Function):
 
         new_logits = logits.clone()
         
-        # Move towards 0 by at most lambda, but don't overshoot past 0
         new_logits[cond_0] = torch.maximum(logits[cond_0] - lmbda, torch.zeros_like(logits[cond_0]))
         
         # Move towards the label by at most lambda, but don't overshoot the label
         new_logits[cond_1] = torch.minimum(logits[cond_1] + lmbda, labels[cond_1])
-
-        return new_logits, None, None
-
-
-class SmoothSoftMargin(torch.autograd.Function):
-    """
-    Soft Margin Variant 2: The 'Continuous/Logistic' pull.
-    Similar to Cross-Entropy from the paper. It never fully 'gives up', 
-    and applies a smooth, continuous force pulling the logit to the correct side.
-    """
-    @staticmethod
-    def forward(ctx, logits, labels, step_size=1.0):
-        ctx.save_for_backward(logits, labels)
-        ctx.step_size = step_size
-        return logits
-
-    @staticmethod
-    def backward(ctx, z_target):
-        logits, labels = ctx.saved_tensors
-        step_size = ctx.step_size
-
-        # Convert labels to standard SVM/Logistic format: -1 for negative, 1 for positive
-        y = torch.where(labels > 0, 1.0, -1.0)
-
-        # Gradient of the smooth soft margin loss: log(1 + exp(-y * logits))
-        # grad = -y / (1 + exp(y * logits))
-        grad = -y / (1.0 + torch.exp(y * logits))
-
-        # Because your custom autograd expects the "projected state" rather than 
-        # the raw gradient, we apply the gradient step directly to the logits here.
-        new_logits = logits - (step_size * grad)
 
         return new_logits, None, None
 
@@ -757,7 +630,6 @@ class Conversion(torch.autograd.Function):
         (input,) = ctx.saved_tensors
         # Convert projection target into gradient: push input toward target
         grad = (input - z_target)
-        #grad = grad/ torch.norm(grad)
         return grad
 
 class ReLULInfinityProjection(torch.autograd.Function):
@@ -852,67 +724,6 @@ class LeakyReLUProjection(torch.autograd.Function):
         return process_activation_target(x, result), None
 
 
-class SelectTokenProjection(torch.autograd.Function):
-    """
-    Projection-aware token selection (e.g. CLS token extraction).
-    Forward: returns x[:, index].
-    Backward: places the target at position `index` and keeps all other
-    positions at their original values (identity), so upstream projections
-    don't get a zero-target for non-selected positions.
-    """
-    @staticmethod
-    def forward(ctx, x, index):
-        ctx.save_for_backward(x)
-        ctx.index = index
-        return x[:, index]           # (B, emb_dim)
-
-    @staticmethod
-    def backward(ctx, y_target):
-        x, = ctx.saved_tensors
-        # Start from the original values (identity for non-selected positions)
-        x_star = x.clone()
-        # Only the selected position gets the projection target
-        x_star[:, ctx.index] = y_target
-        return x_star, None          # None for `index`
-    
-class MeanProjection(torch.autograd.Function):
-    """
-    Projects inputs onto the mean constraint graph.
-    https://gemini.google.com/share/53aeb9b49de3
-    """
-    @staticmethod
-    def forward(ctx, x, dim=-1):
-        # Note: Changed *inputs to x as torch.mean operates on a single tensor.
-        ctx.save_for_backward(x)
-        ctx.dim = dim
-        return torch.mean(x, dim=dim)
-    
-    @staticmethod
-    def backward(ctx, z_target):
-        x, = ctx.saved_tensors
-        dim = ctx.dim
-        n = x.size(dim)
-        
-        # Calculate the mean of the original input
-        x_mean = torch.mean(x, dim=dim, keepdim=True)
-        
-        # Align z_target dimensions for broadcasting if the forward pass reduced the dimension
-        if z_target.dim() < x.dim():
-            z_target_expanded = z_target.unsqueeze(dim)
-        else:
-            z_target_expanded = z_target
-            
-        # Compute lambda: (y_0 - mean(x_0)) / (n + 1)
-        lambda_val = (z_target_expanded - x_mean) / (n + 1)
-        
-        # Projected input: x_0 + lambda * 1
-        projected_x = x + lambda_val
-        
-        # Return the projected tensor. 
-        # We must return None for the 'dim' argument since it does not require a gradient.
-        return projected_x, None
-
-
 class StepProjection(torch.autograd.Function):
     """
     PyTorch equivalent of PJAX step activation projection.
@@ -933,11 +744,10 @@ class StepProjection(torch.autograd.Function):
         
         s = sum(inputs)
         
-        # Midpoint adjustment: move inputs toward the target output
-        # (s - output) / (len(inputs) + 1)
         mid = (s - z_target) / (n + 1)
         
         return projected_inputs
+
 class QuantizeReLUProjection(torch.autograd.Function):
     """
     Quantized ReLU with Projection-aware gradients.
@@ -989,36 +799,6 @@ class QuantizeReLUProjection(torch.autograd.Function):
 
         # Assuming process_activation_target handles the STE or projection update
         return process_activation_target(x, best_x), None
-
-class GapProjection(torch.autograd.Function):
-    """
-    Projection-aware Gap activation.
-
-    Forward: identity (pass-through).
-    Backward: projects input x onto the feasible set |x| >= delta/2,
-    enforcing a gap of width `delta` in output space centred at zero.
-    Values inside the gap are snapped to the nearest boundary (+delta/2
-    or -delta/2), forcing the network to commit.
-    """
-    @staticmethod
-    def forward(ctx, x, delta=2.0):
-        ctx.save_for_backward(x)
-        ctx.delta = delta
-        return x
-
-    @staticmethod
-    def backward(ctx, z_target):
-        x, = ctx.saved_tensors
-        half = ctx.delta / 2.0
-
-        # Project: snap values inside the gap to the nearest boundary
-        result = torch.where(
-            z_target >= 0,
-            torch.clamp(z_target, min=half),
-            torch.clamp(z_target, max=-half),
-        )
-
-        return process_activation_target(x, result), None
 
 class GappedStepProjection(torch.autograd.Function):
     """

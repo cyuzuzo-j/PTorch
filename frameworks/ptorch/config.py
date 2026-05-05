@@ -23,24 +23,15 @@ class Config:
 
     # ---- global projection --------------------------------------------------
     use_projections: bool = True
-    projection_norm: str = "l2"
     projection_alpha: float = 1.0
     projection_g: float = 1.0
-    projection_p: Optional[float] = None
 
     # ---- muon on activations ------------------------------------------------
     muon_activations: bool = True
     muon_activations_lr: float = 0.5
-    muon_activations_scale: bool = False
-    muon_activations_norm_preserve: bool = False
-
-    # ---- muon on weights ----------------------------------------------------
-    muon_weights: bool = False
-    muon_weights_lr: float = 0.02
-    muon_weights_scale: bool = False
-
+    
     # ---- frozen-A weight solve ----------------------------------------------
-    frozen_a_weights: bool = True
+    frozen_a_weights: bool = False
     frozen_a_g: float = 1.0
 
     _lock: threading.Lock = field(
@@ -67,20 +58,6 @@ class Config:
             for f in fields(self)
             if not f.name.startswith("_")
         }
-
-    @contextlib.contextmanager
-    def projections(self, enabled: bool, norm: Optional[str] = None):
-        prev_enabled = self.use_projections
-        prev_norm = self.projection_norm
-        self.update("use_projections", enabled)
-        if norm is not None:
-            self.update("projection_norm", norm.lower())
-        try:
-            yield
-        finally:
-            self.update("use_projections", prev_enabled)
-            if norm is not None:
-                self.update("projection_norm", prev_norm)
 
 
 _PUBLIC_KEYS: frozenset = frozenset(
