@@ -9,7 +9,7 @@ num_runs: 1
 
 # ── Training ──────────────────────────────────────
 max_steps: 20_000
-eval_every: 1
+eval_every: 10
 patience: 100
 
 # ── Data ──────────────────────────────────────────
@@ -21,7 +21,7 @@ tasks:
   - name: XOR
     in_features: 2
     classes: 1
-    hidden: [6]
+    hidden: [32]
 
 # ── Activation functions to sweep ────────────────
 # Each entry maps to a class in ptorch.nn.modules.
@@ -34,25 +34,20 @@ tasks:
 #   - GappedStep  (params: delta)
 #
 activations:
-  - name: LeakyReLU
-    params:
-      negative_slope: 0.1
+  - name: Step
   # Uncomment to sweep over more activations:
   # - name: ReLU
   #   params: {}
   # - name: Step
   #   params: {}
-  - name: GappedStep
-    params:
-      delta: 2.0
 
 # ── Optimizer ─────────────────────────────────────
 # Available: ProjectionSGD,
 #            ProjectionAdam, ProjectionAdagrad,
 #            ProjectionAdadelta, ProjectionMuon
-ptorch_optimizer: ProjectionMuon
+ptorch_optimizer: ProjectionSGD
 ptorch_optimizer_kwargs:
-  lr: 0.001
+  lr: 1.0
 
 # ── Layer defaults ────────────────────────────────
 # These are forwarded to every Linear / LinearFrozen layer.

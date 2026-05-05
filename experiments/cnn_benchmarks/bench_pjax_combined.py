@@ -12,10 +12,10 @@ import jax
 import jax.numpy as jnp
 import importlib
 import argparse
+import pandas as pd
 import tqdm, time
-import wandb
 
-from experiments.cnn_benchmarks.models import CNN_PJAX
+from experiments.cnn_benchmarks.models import SimpleCNN_PJAX
 
 CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 
@@ -49,7 +49,8 @@ def load_impl(name):
     }
 
 
-def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
+def run(cfg, task_cfg, batch_size, run_number, key, impl_name,
+        norm='l2', opt_name=None, opt_kwargs=None, loss_name='CrossEntropy', use_muon_activations=False):
     impl = load_impl(impl_name)
     optim = impl['optim']
     optim_static = impl['optim_static']
@@ -79,28 +80,31 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
     model_key, _ = jax.random.split(key)
     
     # Init CNN properly
-    model = CNN_PJAX(classes=task_cfg["classes"], in_channels=task_cfg.get("in_channels", 3), conv_widths=cfg.get("conv_widths"))
-    params = model.init(model_key)
+    model = SimpleCNN_PJAX(
+        classes=task_cfg["classes"], 
+        in_channels=task_cfg.get("in_channels", 3)
+    )
+    
+    # Dummy forward to initialize params in pjax
+    dummy_res = 32 if task_cfg.get("in_channels", 3) == 3 else 28
+    dummy_x = jnp.zeros((1, dummy_res, dummy_res, task_cfg.get("in_channels", 3)))
+    params = model.init(model_key, dummy_x)
 
-    # Pick optimizer name from config, try both possible key names
-    opt_name = cfg.get(f"{impl_name}_optimizer") or cfg.get("pjax_optimizer") or cfg.get("pjax_orr_optimizer")
-    opt_kwargs = cfg.get(f"{impl_name}_optimizer_kwargs") or cfg.get("pjax_optimizer_kwargs") or cfg.get("pjax_orr_optimizer_kwargs") or {}
+    # Pick optimizer name from config, try both possible key names if not passed
+    if opt_name is None:
+        opt_name = cfg.get(f"{impl_name}_optimizer") or cfg.get("pjax_optimizer") or cfg.get("pjax_orr_optimizer")
+    if opt_kwargs is None:
+        opt_kwargs = cfg.get(f"{impl_name}_optimizer_kwargs") or cfg.get("pjax_optimizer_kwargs") or cfg.get("pjax_orr_optimizer_kwargs") or {}
+    
     optimizer = OPTIM_MODULES[opt_name](**opt_kwargs)
 
-    run_name = f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}"
-    run = wandb.init(project="pjax", name=run_name)
-    wandb.config.update({
-        "framework": FRAMEWORK,
-        "task": task_cfg["name"],
-        "optimizer": opt_name,
-        **{f"opt_{k}": v for k, v in opt_kwargs.items()},
-        "batch_size": batch_size,
-        "seed": seed,
-        "run_number": run_number,
-        "max_steps": cfg["max_steps"],
-        "eval_every": cfg["eval_every"],
-        "patience": cfg["patience"],
-    })
+    # Build a tag that distinguishes this run in the CSV
+    tag = f"{FRAMEWORK}_norm={norm}_opt={opt_name}_loss={loss_name}_muon={use_muon_activations}"
+
+    results_dir = os.path.join(os.path.dirname(__file__), cfg.get("results_dir", "results"))
+    os.makedirs(results_dir, exist_ok=True)
+    csv_path = os.path.join(results_dir, f"{tag}_{task_cfg['name']}.csv")
+    csv_rows = []
 
     # Fall back cross_entropy implementation if missing
     if cross_entropy is None:
@@ -134,14 +138,26 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
     step = 0
     t0 = time.time()
 
-    with tqdm.tqdm(unit="step") as pbar:
-        while True:
+    with tqdm.tqdm(total=cfg["max_steps"], unit="step", desc=f"{task_cfg['name']} | norm={norm} | {opt_name} | {loss_name}") as pbar:
+        while step < cfg["max_steps"]:
+            # ── Fetch a new batch ─────────────────────────────────────────────
+            x_np, y_np = next(train_iter)
+            params, loss = step_fn(params, jnp.array(x_np), jnp.array(y_np))
+
             if step % cfg["eval_every"] == 0:
                 accs = [eval_fn(params, jnp.array(x), jnp.array(y)) for x, y in val_loader]
                 val_acc = float(jnp.mean(jnp.array(accs)))
-                wandb.log({"val/val_acc": val_acc}, step=step)
-                wandb.log({"training_time_s": time.time() - t0}, step=step)
+                elapsed = time.time() - t0
+                
+                csv_rows.append({
+                    "framework": FRAMEWORK, "task": task_cfg["name"],
+                    "norm": norm, "optimizer": opt_name, "loss": loss_name,
+                    "use_muon_activations": use_muon_activations,
+                    "run": run_number, "step": step,
+                    "val_acc": val_acc, "wall_time_s": elapsed,
+                })
                 pbar.set_postfix(val_acc=f"{val_acc:.4f}", best=f"{best_val_acc:.4f}")
+                
                 if val_acc > best_val_acc:
                     best_val_acc, best_params, best_step = val_acc, params, step
                     no_improve = 0
@@ -151,9 +167,6 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
                     print(f"Early stop at step {step}")
                     break
 
-            x, y   = next(train_iter)
-            params, loss = step_fn(params, jnp.array(x), jnp.array(y))
-            wandb.log({"train/loss": float(loss)}, step=step)
             step += 1
             pbar.update(1)
             if cfg["max_steps"] and step >= cfg["max_steps"]:
@@ -163,30 +176,64 @@ def run(cfg, task_cfg, batch_size, run_number, key, impl_name):
     test_accs  = [eval_fn(best_params, jnp.array(x), jnp.array(y)) for x, y in test_loader]
     final_acc  = float(jnp.mean(jnp.array(test_accs)))
     print(f"Test Acc: {final_acc:.4f}  Time: {total_time:.1f}s")
-    wandb.log({"test/test_acc": final_acc}, step=step)
-    wandb.log({"total_training_time_s": total_time}, step=step)
-    wandb.finish()
+    
+    csv_rows.append({
+        "framework": FRAMEWORK, "task": task_cfg["name"],
+        "norm": norm, "optimizer": opt_name, "loss": loss_name,
+        "use_muon_activations": use_muon_activations,
+        "run": run_number, "step": step,
+        "val_acc": final_acc, "wall_time_s": total_time,
+    })
+
+    # Write / append CSV
+    df = pd.DataFrame(csv_rows)
+    df.to_csv(csv_path, mode="a", header=not os.path.exists(csv_path), index=False)
+    print(f"Results appended to {csv_path}")
+
     return final_acc, best_val_acc, best_step, total_time
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--impl', choices=['pjax', 'pjax_orr'], default=os.environ.get('PJAX_IMPL', 'pjax'))
+    p.add_argument('--impl', choices=['pjax', 'pjax_orr'], default=os.environ.get('PJAX_IMPL', 'pjax_orr'))
+    p.add_argument('--config', default=CFG_PATH, help="Path to YAML config file")
     args = p.parse_args()
-    cfg = yaml.safe_load(open(CFG_PATH))
+    cfg = yaml.safe_load(open(args.config))
     base_key = jax.random.key(cfg["random_seed"])
+    
+    # Calculate total runs
+    num_optimizers = len(cfg.get("optimizers", [{}]))
     all_keys = jax.random.split(base_key,
-        len(cfg["batch_sizes"]) * len(cfg["tasks"]) * cfg["num_runs"])
+        len(cfg["batch_sizes"]) * len(cfg["tasks"]) * cfg["num_runs"] * num_optimizers)
     ki = 0
+
+    # Standardize values for plotting comparison
+    norm = "l2"
+    loss_name = "CrossEntropy"
+    muon_act = False
+
+    # Optimizer sweep fallback
+    impl_key = f"{args.impl}_optimizer"
+    kwargs_key = f"{args.impl}_optimizer_kwargs"
+    optimizers = cfg.get("optimizers", [
+        {"name": cfg.get(impl_key, "DouglasRachford"),
+         "kwargs": cfg.get(kwargs_key, {})}
+    ])
 
     for batch_size in cfg["batch_sizes"]:
         for task_cfg in cfg["tasks"]:
-            print(f"\n{'='*50}\n{args.impl} | {task_cfg['name']} | bs={batch_size}")
-            for run_number in range(1, cfg["num_runs"] + 1):
-                run(cfg, task_cfg, batch_size, run_number, all_keys[ki], args.impl)
-                ki += 1
-                gc.collect()
-                jax.clear_caches()
+            for opt_entry in optimizers:
+                opt_name   = opt_entry["name"]
+                opt_kwargs = opt_entry.get("kwargs", {})
+                header = (f"{args.impl} | {task_cfg['name']} "
+                          f"| norm={norm} | opt={opt_name} | loss={loss_name} | muon={muon_act} | bs={batch_size}")
+                print(f"\n{'='*60}\n{header}")
+                for run_number in range(1, cfg["num_runs"] + 1):
+                    run(cfg, task_cfg, batch_size, run_number, all_keys[ki], args.impl,
+                        norm=norm, opt_name=opt_name, opt_kwargs=opt_kwargs, loss_name=loss_name, use_muon_activations=muon_act)
+                    ki += 1
+                    gc.collect()
+                    jax.clear_caches()
 
 
 if __name__ == '__main__':

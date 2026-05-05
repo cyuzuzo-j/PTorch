@@ -48,6 +48,6 @@ def plot_optimizer_comparison(results_dir: str, output_path: str):
     print(f"Saved {output_path}")
 
 if __name__ == "__main__":
-    results_dir = os.path.join(os.path.dirname(__file__), "results", "optimizer_comparison_torch")
-    output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../images/optimizer_comparison_torch.png"))
+    results_dir = os.path.join(os.path.dirname(__file__), "results", "optimizer_comparison")
+    output_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../images/optimizer_comparison.png"))
     plot_optimizer_comparison(results_dir, output_path)

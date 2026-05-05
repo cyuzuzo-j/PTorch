@@ -14,7 +14,7 @@ class Config:
     """
 
     # ---- cross-entropy constraint -------------------------------------------
-    cross_entropy_num_steps: int = 5
+    cross_entropy_num_steps: int = 2
     cross_entropy_lambda: float = 5.0
 
     # ---- global projection --------------------------------------------------

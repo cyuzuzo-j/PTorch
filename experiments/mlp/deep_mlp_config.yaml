@@ -1,6 +1,6 @@
 experiment_name: deep_mlp
 random_seed: 43
-num_runs: 1
+num_runs: 3
 
 max_steps: 10000
 eval_every: 200
@@ -12,13 +12,16 @@ results_dir: results/deep_mlp
 figures_dir: ../../images/mlp
 
 tasks:
+  - name: MNIST_1L
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [512]
   - name: MNIST_4L
     dataset: MNIST
     in_features: 784
     classes: 10
     hidden: [512, 512, 512, 512]
-
-use_muon_activations: [true, false]
 
 ptorch_optimizer: ProjectionMuon
 ptorch_optimizer_kwargs:

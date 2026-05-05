@@ -25,6 +25,8 @@ import tracemalloc
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 import torch
 import torch.nn as tnn
 import torch.nn.functional as F
@@ -34,8 +36,25 @@ import jax.numpy as jnp
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../frameworks")))
 
-from ptorch.nn.modules import Linear as PLinear, SumReLU
+from ptorch.nn.modules import Linear as PLinear, ReLU
 from ptorch.core.ops import CrossEntropyProjection
+
+# ── Seaborn theme — identical to other plot scripts ──────────────────────────
+sns.set_theme(style="whitegrid", context="paper", font_scale=2.0)
+
+# Pretty display names for the legend
+FRAMEWORK_LABELS = {
+    "ptorch": r"$\mathcal{P}$Torch",
+    "torch":  "Torch",
+    "pjax":   "PJAX",
+}
+
+# Curated palette (viridis-derived) — one color per framework
+FRAMEWORK_COLORS = {
+    r"$\mathcal{P}$Torch": sns.color_palette("viridis", 3)[0],
+    "Torch":               sns.color_palette("viridis", 3)[1],
+    "PJAX":                sns.color_palette("viridis", 3)[2],
+}
 
 # ---------------------------------------------------------------------------
 # Model definitions
@@ -69,8 +88,8 @@ class PtorchMLP(tnn.Module):
         self.hidden_layers = tnn.ModuleList()
         last = in_features
         for _ in range(depth):
-            self.hidden_layers.append(PLinear(last, hidden_dim, residual=False))
-            self.hidden_layers.append(SumReLU())
+            self.hidden_layers.append(PLinear(last, hidden_dim))
+            self.hidden_layers.append(ReLU())
             last = hidden_dim
         self.out = PLinear(last, classes)
 
@@ -281,6 +300,89 @@ def run_isolated(func_name, M, D, N, K):
 
 
 # ---------------------------------------------------------------------------
+# Plotting
+# ---------------------------------------------------------------------------
+
+def plot_memory_results(csv_path: str, output_dir: str):
+    """
+    Produce publication-quality memory benchmark figures from the CSV results.
+
+    Generates two figures:
+      (a) Peak memory vs. hidden width M  (averaged over K, N)
+      (b) Peak memory vs. input features K (averaged over M, N)
+    """
+    df = pd.read_csv(csv_path)
+    if df.empty:
+        print("No data to plot.")
+        return
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Melt wide-format (torch_mb, ptorch_mb, pjax_mb) into long format
+    id_vars = [c for c in df.columns if not c.endswith("_mb")]
+    long = df.melt(id_vars=id_vars, var_name="framework_raw", value_name="Peak Memory (MB)")
+    long["framework_raw"] = long["framework_raw"].str.replace("_mb", "", regex=False)
+    long["Framework"] = long["framework_raw"].map(FRAMEWORK_LABELS).fillna(long["framework_raw"])
+
+    # Drop rows where pjax returned 0 (unavailable)
+    long = long[long["Peak Memory (MB)"] > 0]
+
+    # ── (a) Peak Memory vs. Hidden Width M ───────────────────────────────────
+    fig, ax = plt.subplots(figsize=(7, 5))
+    sns.lineplot(
+        data=long, x="M", y="Peak Memory (MB)",
+        hue="Framework", estimator="mean", errorbar=("ci", 95),
+        palette=FRAMEWORK_COLORS, linewidth=2, ax=ax,
+    )
+    ax.set_xlabel("Hidden Width $M$")
+    ax.set_ylabel("Peak Memory (MB)")
+    ax.set_title("Memory Scaling — Hidden Width")
+    ax.legend(loc="upper left", fontsize=12, frameon=False)
+
+    plt.tight_layout()
+    out_path = os.path.join(output_dir, "memory_vs_hidden_width.png")
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out_path}")
+
+    # ── (b) Peak Memory vs. Input Features K ─────────────────────────────────
+    fig, ax = plt.subplots(figsize=(7, 5))
+    sns.lineplot(
+        data=long, x="K", y="Peak Memory (MB)",
+        hue="Framework", estimator="mean", errorbar=("ci", 95),
+        palette=FRAMEWORK_COLORS, linewidth=2, ax=ax,
+    )
+    ax.set_xlabel("Input Features $K$")
+    ax.set_ylabel("Peak Memory (MB)")
+    ax.set_title("Memory Scaling — Input Features")
+    ax.legend(loc="upper left", fontsize=12, frameon=False)
+
+    plt.tight_layout()
+    out_path = os.path.join(output_dir, "memory_vs_input_features.png")
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out_path}")
+
+    # ── (c) Peak Memory vs. Batch Size N ─────────────────────────────────────
+    fig, ax = plt.subplots(figsize=(7, 5))
+    sns.lineplot(
+        data=long, x="N", y="Peak Memory (MB)",
+        hue="Framework", estimator="mean", errorbar=("ci", 95),
+        palette=FRAMEWORK_COLORS, linewidth=2, ax=ax,
+    )
+    ax.set_xlabel("Batch Size $N$")
+    ax.set_ylabel("Peak Memory (MB)")
+    ax.set_title("Memory Scaling — Batch Size")
+    ax.legend(loc="upper left", fontsize=12, frameon=False)
+
+    plt.tight_layout()
+    out_path = os.path.join(output_dir, "memory_vs_batch_size.png")
+    fig.savefig(out_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out_path}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -288,7 +390,7 @@ def main():
     # Depth = 1 to isolate a single K -> M layer's memory behaviour
     D = 1
     M_vals = [500, 2500, 5000]
-    N_vals = [8, 64, 256]
+    N_vals = [256, 512, 1024]
     K_vals = [500, 2500, 5000]
 
     header = f"{'M (Out)':<8} | {'N (Batch)':<9} | {'K (In)':<8} | {'torch (MB)':<12} | {'ptorch (MB)':<12} | {'pjax (MB)':<12}"
@@ -305,9 +407,14 @@ def main():
                 print(f"{M:<8} | {N:<9} | {K:<8} | {mem['torch']:<12.2f} | {mem['ptorch']:<12.2f} | {mem['pjax']:<12.2f}")
                 results.append({"M": M, "N": N, "K": K, **{f"{fw}_mb": mem[fw] for fw in MEASURE_FNS}})
 
+    csv_path = os.path.join(os.path.dirname(__file__), "memory_benchmark_results.csv")
     df = pd.DataFrame(results)
-    df.to_csv("memory_benchmark_results.csv", index=False)
-    print(f"\nResults saved to memory_benchmark_results.csv")
+    df.to_csv(csv_path, index=False)
+    print(f"\nResults saved to {csv_path}")
+
+    # Generate plots
+    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../images/memory"))
+    plot_memory_results(csv_path, output_dir)
 
 
 if __name__ == "__main__":

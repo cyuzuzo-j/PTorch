@@ -1,8 +1,8 @@
 ##################################################
 ###   Benchmark — torch (PyTorch baseline)    ###
-###   Standard Adam + cross-entropy           ###
+###   CNN architecture                        ###
 ##################################################
-import sys, os
+import sys, os, argparse
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../frameworks')))
 
@@ -10,143 +10,173 @@ import gc
 import yaml
 import torch
 import torch.nn.functional as F
+import pandas as pd
 import tqdm, time
-import wandb
 
-from experiments.cnn_benchmarks.models import CNN_Torch
+from experiments.cnn_benchmarks.models import SimpleCNN_Torch
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 
 FRAMEWORK = "torch"
-CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 
 DATASETS = {"MNIST": MNISTDataModule, "CIFAR10": InfiniteCifarDataModule}
 
-# ── Training ─────────────────────────────────────
-def run(cfg, task_cfg, batch_size, run_number, device):
-    seed = cfg["random_seed"]
-    torch.manual_seed(seed + run_number)
+# ── Training ─────────────────────────────────────────────────────────────────
 
-    dataset_cls = DATASETS[task_cfg["name"]]
+def run(cfg, task_cfg, batch_size, run_number, device,
+        norm='l2', opt_name=None, opt_kwargs=None, loss_name='CrossEntropy', use_muon_activations=False):
+    seed = cfg["random_seed"]
+    run_seed = seed + run_number
+    torch.manual_seed(run_seed)
+
+    dataset_name = task_cfg.get("dataset", task_cfg["name"])
+    dataset_cls = DATASETS[dataset_name]
     
-    if task_cfg["name"] == "CIFAR10":
-        ds = dataset_cls(batch_size=batch_size, data_dir="./dataset", seed=seed)
+    if dataset_name == "CIFAR10":
+        ds = dataset_cls(batch_size=batch_size, data_dir="./dataset", seed=run_seed)
     else:
-        ds = dataset_cls(batch_size=batch_size, seed=seed)
+        ds = dataset_cls(batch_size=batch_size, seed=run_seed)
         
     train_iter = ds.train_iterator()
     val_loader  = ds.val_dataloader()
     test_loader = ds.test_dataloader()
 
-    model = CNN_Torch(classes=task_cfg["classes"], in_channels=task_cfg.get("in_channels", 3), conv_widths=cfg.get("conv_widths")).to(device)
-    
-    opt_name   = cfg["torch_optimizer"]
-    opt_kwargs = cfg.get("torch_optimizer_kwargs", {})
+    model = SimpleCNN_Torch(
+        classes=task_cfg["classes"],
+        in_channels=task_cfg.get("in_channels", 3)
+    ).to(device)
+
+    opt_name   = opt_name   or cfg["torch_optimizer"]
+    opt_kwargs = opt_kwargs if opt_kwargs is not None else cfg.get("torch_optimizer_kwargs", {})
     optimizer  = getattr(torch.optim, opt_name)(model.parameters(), **opt_kwargs)
 
-    run_name = f"{cfg.get('experiment_name', 'run')}_{FRAMEWORK}_{task_cfg['name']}_bs{batch_size}_run{run_number}_{opt_name}"
-    run = wandb.init(project="pjax", name=run_name)
-    wandb.config.update({
-        "framework": FRAMEWORK,
-        "task": task_cfg["name"],
-        "optimizer": opt_name,
-        **{f"opt_{k}": v for k, v in opt_kwargs.items()},
-        "batch_size": batch_size,
-        "seed": seed,
-        "run_number": run_number,
-        "max_steps": cfg["max_steps"],
-        "eval_every": cfg["eval_every"],
-        "patience": cfg["patience"],
-    })
+    # Build a tag that distinguishes this run in the CSV
+    tag = f"{FRAMEWORK}_norm={norm}_opt={opt_name}_loss={loss_name}_muon={use_muon_activations}"
 
-    def step_fn(x, y):
-        optimizer.zero_grad()
-        loss = F.cross_entropy(model(x), y.long())
-        loss.backward()
-        optimizer.step()
-        return loss
+    results_dir = os.path.join(os.path.dirname(__file__), cfg.get("results_dir", "results"))
+    os.makedirs(results_dir, exist_ok=True)
+    csv_path = os.path.join(results_dir, f"{tag}_{task_cfg['name']}.csv")
+    csv_rows = []
 
-    def eval_fn(x, y):
+    def eval_acc(loader):
+        model.eval()
+        accs = []
         with torch.no_grad():
-            return (model(x).argmax(dim=-1) == y).float().mean()
+            for xv, yv in loader:
+                xv = torch.tensor(xv, dtype=torch.float32, device=device)
+                if xv.shape[-1] in [1, 3]:  
+                    xv = xv.permute(0, 3, 1, 2)
+                yv = torch.tensor(yv, dtype=torch.long,  device=device)
+                logits = model(xv)
+                accs.append((logits.argmax(dim=-1) == yv).float().mean())
+        model.train()
+        return float(torch.stack(accs).mean())
 
     best_val_acc, best_state, best_step = 0.0, None, 0
     no_improve = 0
-    step = 0
     t0 = time.time()
 
-    with tqdm.tqdm(unit="step") as pbar:
-        while True:
+    step = 0
+    with tqdm.tqdm(total=cfg["max_steps"], unit="step",
+                   desc=f"{task_cfg['name']} | norm={norm} | {opt_name} | {loss_name}") as pbar:
+        while step < cfg["max_steps"]:
+            # ── Fetch a new batch ─────────────────────────────────────────────
+            x_np, y_np = next(train_iter)
+            x_batch = torch.tensor(x_np, dtype=torch.float32, device=device)
+            if x_batch.shape[-1] in [1, 3]:
+                x_batch = x_batch.permute(0, 3, 1, 2)
+            y_batch = torch.tensor(y_np, dtype=torch.long, device=device)
+
+            # ── Forward + Backward + Step ─────────────────────────────────────
+            model.train()
+            logits = model(x_batch)
+            loss = F.cross_entropy(logits, y_batch)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            # ── Eval ──────────────────────────────────────────────────────────
             if step % cfg["eval_every"] == 0:
-                model.eval()
-                accs = []
-                for x, y in val_loader:
-                    x_tensor = torch.tensor(x, dtype=torch.float32, device=device)
-                    if x_tensor.shape[-1] in [1, 3]:  # Convert BHWC to BCHW for PyTorch CNN
-                        x_tensor = x_tensor.permute(0, 3, 1, 2)
-                    y_tensor = torch.tensor(y, dtype=torch.long, device=device)
-                    accs.append(eval_fn(x_tensor, y_tensor))
-                    
-                val_acc = float(torch.stack(accs).mean()) if accs else 0.0
-                model.train()
-                
-                wandb.log({"val/val_acc": val_acc}, step=step)
-                wandb.log({"training_time_s": time.time() - t0}, step=step)
+                val_acc = eval_acc(val_loader)
+                elapsed = time.time() - t0
+                csv_rows.append({
+                    "framework": FRAMEWORK, "task": task_cfg["name"],
+                    "norm": norm, "optimizer": opt_name, "loss": loss_name,
+                    "use_muon_activations": use_muon_activations,
+                    "run": run_number, "step": step,
+                    "val_acc": val_acc, "wall_time_s": elapsed,
+                })
                 pbar.set_postfix(val_acc=f"{val_acc:.4f}", best=f"{best_val_acc:.4f}")
-                
+
                 if val_acc > best_val_acc:
                     best_val_acc, best_step = val_acc, step
                     best_state = {k: v.clone() for k, v in model.state_dict().items()}
                     no_improve = 0
                 else:
                     no_improve += 1
+
                 if no_improve >= cfg["patience"]:
                     print(f"Early stop at step {step}")
                     break
 
-            x, y = next(train_iter)
-            x_tensor = torch.tensor(x, dtype=torch.float32, device=device)
-            if x_tensor.shape[-1] in [1, 3]:
-                x_tensor = x_tensor.permute(0, 3, 1, 2)
-            y_tensor = torch.tensor(y, dtype=torch.long, device=device)
-            
-            loss = step_fn(x_tensor, y_tensor)
-            wandb.log({"train/loss": float(loss)}, step=step)
-            step += 1
             pbar.update(1)
-            if cfg["max_steps"] and step >= cfg["max_steps"]:
+            step += 1
+            
+            if no_improve >= cfg["patience"]:
                 break
 
     total_time = time.time() - t0
     if best_state:
         model.load_state_dict(best_state)
-    model.eval()
-    
-    test_accs = []
-    for x, y in test_loader:
-        x_tensor = torch.tensor(x, dtype=torch.float32, device=device)
-        if x_tensor.shape[-1] in [1, 3]:
-            x_tensor = x_tensor.permute(0, 3, 1, 2)
-        y_tensor = torch.tensor(y, dtype=torch.long, device=device)
-        test_accs.append(eval_fn(x_tensor, y_tensor))
-        
-    final_acc = float(torch.stack(test_accs).mean()) if test_accs else 0.0
-    print(f"Test Acc: {final_acc:.4f}  Time: {total_time:.1f}s")
-    wandb.log({"test/test_acc": final_acc}, step=step)
-    wandb.log({"total_training_time_s": total_time}, step=step)
-    wandb.finish()
-    return final_acc, best_val_acc, best_step, total_time
+
+    test_acc = eval_acc(test_loader)
+    print(f"Test Acc: {test_acc:.4f}  Time: {total_time:.1f}s")
+    csv_rows.append({
+        "framework": FRAMEWORK, "task": task_cfg["name"],
+        "norm": norm, "optimizer": opt_name, "loss": loss_name,
+        "use_muon_activations": use_muon_activations,
+        "run": run_number, "step": step,
+        "val_acc": test_acc, "wall_time_s": total_time,
+    })
+
+    # Write / append CSV
+    df = pd.DataFrame(csv_rows)
+    df.to_csv(csv_path, mode="a", header=not os.path.exists(csv_path), index=False)
+    print(f"Results appended to {csv_path}")
 
 
 if __name__ == "__main__":
-    cfg    = yaml.safe_load(open(CFG_PATH))
+    parser = argparse.ArgumentParser(description="Torch CNN benchmark")
+    parser.add_argument("--config", default=os.path.join(os.path.dirname(__file__), "config.yaml"),
+                        help="Path to YAML config file")
+    args = parser.parse_args()
+
+    cfg    = yaml.safe_load(open(args.config))
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
+    # Standardize values for plotting comparison
+    norm = "l2"
+    loss_name = "CrossEntropy"
+    muon_act = False
+
+    # Optimizer sweep fallback
+    optimizers = cfg.get("optimizers", [
+        {"name": cfg.get("torch_optimizer", "Adam"),
+         "kwargs": cfg.get("torch_optimizer_kwargs", {})}
+    ])
+
     for batch_size in cfg["batch_sizes"]:
         for task_cfg in cfg["tasks"]:
-            print(f"\n{'='*50}\n{FRAMEWORK} | {task_cfg['name']} | bs={batch_size}")
-            for run_number in range(1, cfg["num_runs"] + 1):
-                run(cfg, task_cfg, batch_size, run_number, device)
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+            for opt_entry in optimizers:
+                opt_name   = opt_entry["name"]
+                opt_kwargs = opt_entry.get("kwargs", {})
+                header = (f"{FRAMEWORK} | {task_cfg['name']} "
+                          f"| norm={norm} | opt={opt_name} | loss={loss_name} | muon={muon_act} | bs={batch_size}")
+                print(f"\n{'='*60}\n{header}")
+                for run_number in range(1, cfg["num_runs"] + 1):
+                    run(cfg, task_cfg, batch_size, run_number, device,
+                        norm=norm, opt_name=opt_name, opt_kwargs=opt_kwargs, loss_name=loss_name, use_muon_activations=muon_act)
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
