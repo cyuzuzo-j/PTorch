@@ -8,8 +8,6 @@ import jax.numpy as jnp
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../frameworks')))
 
-import pjax_orr as pjax
-from pjax_orr import nn
 import ptorch
 import ptorch.nn.modules as pnn
 import torch.nn as tnn
