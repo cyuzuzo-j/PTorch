@@ -27,7 +27,7 @@ class ProjectionSGD(torch.optim.SGD):
         # Now apply the standard SGD step using the pseudo-gradients
         return super().step(closure)
 
-class ProjectionAdam(torch.optim.AdamW):
+class ProjectionAdam(torch.optim.Adam):
     """
     Projection-based optimizer wrapped around Adam.
     Converts projection targets into pseudo-gradients (g = p - p_proj).

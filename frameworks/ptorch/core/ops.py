@@ -6,7 +6,6 @@ import math
 from itertools import repeat
 
 
-# Precomputed optimal coefficients from Polar Express (degree=5)
 # Paper: "The Polar Express: Optimal Matrix Sign Methods and Their Application to the Muon Algorithm"
 _POLAR_COEFFS = [
     (8.28721201814563, -23.595886519098837, 17.300387312530933),
@@ -36,20 +35,16 @@ def zeropower_via_polarexpress(G: torch.Tensor, steps: int = 5, eps: float = 1e-
         
     X = G.bfloat16()
     
-    # As per paper recommendation: use a larger eps (1e-2) to avoid conditioning issues
     X = X / (X.norm(dim=(-2, -1), keepdim=True) + eps)
     
-    # Transpose if rows > cols to save FLOPs in matrix multiplications
     transposed = X.size(-2) > X.size(-1)
     if transposed:
         X = X.mT
         
-    # Build sequence of coefficients for requested number of steps
     hs = _POLAR_COEFFS[:steps]
     if steps > len(_POLAR_COEFFS):
         hs += list(repeat(_POLAR_COEFFS[-1], steps - len(_POLAR_COEFFS)))
         
-    # Iterate dynamically shifting polynomials
     for a, b, c in hs:
         A = X @ X.mT
         B = b * A + c * A @ A
@@ -84,31 +79,6 @@ def process_activation_target(A_det, A_proj):
     return A_proj_new.reshape(orig_shape)
 
 
-
-def compute_weight_target_frozen_a(A, B, Z_target_scaled, g=1.0, omega=1.0, residual=False):
-    """Optimal weight target with frozen activations via (K,K) least-squares solve.
-
-    Solves: min ||B_new - B||^2 + (1/g^2)||A@B_new - Z_target_scaled||^2
-    where Z_target_scaled = Z_target * omega.
-    """
-    K = B.size(-2)
-    frozen_g = g * config.frozen_a_g
-    lam = 1.0 / (frozen_g ** 2 + 1e-8)
-
-    if residual:
-        I_B = torch.eye(K, B.size(-1), device=B.device, dtype=B.dtype)
-        B_eff = I_B - B
-    else:
-        B_eff = B
-
-    ATA = A.transpose(-2, -1) @ A
-    I_K = torch.eye(K, device=A.device, dtype=A.dtype)
-    rhs = B_eff + lam * (A.transpose(-2, -1) @ Z_target_scaled)
-    B_eff_new = torch.linalg.solve(I_K + lam * ATA, rhs)
-
-    if residual:
-        return I_B - B_eff_new
-    return B_eff_new
 
         
 
@@ -394,10 +364,6 @@ class MatMulProjection(torch.autograd.Function):
             )
             
             A_proj = A_proj_2d.reshape(A_det.shape)
-            if config.frozen_a_weights:
-                B_proj_2d = compute_weight_target_frozen_a(
-                    A_2d, B_2d, Z_2d, g=ctx.g, omega=ctx.omega)
-            B_proj_2d = B_proj_2d
             B_proj = B_proj_2d.reshape(B_det.shape[-2], B_det.shape[-1]).expand(B_det.shape)
             Z_proj = Z_proj_2d.reshape(Z_det.shape)
 
@@ -416,12 +382,6 @@ class MatMulProjection(torch.autograd.Function):
             if not ctx.pairwise and ctx.proj_cache is not None:
                 ctx.proj_cache['t'] = t_new
 
-            if config.frozen_a_weights:
-                A_2d_fb = A_det.contiguous().clone()
-                Z_2d_fb = Z_det.contiguous().clone() * ctx.omega
-                B_proj = compute_weight_target_frozen_a(
-                    A_2d_fb, B_det.contiguous().clone(), Z_2d_fb,
-                    g=ctx.g, omega=ctx.omega)
             B_proj = B_proj
 
         if ctx.forward_cache is not None:

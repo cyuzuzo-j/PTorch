@@ -13,8 +13,8 @@ import torch.nn.functional as F
 import torch.fx
 import pandas as pd
 from ptorch.nn.modules import (
-    Linear, LinearFrozen, ReLU,
-    ProjectionModule, CrossEntropy, HardMarginLoss, ProximalHingeMarginLoss
+    Linear, ReLU,
+    CrossEntropy, HardMarginLoss, ProximalHingeMarginLoss
 )
 import ptorch.nn.modules as ptorch_modules
 from ptorch import config as ptorch_config
