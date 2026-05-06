@@ -1,4 +1,4 @@
-# Learning with Projections
+# PTorch
 
 > **Attribution:** A significant portion of this code is based on or directly copied from [AndreasBergmeister/pjax](https://github.com/AndreasBergmeister/pjax).
 
@@ -8,8 +8,6 @@ A PyTorch-based framework for training neural networks via **cyclic projections*
 
 Standard training: `loss.backward()` propagates gradients.  
 ptorch: `loss.backward()` propagates *projection targets* — each layer projects its inputs/outputs onto the constraint set defined by its operation, and the optimizer updates parameters by `p ← p - lr * (p - p_proj)`.
-
-Importing `ptorch` automatically overrides `torch.sum`, `torch.add`, `torch.mul`, and `torch.square` with projection-aware versions.
 
 ## Installation
 
