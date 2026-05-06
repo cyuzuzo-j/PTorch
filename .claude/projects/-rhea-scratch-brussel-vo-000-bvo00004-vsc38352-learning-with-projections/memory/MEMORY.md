@@ -1,3 +1,0 @@
-- [User profile](user_profile.md) — ML researcher building ptorch target-propagation framework on VSC cluster
-- [FrozenA required](feedback_frozen_a.md) — frozen_a_weights=True needed: 50% with vs 20% without
-- [ResNet-8 debugging](project_resnet8_debugging.md) — Pushing CIFAR-10 accuracy from 39% to 95%; bugs fixed, bottlenecks identified, diag_resnet22 testing structural fixes
