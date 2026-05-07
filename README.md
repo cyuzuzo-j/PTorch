@@ -12,12 +12,12 @@ ptorch: `loss.backward()` propagates *projection targets* — each layer project
 ## Installation
 
 ```bash
-# Clone the repo
-git clone <repo-url>
-cd learning_with_projections
 
 # Install dependencies (Python 3.10+)
 pip install torch numpy pandas tqdm pyyaml
+
+cd frameworks
+git clone https://github.com/AndreasBergmeister/pjax.git pjax_orr # download pjax
 ```
 
 The `frameworks/` directory is used directly from source — no `pip install` needed. Scripts add it to `sys.path` automatically.

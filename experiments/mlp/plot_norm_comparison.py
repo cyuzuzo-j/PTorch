@@ -40,7 +40,7 @@ def plot_norm_comparison(results_dir: str, output_path: str):
     # Bin unaligned wall-clock times into uniform intervals for clean averaging
     time_data = df.dropna(subset=["wall_time_s", "val_acc"]).copy()
     if not time_data.empty:
-        n_bins = 60
+        n_bins = 100
         time_data["time_bin"] = pd.cut(time_data["wall_time_s"], bins=n_bins)
         time_data["time_mid"] = time_data["time_bin"].apply(
             lambda iv: iv.mid if pd.notnull(iv) else None
@@ -55,7 +55,6 @@ def plot_norm_comparison(results_dir: str, output_path: str):
     ax.set_xlabel("Wall-clock Time (s)")
     ax.set_ylabel("Validation Accuracy")
     ax.set(xlim=(0, 50))
-    ax.set(ylim=(0.8, 1.0))
 
     ax.set_title("Effect of Projection Norm")
     ax.legend(loc="lower right", fontsize=12, frameon=False)

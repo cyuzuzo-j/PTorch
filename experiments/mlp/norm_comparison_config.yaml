@@ -7,13 +7,13 @@
 # ── Experiment identity ───────────────────────────
 experiment_name: norm_comparison
 random_seed: 43
-num_runs: 3
+num_runs: 6
 
 # ── Training ──────────────────────────────────────
 max_steps: 50_000
 eval_every: 200
 patience: 10
-batch_sizes: [128, 512]
+batch_sizes: [1024]
 
 
 # ── Output ────────────────────────────────────────
