@@ -6,7 +6,6 @@ import math
 from itertools import repeat
 
 
-# Paper: "The Polar Express: Optimal Matrix Sign Methods and Their Application to the Muon Algorithm"
 _POLAR_COEFFS = [
     (8.28721201814563, -23.595886519098837, 17.300387312530933),
     (4.107059111542203, -2.9478499167379106, 0.5448431082926601),
@@ -18,7 +17,6 @@ _POLAR_COEFFS = [
     (1.875, -1.25, 0.375)
 ]
 
-# Apply safety factor for numerical stability in bfloat16 (Section 3.4 & Appendix G)
 _POLAR_COEFFS = [
     (a / 1.01, b / 1.01**3, c / 1.01**5) for a, b, c in _POLAR_COEFFS[:-1]
 ] + [_POLAR_COEFFS[-1]]
@@ -414,7 +412,14 @@ class CrossEntropyProjection(torch.autograd.Function):
         ctx.save_for_backward(logits, labels)
         ctx.num_steps = num_steps
         ctx.lmbda = lmbda
-        return logits
+        
+        # Calculate standard cross entropy loss to return as the scalar loss
+        if labels.ndim == logits.ndim - 1:
+            loss = F.cross_entropy(logits, labels)
+        else:
+            loss = F.cross_entropy(logits, labels.argmax(dim=-1))
+            
+        return loss
 
     @staticmethod
     def backward(ctx, z_target):
@@ -423,10 +428,14 @@ class CrossEntropyProjection(torch.autograd.Function):
         steps = ctx.num_steps
 
         x = logits
-        for _ in range(steps):
-            x = x + lmbda * (labels - F.softmax(x, dim=-1))
+        target_probs = labels
+        if labels.ndim == logits.ndim - 1:
+            target_probs = F.one_hot(labels, num_classes=logits.size(-1)).to(logits.dtype)
 
-        return x, labels
+        for _ in range(steps):
+            x = x + lmbda * (target_probs - F.softmax(x, dim=-1))
+
+        return x, None, None, None
 
 class HardMarginProjection(torch.autograd.Function):
     """
@@ -556,6 +565,79 @@ class ReLUProjection(torch.autograd.Function):
         result_forwards = torch.where(dist_1 < dist_2, torch.zeros_like(x), x_2)
         ctx.forward_cache[0] = result_forwards        
         return process_activation_target(x, result_backwards), None    
+
+
+class SoftmaxProjection(torch.autograd.Function):
+    """
+    Softmax projection via mixed L2/KL geometry.
+    """
+    @staticmethod
+    def forward(ctx, x, forward_cache=None):
+        ctx.save_for_backward(x)
+        ctx.forward_cache = forward_cache
+        return F.softmax(x, dim=-1)
+
+    @staticmethod
+    def backward(ctx, z):
+        x, = ctx.saved_tensors
+        eps = 1e-8
+
+        # Step 1: positivity + KL projection onto the simplex (L1 normalization).
+        z_pos = torch.clamp(z, min=eps)
+        z_bar = z_pos / z_pos.sum(dim=-1, keepdim=True)
+
+        # Step 2: shift log(z_bar) to be closest in L2 to x along the softmax-equivalence ray.
+        log_z = torch.log(z_bar)
+        
+        # Handle -inf in x (e.g., from causal masking)
+        mask = (x != float('-inf'))
+        safe_x = torch.where(mask, x, torch.zeros_like(x))
+        diff = (safe_x - log_z) * mask
+        c = diff.sum(dim=-1, keepdim=True) / mask.sum(dim=-1, keepdim=True).clamp(min=1)
+        
+        x_bar = log_z + c
+        x_bar = torch.where(mask, x_bar, x)
+
+        if ctx.forward_cache is not None:
+            ctx.forward_cache[0] = z_bar
+
+        return process_activation_target(x, x_bar), None
+
+class MaskedAddProjection(torch.autograd.Function):
+    """
+    Projection-aware addition for causal masks.
+    Forward: x + mask
+    Backward: Replaces the target for masked positions with the original x, 
+              so the pseudo-gradient is zero for masked positions.
+    """
+    @staticmethod
+    def forward(ctx, x, mask):
+        ctx.save_for_backward(x, mask)
+        return x + mask
+
+    @staticmethod
+    def backward(ctx, target_out):
+        x, mask = ctx.saved_tensors
+        # If mask is -inf, replace the incoming target with x
+        target_x = torch.where(mask == float('-inf'), x, target_out)
+        return process_activation_target(x, target_x), None
+
+class BranchProjection(torch.autograd.Function):
+    """
+    Projection-aware branching.
+    Averages the targets from multiple consumers to compute a consensus target.
+    """
+    @staticmethod
+    def forward(ctx, x, num_branches):
+        ctx.num_branches = float(num_branches)
+        return x
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # grad_output is the sum of targets from all branches.
+        # We average them to get the consensus target.
+        return grad_output / ctx.num_branches, None
+
 
 
 class LeakyReLUProjection(torch.autograd.Function):
@@ -948,4 +1030,95 @@ class ConvPatchProjection(torch.autograd.Function):
         
         return target, None, None, None
 
+
+class RMSNormProjection(torch.autograd.Function):
+    """
+    Projection-aware RMS Normalization.
+
+    Forward:
+        z = x / RMS(x)
+
+    Backward (target -> projected input):
+        Given an incoming target z_target for the output:
+            z_bar = sqrt(n) * z_target / ||z_target||_2
+            sigma_bar = mean(x * z_bar)
+            x_bar = sigma_bar * z_bar
+    """
+    @staticmethod
+    def forward(ctx, x, eps=1e-5):
+        ctx.save_for_backward(x)
+        return F.rms_norm(x, (x.size(-1),), eps=eps)
+
+    @staticmethod
+    def backward(ctx, z_target):
+        x, = ctx.saved_tensors
+        n = x.size(-1)
+
+        # Step 1: Output projection
+        # \bar{z} = \sqrt{n} z^+ / ||z^+||_2
+        z_target_norm = torch.linalg.norm(z_target, dim=-1, keepdim=True)
+        z_bar = math.sqrt(n) * (z_target / (z_target_norm + 1e-8))
+
+        # Step 2: Input projection
+        # \bar{\sigma} = mean(x * \bar{z})
+        sigma_bar = (x * z_bar).mean(dim=-1, keepdim=True)
+        
+        # \bar{x} = \bar{\sigma} \bar{z}
+        x_bar = sigma_bar * z_bar
+
+        return process_activation_target(x, x_bar), None
+
+
+
+
+
+
+class LogitSoftcapInversion(torch.autograd.Function):
+    """
+    Sets the new input target directly based on the target z.
+    Uses the exact mathematical inverse of the softcap function.
+    """
+    @staticmethod
+    def forward(ctx, x, logit_softcap):
+        # Save the softcap constant for the backward pass
+        ctx.logit_softcap = logit_softcap
+        
+        # We don't need to save 'x' because pure inversion only relies on 'z'
+        return logit_softcap * torch.tanh(x / logit_softcap)
+
+    @staticmethod
+    def backward(ctx, z):
+        # In Target Propagation, 'z' is the target output. 
+        # We must return 'x_target', the input that would produce 'z'.
+        C = ctx.logit_softcap
+        
+        # CRITICAL SAFETY STEP: 
+        # arctanh is only valid for inputs strictly between -1 and 1.
+        # If the network asks for a target 'z' that is outside the bounds of the softcap,
+        # we MUST clamp it slightly inside the bounds to avoid returning NaNs.
+        eps = 1e-6
+        z_clipped = torch.clamp(z, min=-C + eps, max=C - eps)
+        
+        # Direct mathematical inversion
+        x_target = C * torch.arctanh(z_clipped / C)
+        
+        # We return x_target for 'x', and None for 'logit_softcap' (as it's a fixed hyperparameter)
+        return x_target, None
+
+
+
+
+class Conversion(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input):
+        ctx.save_for_backward(input)
+        return input
+
+    @staticmethod
+    def backward(ctx, z_target):
+        (input,) = ctx.saved_tensors
+        # Convert projection target into gradient: push input toward target
+        grad = (input - z_target)
+        #grad = grad/ torch.norm(grad)
+        return grad
 
