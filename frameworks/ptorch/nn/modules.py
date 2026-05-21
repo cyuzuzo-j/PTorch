@@ -92,6 +92,21 @@ class ReLU(ProjectionModule):
             return ReLUProjection.apply(input,  self.projection_forward_cache)
         return super().forward(input)
 
+class Softmax(ProjectionModule):
+    """Projection-aware softmax over the last dimension.
+
+    Forward: z = softmax(input, dim=-1)
+    Backward: routes through SoftmaxProjection (mixed L2/KL geometry).
+    """
+    def __init__(self):
+        super().__init__(outputs=1)
+
+    def forward(self, input):
+        if config.use_projections:
+            return SoftmaxProjection.apply(input, self.projection_forward_cache)
+        return F.softmax(input, dim=-1)
+
+
 class LeakyReLU(nn.LeakyReLU):
     def __init__(self, negative_slope: float = 0.01, inplace: bool = False):
         super().__init__(negative_slope=negative_slope, inplace=inplace)
@@ -265,10 +280,8 @@ class Conv2D(ProjectionModule):
         padding = self._resolve_padding(input.shape[2], input.shape[3])
 
         if getattr(config, 'use_projections', False):
-            # Enforce Spatial Consensus (Activations)
             patches = ConvPatchProjection.apply(input, self.kernel_size, self.stride, padding)
         else:
-            # Standard Unfold Pipeline (Gradients)
             patches = F.unfold(input, self.kernel_size, dilation=1, padding=padding, stride=self.stride)
             kH, kW = self.kernel_size
             sH, sW = self.stride
@@ -277,10 +290,8 @@ class Conv2D(ProjectionModule):
             W_out = (input.shape[3] + 2 * pad_w - kW) // sW + 1
             patches = patches.view(input.shape[0], -1, H_out, W_out).permute(0, 2, 3, 1)
 
-        # Enforce Flat Global Consensus (Weights & Bias) via MatMulProjection
         out = self.linear(patches)
         
-        # Reshape back to Image Topology: (N, C_out, H_out, W_out)
         return out.permute(0, 3, 1, 2)
 
 
