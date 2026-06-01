@@ -18,7 +18,7 @@ from ptorch.nn.modules import (
 )
 from ptorch import config as ptorch_config
 import ptorch.optim_static as ptorch_optim_static
-from experiments.cnn_benchmarks.models import SimpleCNN_PTorch
+from experiments.cnn_benchmarks.models import SimpleCNN_PTorch, ResidualCNN_PTorch
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 import tqdm, time
 
@@ -101,7 +101,7 @@ def run(cfg, task_cfg, batch_size, run_number, device,
     best_val_acc, best_state, best_step = 0.0, None, 0
     no_improve = 0
     t0 = time.time()
-
+    last_val_acc = 0.0
     step = 0
     with tqdm.tqdm(total=cfg["max_steps"], unit="step",
                    desc=f"{task_cfg['name']} | norm={norm} | {opt_name} | {loss_name}") as pbar:
@@ -122,6 +122,15 @@ def run(cfg, task_cfg, batch_size, run_number, device,
             loss.sum().backward()
             optimizer.step()
 
+            train_acc = float((logits.argmax(dim=-1) == y_batch).float().mean())
+
+            step += 1
+            pbar.set_postfix(
+                train_acc=f"{train_acc:.4f}",
+                val_acc=f"{last_val_acc:.4f}",
+                best=f"{best_val_acc:.4f}",
+            )
+
             # ── Eval ──────────────────────────────────────────────────────────
             if step % cfg["eval_every"] == 0:
                 val_acc = eval_acc(val_loader)
@@ -134,7 +143,7 @@ def run(cfg, task_cfg, batch_size, run_number, device,
                     "val_acc": val_acc, "wall_time_s": elapsed,
                 })
                 pbar.set_postfix(val_acc=f"{val_acc:.4f}", best=f"{best_val_acc:.4f}")
-
+                last_val_acc = val_acc
                 if val_acc > best_val_acc:
                     best_val_acc, best_step = val_acc, step
                     best_state = {k: v.clone() for k, v in model.state_dict().items()}
@@ -147,7 +156,6 @@ def run(cfg, task_cfg, batch_size, run_number, device,
                     break
 
             pbar.update(1)
-            step += 1
             
             if no_improve >= cfg["patience"]:
                 break

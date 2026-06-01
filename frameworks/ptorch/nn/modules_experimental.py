@@ -9,7 +9,7 @@ Caveat: reproduced from the deleted source as a starting point — not
 re-verified end-to-end.
 """
 
-from typing import Tuple
+from typing import Tuple, Optional
 from frameworks.ptorch.core.ops import MaskedAddProjection
 
 import torch
@@ -17,7 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ..config import config
-from ..core.ops import MatMulProjection, SoftmaxProjection, RMSNormProjection, Conversion as ConversionFn, LogitSoftcapInversion
+from ..core.ops import MatMulProjection, SoftmaxProjection, RMSNormProjection, Conversion as ConversionFn, LogitSoftcapInversion, SeqMaxPoolProjection, SeqAvgPoolProjection, BranchProjection
 from .modules import Linear, ProjectionModule
 
 class GQAConsensusProjection(torch.autograd.Function):
@@ -36,6 +36,98 @@ class GQAConsensusProjection(torch.autograd.Function):
         # z_target shape: (bsz, num_kv_heads, group_size, seqlen, head_dim)
         # Average the targets across the group_size dimension to find the consensus!
         return z_target.mean(dim=2), None
+
+class ExpandAvgProjection(torch.autograd.Function):
+    """
+    Forward: expands the input along given dimensions (like torch.Tensor.expand).
+    Backward: averages the targets across expanded dimensions instead of summing.
+    """
+    @staticmethod
+    def forward(ctx, x, sizes):
+        ctx.input_shape = x.shape
+        ctx.sizes = sizes
+        return x.expand(*sizes)
+
+    @staticmethod
+    def backward(ctx, z_target):
+        # Average targets across dims that were expanded (input had size 1 there).
+        out = z_target
+        for dim, in_size in enumerate(ctx.input_shape):
+            if in_size == 1 and out.size(dim) != 1:
+                out = out.mean(dim=dim, keepdim=True)
+        return out, None
+
+
+class Expand(nn.Module):
+    """Projection-aware replacement for `tensor.expand(*sizes)`.
+
+    Under projection mode, backward averages targets across expanded dims
+    rather than summing them (the default expand backward).
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x: torch.Tensor, *sizes) -> torch.Tensor:
+        if len(sizes) == 1 and isinstance(sizes[0], (tuple, list, torch.Size)):
+            sizes = tuple(sizes[0])
+        if config.use_projections:
+            return ExpandAvgProjection.apply(x, sizes)
+        return x.expand(*sizes)
+
+
+class Branch(nn.Module):
+    """Returns ``num_branches`` references of the input. In projection mode each
+    reference is wrapped with its own ``BranchProjection.apply(x, N)`` so the
+    gradient flowing back to ``x`` is the *average* of the per-branch gradients
+    instead of their sum. In non-projection mode this is a plain identity tuple
+    (standard summing preserved).
+
+    Returning independent references (rather than a single shared one) keeps
+    ``MultiheadAttention``'s ``q is k and k is v`` self-attention check inert,
+    avoiding a second BranchProjection wrap inside the attention module.
+    """
+    def __init__(self, num_branches: int):
+        super().__init__()
+        self.num_branches = int(num_branches)
+
+    def forward(self, x: torch.Tensor):
+        if config.use_projections:
+            return tuple(BranchProjection.apply(x, self.num_branches)
+                         for _ in range(self.num_branches))
+        return tuple(x for _ in range(self.num_branches))
+
+
+class SeqMaxPool(nn.Module):
+    """GNN-style global max-pool readout over the sequence/token dimension.
+
+    Drop-in replacement for CLS-token aggregation: maps (B, T, D) -> (B, D)
+    by taking the per-feature max across tokens. Under projection mode,
+    backward solves the closed-form max-projection per (batch, channel).
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if config.use_projections:
+            return SeqMaxPoolProjection.apply(x)
+        return torch.amax(x, dim=1)
+
+
+class SeqAvgPool(nn.Module):
+    """GNN-style global average-pool readout over the sequence/token dimension.
+
+    Drop-in replacement for CLS-token aggregation: maps (B, T, D) -> (B, D)
+    by taking the per-feature mean across tokens. Under projection mode,
+    backward solves the closed-form mean-projection per (batch, channel).
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if config.use_projections:
+            return SeqAvgPoolProjection.apply(x)
+        return x.mean(dim=1)
+
 
 class RMSNorm(ProjectionModule):
     def __init__(self, eps: float = 1e-5):
@@ -122,15 +214,14 @@ class Rotary(nn.Module):
         """
         if seq_len is None:
             seq_len = x.size(-2)
-            
+
         self._update_cache(seq_len, x.device, x.dtype)
-        
-        # Use the custom PTorch projection function
-        return RotaryFunction.apply(
-            x, 
-            self._cos_cached.to(dtype=x.dtype), 
-            self._sin_cached.to(dtype=x.dtype)
-        )
+        cos = self._cos_cached.to(dtype=x.dtype)
+        sin = self._sin_cached.to(dtype=x.dtype)
+
+        if config.use_projections:
+            return RotaryFunction.apply(x, cos, sin)
+        return apply_rotary_emb(x, cos, sin)
 
 class Softcap(nn.Module):
     def __init__(self, logit_softcap=30.0):
@@ -143,6 +234,113 @@ class Softcap(nn.Module):
             return LogitSoftcapInversion.apply(x, self.logit_softcap)
         return self.logit_softcap * torch.tanh(x / self.logit_softcap)
 
+class MultiheadAttention(nn.Module):
+    """Projection-aware General Multihead Attention with RoPE + GQA + RMSNorm.
+    Supports both Self-Attention and Cross-Attention via separate q, k, v inputs.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int,
+        num_kv_heads: int,
+        rope_base: float,
+        qk_gain_init: float,
+        norm: str = "l2",
+    ):
+        super().__init__()
+        if dim % num_heads != 0:
+            raise ValueError("dim must be divisible by num_heads")
+        if num_heads % num_kv_heads != 0:
+            raise ValueError("num_heads must be divisible by num_kv_heads")
+        
+        self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads
+        self.head_dim = dim // num_heads
+        
+        if self.head_dim % 2 != 0:
+            raise ValueError("head_dim must be even for RoPE")
+            
+        kv_dim = self.num_kv_heads * self.head_dim
+
+        self.c_q = Linear(dim, dim, bias=False, norm=norm)
+        self.c_k = Linear(dim, kv_dim, bias=False, norm=norm)
+        self.c_v = Linear(dim, kv_dim, bias=False, norm=norm)
+        self.proj = Linear(dim, dim, bias=False, norm=norm)
+
+        self.rotary = Rotary(self.head_dim, base=rope_base)
+        self.q_norm = RMSNorm()
+        self.k_norm = RMSNorm()
+
+    def _project_pairwise_matmul(self, left: torch.Tensor, right: torch.Tensor,
+                                  omega: float = 1.0) -> torch.Tensor:
+        if not config.use_projections:
+            return (left @ right) / omega
+        return MatMulProjection.apply(
+            left, right, 5,
+            config.projection_alpha,
+            config.projection_g,
+            omega, None, True, None,
+        )
+
+    def forward(
+        self, 
+        q: torch.Tensor, 
+        k: torch.Tensor, 
+        v: torch.Tensor, 
+        attn_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        bsz, seqlen_q, dim = q.shape
+        _, seqlen_k, _ = k.shape
+
+    
+        q_in, k_in, v_in = q, k, v
+
+        # Linear projections
+        q_proj = self.c_q(q_in).reshape(bsz, seqlen_q, self.num_heads, self.head_dim).transpose(1, 2)
+        k_proj = self.c_k(k_in).reshape(bsz, seqlen_k, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        v_proj = self.c_v(v_in).reshape(bsz, seqlen_k, self.num_kv_heads, self.head_dim).transpose(1, 2)
+
+        # Normalization
+        q_proj = self.q_norm(q_proj)
+        k_proj = self.k_norm(k_proj)
+
+        # Rotary Embeddings applied to respective sequence lengths
+        q_proj = self.rotary(q_proj, seqlen_q)
+        k_proj = self.rotary(k_proj, seqlen_k)
+
+        # Grouped-Query Attention scaling
+        if self.num_heads != self.num_kv_heads:
+            group_size = self.num_heads // self.num_kv_heads
+            if config.use_projections:
+                k_proj = GQAConsensusProjection.apply(k_proj, group_size).reshape(bsz, self.num_heads, seqlen_k, self.head_dim)
+                v_proj = GQAConsensusProjection.apply(v_proj, group_size).reshape(bsz, self.num_heads, seqlen_k, self.head_dim)
+            else:
+                k_proj = k_proj.unsqueeze(2).expand(-1, -1, group_size, -1, -1).reshape(bsz, self.num_heads, seqlen_k, self.head_dim)
+                v_proj = v_proj.unsqueeze(2).expand(-1, -1, group_size, -1, -1).reshape(bsz, self.num_heads, seqlen_k, self.head_dim)
+
+        scale = (self.head_dim ** 0.5)
+        qk = self._project_pairwise_matmul(q_proj, k_proj.transpose(-2, -1), omega=scale)
+
+        # Masking
+        if attn_mask is not None:
+            # Assumes attn_mask is broadcastable to [bsz, num_heads, seqlen_q, seqlen_k]
+            if config.use_projections:
+                qk = MaskedAddProjection.apply(qk, attn_mask)
+            else:
+                qk = qk + attn_mask
+                
+        # Softmax
+        if config.use_projections:
+            attention_weights = SoftmaxProjection.apply(qk, None)
+        else:
+            attention_weights = F.softmax(qk, dim=-1)
+
+        # Output projection
+        y = self._project_pairwise_matmul(attention_weights, v_proj)
+        y = y.transpose(1, 2).contiguous().reshape(bsz, seqlen_q, dim)
+        return self.proj(y)
+        
 class CausalSelfAttention(nn.Module):
     """Projection-aware Causal Self Attention with RoPE + GQA + RMSNorm.
     """
@@ -233,6 +431,7 @@ class CausalSelfAttention(nn.Module):
         y = self._project_pairwise_matmul(attention_weights, v)
         y = y.transpose(1, 2).contiguous().reshape(bsz, seqlen, dim)
         return self.proj(y)
+
 
 
 class Conversion(nn.Module):

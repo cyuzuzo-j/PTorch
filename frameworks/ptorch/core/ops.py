@@ -33,7 +33,13 @@ def zeropower_via_polarexpress(G: torch.Tensor, steps: int = 5, eps: float = 1e-
         
     X = G.bfloat16()
     
-    X = X / (X.norm(dim=(-2, -1), keepdim=True) + eps)
+    # Direction-preserving normalization: floor the *denominator* at eps rather
+    # than adding eps. With the additive form a tiny-norm G (e.g. a body
+    # activation residual ~1e-7) is scaled toward zero (G/(‖G‖+1e-2) ≈ 100·G),
+    # collapsing the polar iteration. clamp_min keeps the unit direction for any
+    # ‖G‖ > eps, so small-but-real targets survive. (For weight-Muon, ‖G‖≫eps so
+    # this is behaviourally identical to the old additive form.)
+    X = X / X.norm(dim=(-2, -1), keepdim=True).clamp_min(eps)
     
     transposed = X.size(-2) > X.size(-1)
     if transposed:
@@ -224,7 +230,7 @@ class MatMulProjectionLinf(torch.autograd.Function):
             
             A_proj_2d, B_proj_2d, _, eps_new = matmul_proj_linf(
                 A_2d, B_2d, Z_2d, eps_init=eps_init_2d, g=ctx.g, 
-                omega=ctx.omega, num_steps=ctx.num_steps, residual=ctx.residual
+                omega=ctx.omega, num_steps=ctx.num_steps
             )
             
             A_proj = A_proj_2d.reshape(A_det.shape)
@@ -269,18 +275,30 @@ def matmul_proj(A, B, Z, t_init=None, alpha=1.0, g=1.0, omega=1.0, num_steps=1, 
 
     # --- NUMERICAL SAFEGUARDS ---
     eps = 1e-5             # Minimum distance from the singularity
-    damping = 1e-4         # Levenberg-Marquardt damping factor
     max_step_size = 0.5    # Maximum allowable change in t per step
-    
+
     # Calculate strict boundary for t to prevent alpha - t^2 from approaching 0
     # We require alpha - t^2 >= eps  =>  t^2 <= alpha - eps
     max_t_val = math.sqrt(max(alpha - eps, eps))
-    
-    # 3. Newton's Method (fused pointwise ops, numerically stabilized)
+
+    # 3. Safeguarded Newton (rtsafe) for the root of f(t) = 0.
+    #
+    # Per Elser, "Learning Without Loss" (arXiv:1911.00493), Lemma B.1: this root
+    # equation (his eq. 52) is *strictly increasing* on the open interval t^2 < alpha,
+    # sweeping -inf -> +inf, whenever q_eff > 2*sqrt(alpha)*|p|. That holds here by
+    # Cauchy-Schwarz ( ||A||^2 + alpha*||B||^2 >= 2*sqrt(alpha)*|A.B| ), so the root is
+    # unique and strictly *interior*. We bracket it in (-max_t_val, max_t_val) -- where
+    # f(-max_t_val) < 0 < f(max_t_val) -- and fall back to bisection whenever a Newton
+    # step would leave the bracket, so the iterate can never overshoot into the
+    # singularity at t^2 = alpha (the boundary trap that made the old clamped Newton
+    # blow up for far targets). A per-step movement clamp keeps the num_steps=1 path
+    # bounded at |t| <= 0.5 (its previous behavior), and a convergence freeze keeps the
+    # projection exactly idempotent when f(t) == 0.
+    t = torch.clamp(t, min=-max_t_val, max=max_t_val)
+    lo = torch.full_like(p, -max_t_val)   # f(lo) < 0
+    hi = torch.full_like(p, max_t_val)    # f(hi) > 0
+
     for _ in range(num_steps):
-        # Enforce singularity boundary before computing fractions
-        t = torch.clamp(t, min=-max_t_val, max=max_t_val)
-        
         t2 = t.square()
         alpha_minus_t2 = alpha - t2 # Guaranteed to be >= eps
 
@@ -290,17 +308,22 @@ def matmul_proj(A, B, Z, t_init=None, alpha=1.0, g=1.0, omega=1.0, num_steps=1, 
         N_prime = alpha * (2.0 * t * p + q_eff)
         f_prime_val = ((N_prime * alpha_minus_t2) + 4.0 * t * N_num) / (alpha_minus_t2 ** 3) + target_penalty
 
-        # Damped Newton Step: Use abs() to prevent moving up the gradient in non-convex regions
-        raw_step = f_val / (f_prime_val.abs() + damping)
-        
-        # Clamp the step size to prevent overshooting into the singularity zone
-        step = torch.clamp(raw_step, min=-max_step_size, max=max_step_size)
-        
-        t = t - step
+        # f is strictly increasing: f>0 => root lies left of t (tighten hi), else lo.
+        lo = torch.where(f_val < 0, t, lo)
+        hi = torch.where(f_val > 0, t, hi)
 
-    # Final boundary clamp before analytical reconstruction 
-    # (prevents accumulation blow-ups in the next step)
-    t = torch.clamp(t, min=-max_t_val, max=max_t_val)
+        # Movement-limited Newton step (f_prime_val > 0 by monotonicity).
+        step = torch.clamp(f_val / f_prime_val.clamp_min(1e-12), min=-max_step_size, max=max_step_size)
+        t_newton = t - step
+
+        # Accept Newton only if it stays strictly inside the bracket; else bisect.
+        # NaN/inf steps fail the comparison and fall back to bisection automatically.
+        inside = (t_newton > lo) & (t_newton < hi)
+        t_next = torch.where(inside, t_newton, 0.5 * (lo + hi))
+
+        # Freeze elements that have already hit the root (keeps idempotence exact).
+        converged = f_val.abs() < 1e-10
+        t = torch.where(converged, t, t_next)
 
     # 4. Analytical Consensus Reconstruction
     t2 = t.square()
@@ -317,8 +340,8 @@ def matmul_proj(A, B, Z, t_init=None, alpha=1.0, g=1.0, omega=1.0, num_steps=1, 
     B_proj = (1.0 / M) * (alpha * B * sum_inv_denom_i + A.transpose(-2, -1) @ t_inv_denom)
 
     Z_proj = Z - t * target_penalty
-    
     return A_proj, B_proj, Z_proj, t.detach()
+
 
 # ─── autograd.Function wrappers ───────────────────────────────────────────────
 class MatMulProjection(torch.autograd.Function):
@@ -328,14 +351,14 @@ class MatMulProjection(torch.autograd.Function):
     """
     @staticmethod
     def forward(ctx, A, B, num_steps, alpha, g, omega, proj_cache=None, pairwise=False, forward_cache=None):
-        ctx.save_for_backward(A, B)
         ctx.alpha = alpha
         ctx.g = g
         ctx.num_steps = num_steps
-        ctx.proj_cache = proj_cache  
-        ctx.forward_cache = forward_cache 
+        ctx.proj_cache = proj_cache
+        ctx.forward_cache = forward_cache
         ctx.omega = omega
         ctx.pairwise = pairwise
+        ctx.save_for_backward(A, B)
         return (A @ B) / omega
 
     @staticmethod
@@ -384,7 +407,7 @@ class MatMulProjection(torch.autograd.Function):
 
         if ctx.forward_cache is not None:
             ctx.forward_cache[0] = Z_proj
-        return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None, None, None
+        return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None, None
 
 
 class MSEProjection(torch.autograd.Function):
@@ -674,29 +697,120 @@ class LeakyReLUProjection(torch.autograd.Function):
         return process_activation_target(x, result), None
 
 
-class StepProjection(torch.autograd.Function):
+def _pava_1d_numpy(values):
+    """O(n) pool-adjacent-violators on a 1D numpy array (unit weights, ascending)."""
+    import numpy as np
+    n = values.shape[0]
+    if n == 0:
+        return values.copy()
+    sums = [float(values[0])]
+    counts = [1]
+    for i in range(1, n):
+        sums.append(float(values[i]))
+        counts.append(1)
+        while len(sums) >= 2 and sums[-2] / counts[-2] > sums[-1] / counts[-1]:
+            s = sums.pop(); c = counts.pop()
+            sums[-1] += s; counts[-1] += c
+    out = np.empty(n, dtype=values.dtype)
+    idx = 0
+    for s, c in zip(sums, counts):
+        v = s / c
+        out[idx:idx + c] = v
+        idx += c
+    return out
+
+
+def isotonic_projection(x):
     """
-    PyTorch equivalent of PJAX step activation projection.
-    Forward: step(sum of inputs) -> 1 if sum >= 0 else -1
-    Backward: projects inputs onto the step constraint graph.
+    L2 projection onto the cone of non-decreasing sequences along the last dim.
+
+    Fast path: if the input is already non-decreasing along the last dim, return
+    as is (the common case when called from SortProjection.backward, where the
+    input is the midpoint of two ascending-sorted vectors). Otherwise fall back
+    to per-row PAVA via numpy.
+    """
+    if x.numel() == 0 or x.shape[-1] <= 1:
+        return x
+    diffs = x[..., 1:] - x[..., :-1]
+    if bool((diffs >= 0).all()):
+        return x
+    import numpy as np
+    orig_shape = x.shape
+    flat = x.detach().reshape(-1, orig_shape[-1]).cpu().numpy()
+    out = np.empty_like(flat)
+    for r in range(flat.shape[0]):
+        out[r] = _pava_1d_numpy(flat[r])
+    return torch.from_numpy(out).to(device=x.device, dtype=x.dtype).reshape(orig_shape)
+
+
+class SortProjection(torch.autograd.Function):
+    """
+    Projection-aware sorting layer.
+
+    Forward: returns the sorted tensor in ascending order along `dim`.
+    Backward: exact L2 projection of (x, z_target) onto the manifold
+              y = sort(x).  z_target is rank-indexed (same shape as the sorted
+              output), so the algorithm is:
+                  m = (sorted_x + z_target) / 2     (midpoint in rank space)
+                  v = isotonic_projection(m)         (PAVA: ascending v closest
+                                                      to m)
+                  x_proj[i] = v[rank_of_x(i)]        (scatter back via the
+                                                      forward sort permutation)
+              This minimises ||x' - x||² + ||sort(x') - z_target||².
+              Sorting z_target before averaging (an earlier draft) destroys
+              the per-rank target signal — that's the rearrangement-inequality
+              trap.
     """
     @staticmethod
-    def forward(ctx, *inputs):
-        ctx.save_for_backward(*inputs)
-        s = sum(inputs)
-        return torch.where(s >= 0, torch.tensor(1.0, dtype=s.dtype, device=s.device), 
-                           torch.tensor(-1.0, dtype=s.dtype, device=s.device))
+    def forward(ctx, x, dim=-1):
+        ctx.dim = dim
+        sorted_x, indices = torch.sort(x, dim=dim)
+        ctx.save_for_backward(x, sorted_x, indices)
+        return sorted_x
 
     @staticmethod
     def backward(ctx, z_target):
-        inputs = ctx.saved_tensors
-        n = len(inputs)
-        
-        s = sum(inputs)
-        
-        mid = (s - z_target) / (n + 1)
-        
-        return projected_inputs
+        x, sorted_x, indices = ctx.saved_tensors
+        dim = ctx.dim
+
+        m = (sorted_x + z_target) / 2.0
+
+        last_dim = x.ndim - 1
+        moved = dim != -1 and dim != last_dim
+        if moved:
+            m = m.transpose(dim, -1)
+        v = isotonic_projection(m)
+        if moved:
+            v = v.transpose(dim, -1)
+
+        x_proj = torch.empty_like(x)
+        x_proj.scatter_(dim, indices, v)
+
+        return process_activation_target(x, x_proj), None
+
+
+class StepProjection(torch.autograd.Function):
+    """
+    Step activation projection.
+    Forward:  step(x) -> +1 if x >= 0 else -1
+    Backward: projects x onto the closed half-space agreeing with z_target.
+              If sign(x) already matches z_target, leave x untouched; else
+              push x to 0 (the boundary closest to x in the wrong branch).
+    """
+    @staticmethod
+    def forward(ctx, x):
+        ctx.save_for_backward(x)
+        return torch.where(x >= 0,
+                           torch.tensor(1.0, dtype=x.dtype, device=x.device),
+                           torch.tensor(-1.0, dtype=x.dtype, device=x.device))
+
+    @staticmethod
+    def backward(ctx, z_target):
+        x, = ctx.saved_tensors
+        # sign-agreement mask: keep x where it already produces z_target.
+        agrees = (x * z_target) >= 0
+        x_proj = torch.where(agrees, x, torch.zeros_like(x))
+        return process_activation_target(x, x_proj)
 
 class QuantizeReLUProjection(torch.autograd.Function):
     """
@@ -747,7 +861,6 @@ class QuantizeReLUProjection(torch.autograd.Function):
             best_x = torch.where(better, x_clamped, best_x)
             best_dist = torch.where(better, dist, best_dist)
 
-        # Assuming process_activation_target handles the STE or projection update
         return process_activation_target(x, best_x), None
 
 class GappedStepProjection(torch.autograd.Function):
@@ -769,10 +882,10 @@ class GappedStepProjection(torch.autograd.Function):
     def forward(ctx, x, delta=2.0):
         ctx.save_for_backward(x)
         ctx.delta = delta
-        half = delta / 2.0
-        return torch.where(x >= half, torch.ones_like(x),
-               torch.where(x <= -half, -torch.ones_like(x),
-                            torch.zeros_like(x)))
+        
+        # Clamp to the closest non-zero value (+1 or -1). 
+        # torch.where ensures we never output exactly 0, even if x == 0.
+        return torch.where(x >= 0.0, torch.ones_like(x), -torch.ones_like(x))
 
     @staticmethod
     def backward(ctx, z_target):
@@ -890,6 +1003,55 @@ def max_proj_pt_batch(a, z):
     a_proj.scatter_(1, idx, best_a_k_sorted)
 
     return a_proj
+
+
+class SeqMaxPoolProjection(torch.autograd.Function):
+    """Projection-aware global max-pool over the sequence (token) dimension.
+
+    GNN-style readout: collapses (B, T, D) to (B, D) by taking the max over T.
+    Backward: for each independent (b, d) slice, projects the T-element vector
+    and the incoming scalar target onto the max-equality constraint via
+    `max_proj_pt_batch`.
+    """
+    @staticmethod
+    def forward(ctx, x):
+        ctx.save_for_backward(x)
+        return torch.amax(x, dim=1)
+
+    @staticmethod
+    def backward(ctx, z_target):
+        x, = ctx.saved_tensors
+        B, T, D = x.shape
+
+        # Lay out each (b, d) slice as a row of length T
+        a_batch = x.permute(0, 2, 1).reshape(B * D, T).contiguous()
+        z_batch = z_target.reshape(B * D, 1)
+
+        a_proj_batch = max_proj_pt_batch(a_batch, z_batch)
+
+        x_proj = a_proj_batch.view(B, D, T).permute(0, 2, 1).contiguous()
+        return process_activation_target(x, x_proj)[0]
+
+
+class SeqAvgPoolProjection(torch.autograd.Function):
+    """Projection-aware global average-pool over the sequence (token) dimension.
+
+    GNN-style readout: collapses (B, T, D) to (B, D) by taking the mean over T.
+    Backward: for the linear constraint ``mean(x_proj, dim=1) == z_target``, the
+    minimum-norm correction adds the per-(b, d) residual ``z_target - mean(x)``
+    uniformly across the T tokens.
+    """
+    @staticmethod
+    def forward(ctx, x):
+        ctx.save_for_backward(x)
+        return x.mean(dim=1)
+
+    @staticmethod
+    def backward(ctx, z_target):
+        x, = ctx.saved_tensors
+        y = x.mean(dim=1)
+        x_proj = x + (z_target - y).unsqueeze(1)
+        return process_activation_target(x, x_proj)[0]
 
 
 class MaxPool2DProjection(torch.autograd.Function):
@@ -1111,9 +1273,8 @@ class LogitSoftcapInversion(torch.autograd.Function):
 class Conversion(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input):
-        ctx.save_for_backward(input)
-        return input
-
+        ctx.save_for_backward(input.clone())
+        return input.clone()
     @staticmethod
     def backward(ctx, z_target):
         (input,) = ctx.saved_tensors

@@ -6,9 +6,9 @@
 # ── Experiment identity ───────────────────────────
 experiment_name: cnn_benchmark   # shown in wandb as the run prefix
 random_seed: 43
-max_steps: 10000
-num_runs: 2
-eval_every: 50
+max_steps: 5000
+num_runs: 3
+eval_every: 1
 patience: 1000
 
 # ── Model architecture ───────────────────────────
@@ -17,7 +17,7 @@ patience: 1000
 conv_widths: [4]
 
 # ── Batch sizes to sweep ─────────────────────────
-batch_sizes: [32]
+batch_sizes: [64]
 
 # ── Tasks ─────────────────────────────────────────
 tasks:
@@ -30,18 +30,13 @@ tasks:
 
 
 # ── Optimizers per framework ──────────────────────
-# pjax (new) — optim_static or optim classes
-pjax_optimizer: DouglasRachford
-pjax_optimizer_kwargs:
-  steps_per_update: 50
-
 # pjax_orr (original) — optim classes
 pjax_orr_optimizer: DouglasRachford
 pjax_orr_optimizer_kwargs:
   steps_per_update: 50
 
 # ptorch — ptorch.optim_static classes
-ptorch_optimizer: ProjectionAdam
+ptorch_optimizer: ProjectionMuon
 ptorch_optimizer_kwargs:
   lr: 0.001
 # torch — any torch.optim class

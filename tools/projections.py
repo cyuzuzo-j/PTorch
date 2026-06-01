@@ -151,6 +151,34 @@ def unpack_dyadic(m, p=12, dtype=jnp.float32):
     return m.astype(dtype) * Delta
 
 
+# --- Per-tensor (shared-exponent) dyadic ---------------------------------
+# Same dyadic lattice Δ·ℤ with Δ = 2^-p, but p is chosen per tensor from its
+# absmax instead of being a single global constant. The scale stays a power of
+# two, so this is still dyadic — just one exponent per tensor (a block / shared-
+# exponent format). Picking p by absmax fills the int{bits} range without ever
+# saturating, which is what lets narrow widths (int8) carry a wide value range.
+
+def dyadic_scale_pertensor(x, bits):
+    """Per-tensor dyadic exponent: p = floor((bits-1) - log2(max|x|)), so the
+    largest |value| lands just inside the int{bits} range. Returns a scalar."""
+    amax = jnp.max(jnp.abs(x))
+    return jnp.floor((bits - 1) - jnp.log2(jnp.maximum(amax, 1e-30)))
+
+
+@partial(jax.jit, static_argnames=("bits",))
+def pack_dyadic_dyn(x, p, bits):
+    """pack_dyadic with a traced (data-dependent) exponent p; saturates on overflow."""
+    Delta = jnp.exp2(-p)
+    lo, hi = _int_range(bits)
+    return jnp.clip(jnp.round(x / Delta), lo, hi).astype(_INT_DTYPE[bits])
+
+
+@partial(jax.jit, static_argnames=("dtype",))
+def unpack_dyadic_dyn(m, p, dtype=jnp.float32):
+    """Decode a dynamic-exponent packed tensor: x = m · 2^-p."""
+    return m.astype(dtype) * jnp.exp2(-p).astype(dtype)
+
+
 @partial(jax.jit, static_argnames=("p", "bits"))
 def matMul_dyadic_packed(X_int, W_int, Z_int,
                          alpha=1.0, g=1.0, omega=1.0, num_steps=10,

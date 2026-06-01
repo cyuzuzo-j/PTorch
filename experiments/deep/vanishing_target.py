@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../frameworks')))
 
 from frameworks.ptorch.nn.modules import Linear
-from frameworks.ptorch.optim_static import ProjectionMuon
+from frameworks.ptorch.optim_static import ProjectionMuonV2
 from frameworks.ptorch.core.ops import MSEProjection
 
 sns.set_theme(style="whitegrid", context="paper", font_scale=2.0)
@@ -90,7 +90,7 @@ def run_experiment(device):
             random.seed(seed)
 
             model = IdentityMLP(depth=depth, d=D).to(device)
-            optimizer = ProjectionMuon(model.parameters())
+            optimizer = ProjectionMuonV2(model.parameters())
             final_loss = 0.0
 
             for step in range(1, N_STEPS + 1):

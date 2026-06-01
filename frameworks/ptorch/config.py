@@ -24,7 +24,6 @@ class Config:
 
     # ---- muon on activations ------------------------------------------------
     use_muon_activations: bool = False
-    muon_activations_lr: float = 1.0
     
     # ---- frozen-A weight solve ----------------------------------------------
     frozen_a_weights: bool = False

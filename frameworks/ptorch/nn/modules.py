@@ -7,7 +7,7 @@ from ..config import config
 
 class ProjectionModule(nn.Module):
     """Base class for projection-aware modules."""
-    def __init__(self, outputs):
+    def __init__(self, outputs=0):
         super().__init__()
         self.outputs = outputs
         self.projection_forward_cache = [None for _ in range(outputs)]
@@ -23,7 +23,7 @@ class Linear(ProjectionModule):
         omega: float = 1.0,
         num_iters: int = 1,
         norm = 'l2',
-        use_cache=True
+        use_cache=True,
     ):
         super().__init__(outputs=1)
         self.in_features = in_features
@@ -44,7 +44,7 @@ class Linear(ProjectionModule):
             self.register_parameter('bias', None)
 
         nn.init.kaiming_normal_(self.weight)
-        
+
     def forward(self, input, norm=None):
         norm_type = norm if norm is not None else self.norm
 
@@ -76,7 +76,7 @@ class Linear(ProjectionModule):
                 self.alpha ,
                 self.g, self.omega,
                 self.proj_cache, False, self.projection_forward_cache)
-            
+
         return output
 
 class ReLU(ProjectionModule):
@@ -90,7 +90,7 @@ class ReLU(ProjectionModule):
             if norm == 'linf':
                 return ReLULInfinityProjection.apply(input,  self.projection_forward_cache)
             return ReLUProjection.apply(input,  self.projection_forward_cache)
-        return super().forward(input)
+        return F.relu(input)
 
 class Softmax(ProjectionModule):
     """Projection-aware softmax over the last dimension.
@@ -121,19 +121,45 @@ class Step(ProjectionModule):
     """Step activation function."""
     def __init__(self):
         super().__init__()
-        
+
     def forward(self, input):
         if config.use_projections:
             return StepProjection.apply(input)
-        return torch.where(input >= 0, torch.tensor(1.0, dtype=input.dtype, device=input.device), 
+        return torch.where(input >= 0, torch.tensor(1.0, dtype=input.dtype, device=input.device),
                            torch.tensor(-1.0, dtype=input.dtype, device=input.device))
 
-class CrossEntropy(ProjectionModule):
-    def __init__(self):
-        super().__init__(0)
+class Sort(ProjectionModule):
+    """Sort activation.
 
-    def forward(self, input, data_target):
-        return CrossEntropyProjection.apply(input, data_target)
+    Forward:  ascending sort along `dim`.
+    Backward: projection-aware via SortProjection (rank-match + midpoint +
+              PAVA + inverse permutation). With config.use_projections=False
+              falls back to a plain sort (gradients go through torch.sort).
+    """
+    def __init__(self, dim: int = -1):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, input):
+        if config.use_projections:
+            return SortProjection.apply(input, self.dim)
+        return torch.sort(input, dim=self.dim).values
+
+class QuantizedRelu(ProjectionModule):
+    """Quantized ReLU activation.
+
+    Forward:  f(x) = step * round(max(0, x) / step)
+    Backward: routes through QuantizeReLUProjection (non-differentiable rung
+    projection onto the nearest staircase segment).
+    """
+    def __init__(self, step: float = 1.0):
+        super().__init__()
+        self.step = step
+
+    def forward(self, input):
+        if config.use_projections:
+            return QuantizeReLUProjection.apply(input, self.step)
+        return self.step * torch.round(torch.clamp(input, min=0.0) / self.step)
 
 class GappedStep(ProjectionModule):
     """Step activation function with a dead zone.
@@ -141,9 +167,14 @@ class GappedStep(ProjectionModule):
     Like the regular Step activation but with a gap of width `delta`
     centred at the origin where the function is undefined:
 
+        backward pass:
         f(x) = +1   if x >= delta/2
         f(x) = -1   if x <= -delta/2
-        f(x) =  0   otherwise (undefined region, outputs 0)
+
+        forward pass 
+        f(x) = +1   if x >= 0
+        f(x) = -1   if x <= -0
+
 
     Args:
         delta: Width of the gap region (default 2.0).
@@ -232,7 +263,7 @@ class Conv2D(ProjectionModule):
         bias: bool = True,
         alpha: float = 1.0,
         g: float = 1.0,
-        num_iters: int = 15,
+        num_iters: int = 5,
     ):
         super().__init__(outputs=1)
         
@@ -303,4 +334,6 @@ class MaxPool2d(nn.Module):
         self.padding = padding
 
     def forward(self, x):
-        return MaxPool2DProjection.apply(x, self.kernel_size, self.stride, self.padding)
+        if config.use_projections:
+            return MaxPool2DProjection.apply(x, self.kernel_size, self.stride, self.padding)
+        return F.max_pool2d(x, self.kernel_size, self.stride, self.padding)
