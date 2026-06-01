@@ -1,12 +1,25 @@
 """
 Compare continuous bilinear projections vs dyadic-quantized variants on MNIST.
 
-Mirrors the shallow-MLP setup from mnist_from_scratch.ipynb. For each precision
-p in {6, 8, 12, 16, infinity}, runs cyclic projections from the same shared
-initialization, logs train/val accuracy and per-batch error, and plots the
-result. p=infinity = the original (no quantization) continuous matMul / matMulfixedX.
+Mirrors the shallow-MLP setup from mnist_from_scratch.ipynb. Each run stores its
+weights in a dyadic format: an int{bits} mantissa m with scale 2^-p, value m·2^-p.
 
-Run:  python experiments/mnist_dyadic_compare.py [--bps N] [--steps S] [--epochs E]
+Two schemes (--scale):
+  pertensor (default): weight-only. p is chosen per weight matrix from its absmax
+      (p = floor(bits-1 - log2(max|W|))), so the matrix fills the int{bits} range
+      without saturating; the scale is still a power of two (dyadic), just one
+      exponent per tensor. Activations are NOT quantized — they're transient
+      (recomputed each batch, never stored), so quantizing them only adds solver
+      noise for no memory benefit. This is what makes int8 viable: a single global
+      exponent can't span both the ~2.8 inputs and the ~0.01 weights in 8 bits.
+  global: original fixed-p dyadic on every tensor (X, W, Z). p must leave enough
+      integer headroom for the data — e.g. 16@16 ⇒ range ±0.5 saturates MNIST's
+      ~2.82 inputs and never learns; 16@12 ⇒ range ±8 works.
+
+'inf' = the original (no quantization) continuous matMul / matMulfixedX baseline.
+
+Run:  python experiments/mnist_dyadic_compare.py [--scale pertensor|global]
+                                                 [--ps 8,16,32,inf] [--bps N] [--steps S]
 """
 import os, sys, argparse, time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -24,6 +37,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
+import torch
 from torchvision.datasets import MNIST
 from torch.utils.data import DataLoader
 
@@ -85,17 +99,42 @@ def compute_accuracy(W0, W1, loader, max_batches=None):
 
 # ---- Projection back-ends parameterized by precision p (None ⇒ continuous) ----
 
-def make_projectors(bits, p):
+def quantize_weight_pertensor(W, bits):
+    """Round-trip W through a per-tensor dyadic int{bits} encoding (the value it
+    would have after being stored as a mantissa + per-tensor power-of-two exponent)."""
+    pw = projections.dyadic_scale_pertensor(W, bits)
+    return projections.unpack_dyadic_dyn(projections.pack_dyadic_dyn(W, pw, bits), pw)
+
+
+def make_projectors(bits, p, scale="pertensor"):
     """Returns (matMul_fn, matMulfixedX_fn) operating on float tensors.
 
-    For packed runs, the projector encodes inputs to int{bits} mantissas with
-    implicit scale 2^-p, runs the joint solver in float, and re-encodes outputs.
-    The float<->int boundary is the fixed-point analogue: between calls the
-    persistent state (W0, W1) lives in int{bits} memory.
+    scale="pertensor" (default): weight-only quantization. Only the persisted
+        weight matrix is encoded — as an int{bits} mantissa with a per-tensor
+        power-of-two exponent chosen by absmax — while the transient activations
+        (X, Z) stay in float. Adapting the exponent to each weight's magnitude is
+        what makes narrow widths (int8) work; keeping activations float avoids
+        injecting quantization noise into the iterative solver for no memory gain
+        (activations are recomputed each batch, never stored).
+
+    scale="global": original fixed-p dyadic. Every tensor (X, W, Z) is snapped to
+        a single shared lattice 2^-p, runs the joint solver in float, and is
+        re-encoded. p must leave enough integer headroom or the data saturates.
     """
     if bits is None:
         def matMul_fn(X, W, Z):       return projections.matMul(X, W, Z)
         def matMulfixedX_fn(X, W, Z): return projections.matMulfixedX(X, W, Z)
+        return matMul_fn, matMulfixedX_fn
+
+    if scale == "pertensor":
+        def matMul_fn(X, W, Z):
+            Xo, Wo, Zo = projections.matMul(X, W, Z)
+            return Xo, quantize_weight_pertensor(Wo, bits), Zo
+
+        def matMulfixedX_fn(X, W, Z):
+            Xo, Wo, Zo = projections.matMulfixedX(X, W, Z)
+            return Xo, quantize_weight_pertensor(Wo, bits), Zo
+
         return matMul_fn, matMulfixedX_fn
 
     def matMul_fn(X, W, Z):
@@ -129,8 +168,20 @@ def _saturation_rate(x, p, bits):
     return float(np.mean((m < lo) | (m > hi)))
 
 
-def run(bits, p, bps, batches_per_epoch, num_epochs, key, train_loader, test_loader, label):
-    matMul_fn, matMulfixedX_fn = make_projectors(bits, p)
+def run(bits, p, bps, batches_per_epoch, num_epochs, key, train_loader, test_loader,
+        label, scale="pertensor"):
+    matMul_fn, matMulfixedX_fn = make_projectors(bits, p, scale)
+
+    def encode_weight(W):
+        """Encode→decode one weight matrix under the active scheme.
+        Returns (W_float, stored_bytes, exponent_used). For 'pertensor' the
+        stored size is the mantissa plus one float32 exponent per tensor."""
+        if scale == "pertensor":
+            pw = projections.dyadic_scale_pertensor(W, bits)
+            Wi = projections.pack_dyadic_dyn(W, pw, bits)
+            return projections.unpack_dyadic_dyn(Wi, pw), int(Wi.nbytes) + 4, float(pw)
+        Wi = projections.pack_dyadic(W, p=p, bits=bits)
+        return projections.unpack_dyadic(Wi, p=p), int(Wi.nbytes), p
 
     k1, k2 = random.split(key, 2)
     W0 = random.normal(k1, (HIDDEN_WIDTH, IN_FEATURES)) * 0.01
@@ -139,14 +190,14 @@ def run(bits, p, bps, batches_per_epoch, num_epochs, key, train_loader, test_loa
     # For packed runs, persist W0/W1 as int{bits} between batches and decode
     # at batch entry. This is what realizes the actual memory saving.
     if bits is not None:
-        W0_int = projections.pack_dyadic(W0, p=p, bits=bits)
-        W1_int = projections.pack_dyadic(W1, p=p, bits=bits)
-        W0 = projections.unpack_dyadic(W0_int, p=p)
-        W1 = projections.unpack_dyadic(W1_int, p=p)
-        weight_bytes_packed = int(W0_int.nbytes + W1_int.nbytes)
+        W0, b0, _ = encode_weight(W0)
+        W1, b1, _ = encode_weight(W1)
+        weight_bytes_packed = b0 + b1
     else:
         weight_bytes_packed = None
-    weight_bytes_float = int(W0.nbytes + W1.nbytes)
+    # float32-equivalent baseline (the run itself uses float64 for solver stability
+    # when jax_enable_x64 is on, so count elements × 4 rather than .nbytes).
+    weight_bytes_float = int((W0.size + W1.size) * 4)
 
     eye_h = jnp.eye(HIDDEN_WIDTH)
     eye_y = jnp.eye(NUM_CLASSES)
@@ -182,13 +233,12 @@ def run(bits, p, bps, batches_per_epoch, num_epochs, key, train_loader, test_loa
 
             # For packed runs: re-pack persistent weights so storage stays int{bits}
             if bits is not None:
-                W0_int = projections.pack_dyadic(W0, p=p, bits=bits)
-                W1_int = projections.pack_dyadic(W1, p=p, bits=bits)
-                W0 = projections.unpack_dyadic(W0_int, p=p)
-                W1 = projections.unpack_dyadic(W1_int, p=p)
+                W0, _, p0 = encode_weight(W0)
+                W1, _, p1 = encode_weight(W1)
                 # accumulate saturation rates (cheap; sampled per batch)
-                sat_W += _saturation_rate(W0, p, bits) + _saturation_rate(W1, p, bits)
-                sat_x += _saturation_rate(x_hidden, p, bits) + _saturation_rate(h_hidden, p, bits)
+                sat_W += _saturation_rate(W0, p0, bits) + _saturation_rate(W1, p1, bits)
+                if scale == "global":  # activations only quantized in global mode
+                    sat_x += _saturation_rate(x_hidden, p, bits) + _saturation_rate(h_hidden, p, bits)
                 n_sat += 2
 
             err, _, _, x_out_log = forward_pass(W0, W1, x_in, y_target)
@@ -221,9 +271,14 @@ def main():
     ap.add_argument("--steps",  type=int, default=120, help="batches per epoch (cap)")
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--out",    type=str, default="mnist_dyadic_compare")
-    ap.add_argument("--ps",     type=str, default="32@32,8@16,16@16,inf",
-                    help=("comma-separated 'bits@p' configs (e.g. 16@10, 8@4); "
-                          "'inf' = continuous float32 baseline"))
+    ap.add_argument("--scale",  type=str, default="pertensor", choices=("pertensor", "global"),
+                    help=("'pertensor' (default): weight-only dyadic, per-tensor exponent "
+                          "chosen by absmax, activations stay float. 'global': original "
+                          "fixed-p dyadic on every tensor (then each --ps token needs '@p')."))
+    ap.add_argument("--ps",     type=str, default="8,16,32,inf",
+                    help=("comma-separated configs: bare 'bits' (per-tensor exponent is "
+                          "auto-derived) or 'bits@p' for a fixed exponent (required under "
+                          "--scale global). 'inf' = continuous float32 baseline."))
     args = ap.parse_args()
 
     precisions = []  # list of (bits, p, label)
@@ -231,15 +286,20 @@ def main():
         tok = tok.strip()
         if tok.lower() in ("inf", "infinity", "none", "-1"):
             precisions.append((None, None, "float32 (continuous)"))
-        else:
-            if "@" not in tok:
-                raise ValueError(f"--ps token {tok!r} must be 'bits@p' (e.g. 16@8) or 'inf'")
+            continue
+        if "@" in tok:
             bits_s, p_s = tok.split("@")
             bits, p = int(bits_s), int(p_s)
-            if bits not in (8, 16, 32):
-                raise ValueError(f"bits must be 8/16/32, got {bits}")
-            precisions.append((bits, p, f"int{bits} p={p}"))
+        else:
+            bits, p = int(tok), None
+        if bits not in (8, 16, 32):
+            raise ValueError(f"bits must be 8/16/32, got {bits}")
+        if args.scale == "global" and p is None:
+            raise ValueError(f"--scale global needs an explicit exponent: '{bits}@<p>'")
+        label = f"int{bits}" if args.scale == "pertensor" else f"int{bits} p={p}"
+        precisions.append((bits, p, label))
 
+    torch.manual_seed(0)  # fix DataLoader shuffle order so runs are reproducible
     train_loader, test_loader = load_mnist(BATCH_SIZE)
     key = random.key(42)
     init_key, _ = random.split(key)
@@ -247,7 +307,7 @@ def main():
     all_rows = []
     for bits, p, label in precisions:
         all_rows.extend(run(bits, p, args.bps, args.steps, args.epochs,
-                            init_key, train_loader, test_loader, label))
+                            init_key, train_loader, test_loader, label, scale=args.scale))
 
     df = pd.DataFrame(all_rows)
     df.to_csv(f"{args.out}.csv", index=False)
@@ -270,7 +330,7 @@ def main():
     ax4.set_xlabel("Cumulative wall-clock time (s)")
     ax4.set_title("Validation accuracy vs wall-clock time"); ax4.grid(True, alpha=0.2)
 
-    fig.suptitle(f"Dyadic quantization vs continuous projections "
+    fig.suptitle(f"Dyadic quantization ({args.scale}) vs continuous projections "
                  f"(bps={args.bps}, batches={args.steps}, epochs={args.epochs})")
     fig.tight_layout()
 

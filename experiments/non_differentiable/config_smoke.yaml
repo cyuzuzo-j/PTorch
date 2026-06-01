@@ -1,0 +1,33 @@
+experiment_name: non_differentiable_activations_smoke
+random_seed: 43
+num_runs: 1
+
+max_steps: 60
+eval_every: 20
+patience: 100
+batch_sizes: [128]
+
+norms:
+  - l2
+
+results_dir: results_smoke
+
+tasks:
+  - name: MNIST
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [64]
+
+activations:
+  - ReLU
+  - Step
+  - GappedStep
+  - QuantizedRelu
+
+ptorch_optimizer: ProjectionAdam
+ptorch_optimizer_kwargs:
+  lr: 0.001
+
+losses:
+  - CrossEntropy

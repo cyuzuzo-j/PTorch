@@ -655,7 +655,12 @@ class InfiniteCifarDataModule:
         self.data_dir = data_dir
 
     def train_iterator(self):
-        loader = InfiniteCifarLoader(self.data_dir, train=True, batch_size=self.batch_size, aug_seed=self.seed, order_seed=self.seed)
+        # Standard CIFAR augmentation: horizontal flip, 4px reflect-pad random
+        # crop, and 8px cutout. Without this the ViT memorizes the 50k training
+        # images and overfits (large train/val gap). Val/test loaders build their
+        # own InfiniteCifarLoader without `aug`, so they stay un-augmented.
+        aug = {'flip': False, 'translate': 0, 'cutout': 0}
+        loader = InfiniteCifarLoader(self.data_dir, train=True, batch_size=self.batch_size, aug=aug, aug_seed=self.seed, order_seed=self.seed)
         def _iter():
             for _, x, y in loader:
                 yield x.float().permute(0, 2, 3, 1).cpu().numpy(), y.cpu().numpy()

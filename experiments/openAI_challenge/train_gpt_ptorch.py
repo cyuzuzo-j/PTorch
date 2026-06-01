@@ -32,12 +32,12 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent.parent.resolve()))
 from frameworks.ptorch.config import config
 from frameworks.ptorch.nn.modules import ReLU, Linear, CrossEntropy
-from frameworks.ptorch.nn.modules_experimental import Conversion
+from frameworks.ptorch.nn.modules_experimental import Conversion, Branch
 from frameworks.ptorch.core.overrides import apply_overrides
 from frameworks.ptorch.optim_static import ProjectionAdam, ProjectionSGD, ProjectionMuon
 from frameworks.ptorch.nn.modules_experimental import RMSNorm, CausalSelfAttention, Softcap
 from torch.backends.cuda import enable_cudnn_sdp, enable_flash_sdp, enable_math_sdp, enable_mem_efficient_sdp
-from frameworks.ptorch.core.ops import MatMulProjection
+from frameworks.ptorch.core.ops import MatMulProjection, process_activation_target
 
 import torch._inductor.runtime.hints as hints
 hints.TRITON_MAX_BLOCK['X'] = 65536
@@ -439,6 +439,149 @@ class DistributedTokenLoader:
 # TRANSFORMER MODULES
 # -----------------------------
 
+# ── Projection-aware residual/blend autograd Functions ─────────────────────
+# Plain `torch.add(skip, out)` and `torch.mul(scale, out)` use standard autograd
+# backward, which chain-rules the upstream "target" as if it were a gradient.
+# Under projection mode the activation should receive the *projected target*
+# `z_target / scale` (not `scale * z_target`), and the optimizer expects each
+# parameter's `.grad` to hold a *target* (it converts pseudo_grad = param - target
+# inside ProjectionMuon/SGD/Adam — see `frameworks/ptorch/optim_static.py:108`).
+# The Functions below return targets at every slot, wrapping activations with
+# `process_activation_target` per the MatMulProjection convention.
+
+class ResidualAdd(torch.autograd.Function):
+    """Projection-aware skip + out residual. Splits the residual displacement
+    equally between the two branches in the backward (target) pass."""
+    @staticmethod
+    def forward(ctx, skip, out):
+        z = skip + out
+        ctx.save_for_backward(skip, out, z)
+        return z
+
+    @staticmethod
+    def backward(ctx, z_target):
+        skip, out, z = ctx.saved_tensors
+        delta = (z_target - z) / 2.0
+        skip_target = skip + delta
+        out_target = out + delta
+        return (
+            process_activation_target(skip, skip_target)[0],
+            process_activation_target(out, out_target)[0],
+        )
+
+
+class ScaledResidualAdd(torch.autograd.Function):
+    """Projection-aware `z = skip + scale * out` with `scale` broadcasting over the
+    leading dims of `out` (e.g. scale: (D,), out: (B, T, D)).
+    Backward:
+      - additive part: ResidualAdd-style delta/2 split.
+      - bilinear part u = scale * out: one alternating-projection sweep
+        (project out given scale, then closed-form LS for scale given out).
+    """
+    @staticmethod
+    def forward(ctx, skip, scale, out):
+        z = skip + scale * out
+        ctx.save_for_backward(skip, scale, out, z)
+        return z
+
+    @staticmethod
+    def backward(ctx, z_target):
+        skip, scale, out, z = ctx.saved_tensors
+        delta = (z_target - z) / 2.0
+        skip_target = skip + delta
+        # Target for the product u = scale * out
+        u_target = scale * out + delta
+        s = scale.to(out.dtype)
+        out_target = torch.where(s.abs() > 1e-6, u_target / s, out)
+        # LS-project scale per-D given out_target. Accumulate in fp32 for stability.
+        reduce_dims = tuple(range(out.ndim - scale.ndim))
+        u_f = u_target.float()
+        o_f = out_target.float()
+        num = (u_f * o_f).sum(reduce_dims)
+        den = (o_f * o_f).sum(reduce_dims) + 1e-8
+        scale_target = (num / den).to(scale.dtype)
+        return (
+            process_activation_target(skip, skip_target)[0],
+            scale_target,
+            process_activation_target(out, out_target)[0],
+        )
+
+
+class MixResidualAdd(torch.autograd.Function):
+    """Projection-aware `z = mix[0] * x + mix[1] * x0` where `mix` has shape (2, D)
+    and broadcasts over (B, T, D)."""
+    @staticmethod
+    def forward(ctx, x, x0, mix):
+        z = mix[0][None, None, :] * x + mix[1][None, None, :] * x0
+        ctx.save_for_backward(x, x0, mix, z)
+        return z
+
+    @staticmethod
+    def backward(ctx, z_target):
+        x, x0, mix, z = ctx.saved_tensors
+        delta = (z_target - z) / 2.0
+        s0 = mix[0][None, None, :].to(x.dtype)
+        s1 = mix[1][None, None, :].to(x.dtype)
+        u0_t = s0 * x + delta
+        u1_t = s1 * x0 + delta
+        x_target = torch.where(s0.abs() > 1e-6, u0_t / s0, x)
+        x0_target = torch.where(s1.abs() > 1e-6, u1_t / s1, x0)
+        reduce_dims = tuple(range(x.ndim - 1))
+        u0_f = u0_t.float(); u1_f = u1_t.float()
+        xt_f = x_target.float(); x0t_f = x0_target.float()
+        m0 = ((u0_f * xt_f).sum(reduce_dims)
+              / ((xt_f * xt_f).sum(reduce_dims) + 1e-8)).to(mix.dtype)
+        m1 = ((u1_f * x0t_f).sum(reduce_dims)
+              / ((x0t_f * x0t_f).sum(reduce_dims) + 1e-8)).to(mix.dtype)
+        mix_target = torch.stack((m0, m1), dim=0)
+        return (
+            process_activation_target(x, x_target)[0],
+            process_activation_target(x0, x0_target)[0],
+            mix_target,
+        )
+
+
+class IndexedScaledResidualAdd(torch.autograd.Function):
+    """`z = skip + scale_table[idx] * out`. Returns a full-shape `scale_table`
+    target whose unused rows equal the current parameter — so the optimizer's
+    `pseudo_grad = param - target` is zero for those rows (no spurious push).
+    """
+    @staticmethod
+    def forward(ctx, skip, scale_table, idx, out):
+        scale = scale_table[idx]
+        z = skip + scale * out
+        ctx.save_for_backward(skip, scale_table, out, z)
+        ctx.idx = int(idx)
+        return z
+
+    @staticmethod
+    def backward(ctx, z_target):
+        skip, scale_table, out, z = ctx.saved_tensors
+        idx = ctx.idx
+        scale = scale_table[idx]
+        delta = (z_target - z) / 2.0
+        skip_target = skip + delta
+        u_target = scale * out + delta
+        s = scale.to(out.dtype)
+        out_target = torch.where(s.abs() > 1e-6, u_target / s, out)
+        reduce_dims = tuple(range(out.ndim - scale.ndim))
+        u_f = u_target.float()
+        o_f = out_target.float()
+        num = (u_f * o_f).sum(reduce_dims)
+        den = (o_f * o_f).sum(reduce_dims) + 1e-8
+        scale_target_row = (num / den).to(scale.dtype)
+        # Build a full-shape target: unused rows = current values (zero pseudo-grad);
+        # used row = LS target.
+        scale_table_target = scale_table.clone()
+        scale_table_target[idx] = scale_target_row
+        return (
+            process_activation_target(skip, skip_target)[0],
+            scale_table_target,
+            None,
+            process_activation_target(out, out_target)[0],
+        )
+
+
 class CastedLinear(nn.Linear):
     # Keep weights in fp32 for optimizer/state quality, cast at matmul time for bf16 compute.
     def forward(self, x: Tensor) -> Tensor:
@@ -455,13 +598,17 @@ def restore_low_dim_params_to_fp32(module: nn.Module) -> None:
 
 
 class MLP(nn.Module):
-    # relu^2 MLP from the original modded-nanogpt setup
+    # relu^2 MLP. ptorch `Linear` (not `CastedLinear` / `nn.Linear`) is used here
+    # so the matmul backward routes through `MatMulProjection`. `F.linear`'s
+    # backward would otherwise treat the incoming target as a gradient and
+    # update the weight via `target.T @ input` instead of the projected target.
+    # This is the same swap the ViT MLP in `bench_ptorch_vit.py` performs.
     def __init__(self, dim: int, mlp_mult: int):
         super().__init__()
         hidden = mlp_mult * dim
-        self.fc = CastedLinear(dim, hidden, bias=False)
+        self.fc = Linear(dim, hidden, bias=False)
         self.act = ReLU()
-        self.proj = CastedLinear(hidden, dim, bias=False)
+        self.proj = Linear(hidden, dim, bias=False)
         self.proj._zero_init = True
 
     def forward(self, x: Tensor) -> Tensor:
@@ -486,13 +633,51 @@ class Block(nn.Module):
         self.attn_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.mlp_scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
         self.resid_mix = nn.Parameter(torch.stack((torch.ones(dim), torch.zeros(dim))).float())
+        # Projection-aware tensor-sharing forks. Both forks in this block split
+        # x into "res" (goes through norm + sub-layer) and "skip" (residual add).
+        # In projection mode each Branch wraps its outputs with BranchProjection,
+        # so backward averages the two incoming targets instead of summing them.
+        self.branch_res_attn = Branch(2)
+        self.branch_res_mlp = Branch(2)
 
     def forward(self, x: Tensor, x0: Tensor) -> Tensor:
-        mix = self.resid_mix.to(dtype=x.dtype)
-        x = torch.add(torch.mul(mix[0][None, None, :], x), torch.mul(mix[1][None, None, :], x0))
-        attn_out = self.attn(self.attn_norm(x))
-        x = torch.add(x, torch.mul(self.attn_scale.to(dtype=x.dtype)[None, None, :], attn_out))
-        x = torch.add(x, torch.mul(self.mlp_scale.to(dtype=x.dtype)[None, None, :], self.mlp(self.mlp_norm(x))))
+        # Learned convex blend of x and x0. Projection-aware via MixResidualAdd:
+        # delta/2 split of the additive part, plus one alt-proj sweep for each
+        # bilinear `mix[i] * .` (closed-form LS for mix per-D).
+        if config.use_projections:
+            x = MixResidualAdd.apply(x, x0, self.resid_mix)
+        else:
+            mix = self.resid_mix.to(dtype=x.dtype)
+            x = torch.add(torch.mul(mix[0][None, None, :], x),
+                          torch.mul(mix[1][None, None, :], x0))
+
+        # Attention sub-layer: x is consumed by `attn_norm(x)` AND by the residual
+        # add below — Branch(2) averages the two targets at x in projection mode.
+        if config.use_projections:
+            x_res, x_skip = self.branch_res_attn(x)
+        else:
+            x_res, x_skip = x, x
+        attn_out = self.attn(self.attn_norm(x_res))
+        # Projection-aware via ScaledResidualAdd: target for attn_out is
+        # `(z_target - x_skip) / attn_scale` (post-delta split), and attn_scale
+        # gets its own LS-projected target rather than a chain-ruled grad.
+        if config.use_projections:
+            x = ScaledResidualAdd.apply(x_skip, self.attn_scale, attn_out)
+        else:
+            x = torch.add(x_skip,
+                          torch.mul(self.attn_scale.to(dtype=x.dtype)[None, None, :], attn_out))
+
+        # MLP sub-layer: x is consumed by `mlp_norm(x)` AND by the residual add.
+        if config.use_projections:
+            x_res, x_skip = self.branch_res_mlp(x)
+        else:
+            x_res, x_skip = x, x
+        mlp_out = self.mlp(self.mlp_norm(x_res))
+        if config.use_projections:
+            x = ScaledResidualAdd.apply(x_skip, self.mlp_scale, mlp_out)
+        else:
+            x = torch.add(x_skip,
+                          torch.mul(self.mlp_scale.to(dtype=x.dtype)[None, None, :], mlp_out))
         return x
 
 
@@ -520,6 +705,7 @@ class GPT(nn.Module):
         self.tok_emb = nn.Embedding(vocab_size, model_dim)
         self.conversion = Conversion()
         self.initial_norm = RMSNorm()
+        self.num_layers = num_layers
         self.num_encoder_layers = num_layers // 2
         self.num_decoder_layers = num_layers - self.num_encoder_layers
         self.num_skip_weights = min(self.num_encoder_layers, self.num_decoder_layers)
@@ -538,6 +724,15 @@ class GPT(nn.Module):
                 for i in range(num_layers)
             ]
         )
+        # Projection-aware sharing forks at the GPT level:
+        # - branch_init: the post-initial-norm tensor is used as the first block
+        #   input AND as `x0` inside every block (num_layers consumers). Without
+        #   this BranchProjection, autograd would sum (num_layers + 1) targets at
+        #   the embedding output and over-amplify the upstream signal.
+        # - branch_enc: each encoder block output is consumed by the next block
+        #   AND saved into the U-Net skip list. Two consumers → Branch(2).
+        self.branch_init = Branch(1 + num_layers) if num_layers > 0 else None
+        self.branch_enc = Branch(2)
         self.final_norm = RMSNorm()
         self.lm_head = None if tie_embeddings else Linear(model_dim, vocab_size, bias=False, norm="linf")
         if self.lm_head is not None:
@@ -561,18 +756,51 @@ class GPT(nn.Module):
         x = self.tok_emb(input_ids)
         x = self.conversion(x)
         x = self.initial_norm(x)
-        x0 = x
+
+        # Fork the post-initial-norm tensor: 1 ref for the first block input plus
+        # `num_layers` refs (one per block) used as `x0`. In non-projection mode
+        # the previous `x0 = x` aliasing was fine (autograd sums equal each path),
+        # but under projection backward we must average the targets.
+        if config.use_projections and self.branch_init is not None:
+            forks = self.branch_init(x)
+            x = forks[0]
+            x0_refs = list(forks[1:])
+        else:
+            x0_refs = [x] * self.num_layers
         skips: list[Tensor] = []
 
         # First half stores skips; second half reuses them in reverse order.
         for i in range(self.num_encoder_layers):
-            x = self.blocks[i](x, x0)
-            skips.append(x)
+            x = self.blocks[i](x, x0_refs[i])
+            # Each encoder output is consumed by the next layer AND by skips.pop()
+            # later in the decoder. Fork it to average those two targets.
+            if config.use_projections:
+                x_next, x_skip = self.branch_enc(x)
+            else:
+                x_next, x_skip = x, x
+            skips.append(x_skip)
+            x = x_next
         for i in range(self.num_decoder_layers):
             if skips:
-                x = torch.add(x, torch.mul(self.skip_weights[i].to(dtype=x.dtype)[None, None, :], skips.pop()))
-            x = self.blocks[self.num_encoder_layers + i](x, x0)
+                skip_pop = skips.pop()
+                # Projection-aware via IndexedScaledResidualAdd. Passing the full
+                # `skip_weights` (not a slice) is required so the backward returns
+                # a full-shape target whose unused rows equal the current param,
+                # yielding zero pseudo-grad for those rows in ProjectionMuon.
+                if config.use_projections:
+                    x = IndexedScaledResidualAdd.apply(x, self.skip_weights, i, skip_pop)
+                else:
+                    x = torch.add(x, torch.mul(
+                        self.skip_weights[i].to(dtype=x.dtype)[None, None, :],
+                        skip_pop,
+                    ))
+            x = self.blocks[self.num_encoder_layers + i](x, x0_refs[self.num_encoder_layers + i])
 
+        # NOTE: `.reshape(-1, x.size(-1))` is 1:1 — its backward is the inverse
+        # rearrangement of the upstream tensor, so a target reshape-backward IS
+        # the correct target in the original shape. Same for `target_ids.reshape`
+        # (no grad flow). Same for `.T.contiguous()` on `tok_emb.weight` below
+        # (transpose+permute are 1:1). These are NOT target-as-grad hazards.
         x = self.final_norm(x).reshape(-1, x.size(-1))
         targets = target_ids.reshape(-1)
         if self.tie_embeddings:

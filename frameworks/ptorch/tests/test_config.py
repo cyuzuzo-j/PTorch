@@ -5,11 +5,13 @@ import torch.nn.functional as F
 from dataclasses import fields, MISSING
 
 from frameworks.ptorch.config import Config, config
-from frameworks.ptorch.core.ops import (
-    MatMulProjection, MatMulProjectionFrozenA,
-    process_activation_target, process_weight_target,
+from frameworks.ptorch.core.ops import process_activation_target
+from frameworks.ptorch.nn.modules import (
+    Linear, ReLU, LeakyReLU, Softmax, Dropout, CrossEntropy, MaxPool2d,
 )
-from frameworks.ptorch.nn.modules import Linear
+from frameworks.ptorch.nn.modules_experimental import (
+    Rotary, RMSNorm, apply_rotary_emb,
+)
 
 
 # ── fixtures & helpers ─────────────────────────────────────────────────────
@@ -34,22 +36,7 @@ def _public_fields():
             if not f.name.startswith("_") and f.default is not MISSING]
 
 
-A, B, TGT  = _rnd(8, 6, seed=1), _rnd(6, 5, seed=2), _rnd(8, 5, seed=3)
 DET, PROJ  = _rnd(8, 16, seed=4), _rnd(8, 16, seed=5) * 0.5
-
-
-def _matmul_b_grad(alpha=1.0, g=1.0):
-    """B.grad through MatMulProjection (consults config in backward)."""
-    a, b = A.detach().requires_grad_(True), B.detach().requires_grad_(True)
-    MatMulProjection.apply(a, b, 5, alpha, g, 1.0, None, False, False, None).backward(TGT)
-    return b.grad.clone()
-
-
-def _frozen_b_grad():
-    """B.grad through MatMulProjectionFrozenA (consults config in backward)."""
-    a, b = A.detach().requires_grad_(True), B.detach().requires_grad_(True)
-    MatMulProjectionFrozenA.apply(a, b, 1.0, 1.0, False, None).backward(TGT)
-    return b.grad.clone()
 
 
 # ── Config class behavior ──────────────────────────────────────────────────
@@ -65,7 +52,7 @@ def test_update_rejects_unknown_key():
 
 
 def test_reset_restores_defaults():
-    _set(projection_alpha=99.0, muon_weights=True)
+    _set(projection_alpha=99.0, use_muon_activations=True)
     config.reset()
     for f in _public_fields():
         assert getattr(config, f.name) == f.default
@@ -79,75 +66,106 @@ def test_use_projections_false_gives_standard_linear():
     assert torch.allclose(layer(x), F.linear(x, layer.weight) / layer.omega, atol=1e-5)
 
 
-# ── projection knobs (alpha, g) ────────────────────────────────────────────
+def test_use_projections_false_linear_with_bias_matches_F_linear():
+    _set(use_projections=False)
+    layer = Linear(8, 6, bias=True)
+    x = _rnd(4, 8, seed=11)
+    expected = F.linear(x, layer.weight, layer.bias.squeeze(0)) / layer.omega
+    assert torch.allclose(layer(x), expected, atol=1e-5)
 
-@pytest.mark.parametrize("knob", ["alpha", "g"])
-def test_projection_knob_changes_b_grad(knob):
-    _set(frozen_a_weights=False)
-    lo = _matmul_b_grad(**{knob: 0.1})
-    hi = _matmul_b_grad(**{knob: 5.0})
-    assert not torch.allclose(lo, hi, atol=1e-4)
+
+def test_use_projections_false_relu_matches_F_relu():
+    _set(use_projections=False)
+    x = _rnd(4, 8, seed=12)
+    assert torch.equal(ReLU()(x), F.relu(x))
+
+
+def test_use_projections_false_leaky_relu_matches_F_leaky_relu():
+    _set(use_projections=False)
+    x = _rnd(4, 8, seed=13)
+    assert torch.equal(LeakyReLU(0.1)(x), F.leaky_relu(x, 0.1))
+
+
+def test_use_projections_false_softmax_matches_F_softmax():
+    _set(use_projections=False)
+    x = _rnd(4, 8, seed=14)
+    assert torch.allclose(Softmax()(x), F.softmax(x, dim=-1), atol=1e-6)
+
+
+def test_use_projections_false_dropout_eval_is_identity():
+    _set(use_projections=False)
+    d = Dropout(p=0.5)
+    d.eval()
+    x = _rnd(4, 8, seed=15)
+    assert torch.equal(d(x), x)
+
+
+def test_use_projections_false_cross_entropy_matches_F_cross_entropy():
+    _set(use_projections=False)
+    logits = _rnd(4, 5, seed=16)
+    target = torch.tensor([0, 2, 4, 1])
+    assert torch.allclose(CrossEntropy()(logits, target),
+                          F.cross_entropy(logits, target), atol=1e-6)
+
+
+def test_use_projections_false_maxpool2d_matches_F_max_pool2d():
+    _set(use_projections=False)
+    x = _rnd(2, 3, 8, 8, seed=17)
+    assert torch.equal(MaxPool2d(2)(x), F.max_pool2d(x, 2))
+
+
+def test_use_projections_false_rotary_matches_apply_rotary_emb():
+    _set(use_projections=False)
+    rot = Rotary(8)
+    x = _rnd(2, 2, 4, 8, seed=18)  # (batch, heads, seqlen, head_dim)
+    out = rot(x)
+    # Reproduce the cos/sin Rotary uses internally
+    rot._update_cache(x.size(-2), x.device, x.dtype)
+    cos = rot._cos_cached.to(dtype=x.dtype)
+    sin = rot._sin_cached.to(dtype=x.dtype)
+    assert torch.equal(out, apply_rotary_emb(x, cos, sin))
+
+
+def test_use_projections_false_rmsnorm_matches_F_rms_norm():
+    _set(use_projections=False)
+    norm = RMSNorm()
+    x = _rnd(4, 8, seed=19)
+    assert torch.allclose(norm(x), F.rms_norm(x, (x.size(-1),), eps=norm.eps), atol=1e-6)
+
+
+def test_use_projections_false_backward_populates_real_gradients():
+    """End-to-end smoke test: a small MLP under use_projections=False must
+    produce real `weight.grad` via vanilla autograd. Catches future ungated
+    layers as soon as anyone wires them into a model."""
+    _set(use_projections=False)
+    l1 = Linear(8, 16, bias=True)
+    l2 = Linear(16, 5, bias=True)
+    act = ReLU()
+    crit = CrossEntropy()
+
+    x = _rnd(4, 8, seed=20)
+    target = torch.tensor([0, 2, 4, 1])
+    logits = l2(act(l1(x)))
+    loss = crit(logits, target)
+    loss.backward()
+
+    assert l1.weight.grad is not None and l1.weight.grad.abs().sum() > 0
+    assert l2.weight.grad is not None and l2.weight.grad.abs().sum() > 0
 
 
 # ── muon on activations ────────────────────────────────────────────────────
 
 def test_muon_activations_off_returns_proj_unchanged():
     _set(use_muon_activations=False)
-    assert torch.allclose(process_activation_target(DET, PROJ), PROJ)
+    out = process_activation_target(DET, PROJ)
+    assert torch.allclose(out, PROJ)
 
 
 def test_muon_activations_lr_zero_returns_det_unchanged():
     _set(use_muon_activations=True, muon_activations_lr=0.0)
-    assert torch.allclose(process_activation_target(DET, PROJ), DET, atol=1e-5)
+    out = process_activation_target(DET, PROJ)
+    assert torch.allclose(out, DET, atol=1e-5)
 
 
 
 
-# ── muon on weights ────────────────────────────────────────────────────────
-
-def test_muon_weights_off_returns_proj_unchanged():
-    _set(muon_weights=False)
-    det, proj = _rnd(4, 8, seed=6), _rnd(4, 8, seed=7)
-    assert torch.allclose(process_weight_target(det, proj), proj)
-
-
-def test_muon_weights_lr_zero_returns_det_unchanged():
-    _set(muon_weights=True, muon_weights_lr=0.0)
-    det, proj = _rnd(4, 8, seed=8), _rnd(4, 8, seed=9)
-    assert torch.allclose(process_weight_target(det, proj), det, atol=1e-5)
-
-
-def test_muon_weights_scale_preserves_gradient_norm():
-    _set(muon_weights=True, muon_weights_lr=1.0, muon_weights_scale=True)
-    det, proj = _rnd(4, 8, seed=10), _rnd(4, 8, seed=11)
-    out = process_weight_target(det, proj)
-    assert abs((out - det).norm() - (det - proj).norm()) < 1e-3
-
-
-# ── frozen-A solve ─────────────────────────────────────────────────────────
-
-def test_frozen_a_weights_toggles_b_grad():
-    _set(muon_weights=False, frozen_a_weights=False)
-    free = _matmul_b_grad()
-    _set(frozen_a_weights=True)
-    frozen = _matmul_b_grad()
-    assert not torch.allclose(free, frozen, atol=1e-4)
-
-
-def test_frozen_a_g_scales_b_grad():
-    _set(muon_weights=False, frozen_a_g=0.1)
-    lo = _frozen_b_grad()
-    _set(frozen_a_g=10.0)
-    hi = _frozen_b_grad()
-    assert not torch.allclose(lo, hi, atol=1e-4)
-
-
-# muon_weights must remain effective in both frozen-A code paths
-@pytest.mark.parametrize("b_grad", [_matmul_b_grad, _frozen_b_grad],
-                         ids=["MatMulProjection+frozen_a", "MatMulProjectionFrozenA"])
-def test_muon_weights_active_in_frozen_paths(b_grad):
-    _set(frozen_a_weights=True, muon_weights=False)
-    off = b_grad()
-    _set(muon_weights=True)
-    on = b_grad()
-    assert not torch.allclose(off, on, atol=1e-4)

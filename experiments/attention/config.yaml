@@ -1,0 +1,40 @@
+##################################################
+###   Shared experiment configuration          ###
+###   Used by the attention benchmark          ###
+##################################################
+
+# ── Experiment identity ───────────────────────────
+experiment_name: attention_benchmark   # shown in wandb as the run group
+random_seed: 43
+max_steps: 30_000
+num_runs: 1
+eval_every: 100
+patience: 1000
+results_dir: results
+
+# ── Batch sizes to sweep ─────────────────────────
+batch_sizes: [256]
+
+# ── Tasks (comment out to disable) ───────────────
+tasks:
+  - name: CIFAR10
+    patch_size: 4      # 32 / 8 -> 4x4 = 16 patches
+    emb_dim: 128
+    num_heads: 16
+    classes: 10
+
+# ── Sweep Parameters ──────────────────────────────
+norms: ["l2"]
+losses: ["CrossEntropy"]
+
+# ── Optimizers per framework ──────────────────────
+torch_optimizers:
+  - name: AdamW
+    kwargs:
+      lr: 0.001
+      weight_decay: 0.01
+
+optimizers:
+  - name: ProjectionMuonV2
+    kwargs:
+      lr: 0.001

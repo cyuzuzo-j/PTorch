@@ -1,0 +1,52 @@
+##################################################
+###   Non-differentiable activations benchmark   ##
+###   MLP on MNIST: ReLU vs Step vs GappedStep   ##
+###   vs QuantizedRelu                           ##
+##################################################
+
+experiment_name: non_differentiable_activations
+random_seed: 43
+num_runs: 3
+
+max_steps: 2000
+eval_every: 100
+patience: 50
+batch_sizes: [512]
+
+norms:
+  - l2
+
+results_dir: results
+
+tasks:
+  - name: MNIST
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [256, 256, 256]
+
+# All four activations are swept by default; override with --activations on CLI.
+activations:
+  - GappedStep
+  - Sort
+  - ReLU
+  - Step
+  - QuantizedRelu
+
+# Per-activation kwargs. The default GappedStep delta=2.0 is too wide for a
+# 256-dim hidden net (most pre-activations fall in the dead zone and learning
+# stalls). delta=0.1 keeps the dead zone narrow enough for signal to pass.
+activation_kwargs:
+  GappedStep:
+    delta: 0.05
+  QuantizedRelu:
+    step: 1.0
+
+# Projection-aware Adam plays well with the non-differentiable backward paths,
+# which return projection targets rather than true gradients.
+ptorch_optimizer: ProjectionMuon
+ptorch_optimizer_kwargs:
+  lr: 0.001
+
+losses:
+  - CrossEntropy
