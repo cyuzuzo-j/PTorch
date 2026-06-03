@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 import gc
 import yaml
 import torch
+torch.set_float32_matmul_precision('high')
 import torch.nn as tnn
 import torch.nn.functional as F
 import torch.fx

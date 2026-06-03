@@ -14,7 +14,7 @@ class Config:
     """
 
     # ---- cross-entropy constraint -------------------------------------------
-    cross_entropy_num_steps: int = 2
+    cross_entropy_num_steps: int = 5
     cross_entropy_lambda: float = 5.0
 
     # ---- global projection --------------------------------------------------
@@ -24,7 +24,8 @@ class Config:
 
     # ---- muon on activations ------------------------------------------------
     use_muon_activations: bool = False
-    
+    muon_activations_lr: float = 1.0
+
     # ---- frozen-A weight solve ----------------------------------------------
     frozen_a_weights: bool = False
     frozen_a_g: float = 1.0

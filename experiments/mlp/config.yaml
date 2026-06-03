@@ -12,10 +12,10 @@ num_runs: 3
 max_steps: 5_000
 eval_every: 200
 patience: 100
-batch_sizes: [512]
+batch_sizes: [128]
 
 norms:
-  - 2
+  - linf
 
 # ── Output ────────────────────────────────────────
 results_dir: results          # CSV logs go here
@@ -28,7 +28,7 @@ tasks:
     dataset: CIFAR10
     in_features: 3072        # 32×32×3 flattened
     classes: 10
-    hidden: [128, 128]
+    hidden: [512]
 
   - name: MNIST_1L
     dataset: MNIST
@@ -37,12 +37,12 @@ tasks:
     hidden: [512]
 
 # ── Optimizers per framework ──────────────────────
-use_muon_activations: true
+use_muon_activations: false
 
 # ptorch — ptorch.optim_static classes
-ptorch_optimizer: ProjectionMuonV2
+ptorch_optimizer: ProjectionMuon
 ptorch_optimizer_kwargs:
-  lr: 0.01
+  lr: 0.001
 ptorch_loss: CrossEntropy   # HardMarginLoss | CrossEntropy
 
 # pjax — pjax_orr.optim classes
