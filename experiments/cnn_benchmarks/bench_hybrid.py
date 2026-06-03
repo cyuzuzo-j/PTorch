@@ -1,9 +1,10 @@
 ##################################################
 ###   Hybrid training — CNN                   ###
 ###   K gradient steps ↔ K projection steps   ###
-###   Optimizer state is reset on each switch  ###
+###   Single optimizer carries state across   ###
 ##################################################
-import sys, os, argparse, gc, time
+import sys, os, argparse, copy, gc, time
+from collections import defaultdict
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../frameworks')))
 
@@ -17,55 +18,36 @@ import ptorch.nn.modules as pnn
 from ptorch.nn.modules import CrossEntropy, HardMarginLoss
 from ptorch import config as ptorch_config
 import ptorch.optim_static as ptorch_optim_static
-from experiments.cnn_benchmarks.models import SimpleCNN_PTorch
+from experiments.cnn_benchmarks.models import SimpleCNN_PTorch, ResidualCNN_PTorch
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 
-DATASETS    = {"MNIST": MNISTDataModule, "CIFAR10": InfiniteCifarDataModule}
-OPTIM_MODULES = vars(ptorch_optim_static)
-FRAMEWORK   = "hybrid_cnn"
-
-
-# ── Optimizer factories ───────────────────────────────────────────────────────
-
-def _make_grad_optimizer(model, name, kwargs):
-    """Standard torch optimizer (no projection pseudo-gradients)."""
-    cls = getattr(torch.optim, name)
-    return cls(model.parameters(), **kwargs)
-
-
-def _make_proj_optimizer(model, name, kwargs):
-    """Projection optimizer that interprets p.grad as the projection target."""
-    cls = OPTIM_MODULES[name]
-    return cls(model.parameters(), **kwargs)
-
-
-def _reset_proj_caches(model):
-    """Drop all per-layer projection caches so stale targets don't bleed over."""
-    for m in model.modules():
-        if hasattr(m, "proj_cache"):
-            m.proj_cache.clear()
-        if hasattr(m, "projection_forward_cache"):
-            m.projection_forward_cache[:] = [None] * len(m.projection_forward_cache)
+DATASETS  = {"MNIST": MNISTDataModule, "CIFAR10": InfiniteCifarDataModule}
+FRAMEWORK = "hybrid_cnn"
 
 
 # ── Single run ────────────────────────────────────────────────────────────────
 
 def run(cfg, task_cfg, batch_size, run_number, device,
         K=50,
-        grad_opt_name="Adam",    grad_opt_kwargs=None,
-        proj_opt_name="ProjectionAdam", proj_opt_kwargs=None,
+        opt_name="ProjectionAdam", opt_kwargs=None,
         loss_name="CrossEntropy",
-        grad_clip=1.0):
+        grad_clip=None,
+        grad_lr=1e-3, proj_lr=1e-3):
     """
     Trains SimpleCNN_PTorch by alternating between:
       - K steps of standard gradient descent  (ptorch_config.config.use_projections = False)
       - K steps of cyclic projections          (ptorch_config.config.use_projections = True)
 
-    The optimizer is fully discarded and re-created on every phase transition so
-    momentum buffers, running statistics, etc., do not carry across modes.
+    Adam state is partitioned per phase: the (m, v, step) buffers from the last
+    grad block are restored when re-entering grad, and likewise for proj. This
+    prevents grad-phase running statistics from contaminating the first proj
+    steps (and vice-versa), since the two signals — true gradients ∂L/∂p and
+    proximal-CE pseudo-gradients (p − p_proj) — live on different scales.
     """
-    grad_opt_kwargs = grad_opt_kwargs or {"lr": 1e-3}
-    proj_opt_kwargs = proj_opt_kwargs or {"lr": 1e-3}
+    # Phase-dependent learning rates (initial phase is grad).
+    opt_kwargs = dict(opt_kwargs or {})
+    opt_kwargs["lr"] = grad_lr
+    phase_lr = {"grad": grad_lr, "proj": proj_lr}
 
     seed = cfg["random_seed"] + run_number
     torch.manual_seed(seed)
@@ -88,43 +70,41 @@ def run(cfg, task_cfg, batch_size, run_number, device,
     criterion = getattr(pnn, loss_name, CrossEntropy)()
 
     tag = (f"{FRAMEWORK}_K={K}"
-           f"_grad={grad_opt_name}_proj={proj_opt_name}_loss={loss_name}"
-           f"_clip={grad_clip}")
+           f"_opt={opt_name}_loss={loss_name}")
 
     results_dir = os.path.join(os.path.dirname(__file__),
                                cfg.get("results_dir", "results"))
     os.makedirs(results_dir, exist_ok=True)
     csv_path = os.path.join(results_dir, f"{tag}_{task_cfg['name']}.csv")
 
-    # ── helpers ──────────────────────────────────────────────────────────────
-
     def to_nchw(x):
-        """Move channel dim to front if batch arrived as NHWC."""
         if x.ndim == 4 and x.shape[-1] in (1, 3):
             x = x.permute(0, 3, 1, 2)
         return x
 
     def eval_acc(loader):
         model.eval()
-        # always eval with plain forward pass (no projection overhead)
         saved = ptorch_config.config.use_projections
         ptorch_config.config.use_projections = False
-        accs = []
-        with torch.no_grad():
-            for xv, yv in loader:
-                xv = to_nchw(torch.tensor(xv, dtype=torch.float32, device=device))
-                yv = torch.tensor(yv, dtype=torch.long, device=device)
-                accs.append((model(xv).argmax(dim=-1) == yv).float().mean())
-        ptorch_config.config.use_projections = saved
-        model.train()
-        return float(torch.stack(accs).mean())
+        try:
+            accs = []
+            with torch.no_grad():
+                for xv, yv in loader:
+                    xv = to_nchw(torch.tensor(xv, dtype=torch.float32, device=device))
+                    yv = torch.tensor(yv, dtype=torch.long, device=device)
+                    accs.append((model(xv).argmax(dim=-1) == yv).float().mean())
+            return float(torch.stack(accs).mean())
+        finally:
+            ptorch_config.config.use_projections = saved
+            model.train()
 
-    # ── phase bootstrap ───────────────────────────────────────────────────────
-    # Start in gradient phase
-    phase      = "grad"
-    phase_step = 0
+    # ── Bootstrap ────────────────────────────────────────────────────────────
+    phase, phase_step = "grad", 0
     ptorch_config.config.use_projections = False
-    optimizer  = _make_grad_optimizer(model, grad_opt_name, grad_opt_kwargs)
+    optimizer = getattr(ptorch_optim_static, opt_name)(model.parameters(), **opt_kwargs)
+    # Per-phase Adam state snapshots — grad and proj keep independent (m, v, step)
+    # buffers so neither phase's running statistics leak into the other.
+    phase_opt_state = {"grad": None, "proj": None}
 
     csv_rows = []
     best_val_acc, best_state, best_step = 0.0, None, 0
@@ -136,18 +116,18 @@ def run(cfg, task_cfg, batch_size, run_number, device,
 
             # ── Phase switch ──────────────────────────────────────────────
             if phase_step >= K:
-                del optimizer
-                _reset_proj_caches(model)
-
-                if phase == "grad":
-                    phase = "proj"
-                    ptorch_config.config.use_projections = True
-                    optimizer = _make_proj_optimizer(model, proj_opt_name, proj_opt_kwargs)
+                # Stash the current phase's Adam state, swap, and restore the
+                # other phase's state (fresh zeros on its first entry).
+                phase_opt_state[phase] = copy.deepcopy(optimizer.state_dict())
+                phase = "proj" if phase == "grad" else "grad"
+                ptorch_config.config.use_projections = (phase == "proj")
+                if phase_opt_state[phase] is not None:
+                    optimizer.load_state_dict(phase_opt_state[phase])
                 else:
-                    phase = "grad"
-                    ptorch_config.config.use_projections = False
-                    optimizer = _make_grad_optimizer(model, grad_opt_name, grad_opt_kwargs)
-
+                    optimizer.state = defaultdict(dict)
+                # Apply this phase's learning rate (lr=10 in proj, lr=0.01 in grad).
+                for pg in optimizer.param_groups:
+                    pg["lr"] = phase_lr[phase]
                 phase_step = 0
 
             # ── Fetch batch ───────────────────────────────────────────────
@@ -159,11 +139,24 @@ def run(cfg, task_cfg, batch_size, run_number, device,
             # ── Forward / backward / step ─────────────────────────────────
             model.train()
             logits = model(x)
-            loss_val = criterion(logits, y_oh).sum()
             optimizer.zero_grad()
-            loss_val.backward()
+            criterion(logits, y_oh).sum().backward()
+
             if phase == "grad" and grad_clip is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+
+            # ── Diagnostics: norm of what the optimizer actually consumes ──
+            # In grad phase that's p.grad; in proj phase ProjectionAdam will
+            # turn p.grad into (p - p_proj), so we report that here.
+            with torch.no_grad():
+                sq = 0.0
+                for p in model.parameters():
+                    if p.grad is None:
+                        continue
+                    d = (p.data - p.grad) if phase == "proj" else p.grad
+                    sq += float(d.pow(2).sum())
+                grad_norm = sq ** 0.5
+
             optimizer.step()
             phase_step += 1
 
@@ -173,12 +166,14 @@ def run(cfg, task_cfg, batch_size, run_number, device,
                 elapsed = time.time() - t0
                 csv_rows.append({
                     "framework": FRAMEWORK, "task": task_cfg["name"],
-                    "K": K, "grad_opt": grad_opt_name, "proj_opt": proj_opt_name,
+                    "K": K, "opt": opt_name,
                     "loss": loss_name, "run": run_number,
                     "step": step, "phase": phase,
                     "val_acc": val_acc, "wall_time_s": elapsed,
+                    "grad_norm": grad_norm,
                 })
                 pbar.set_postfix(val_acc=f"{val_acc:.4f}", phase=phase,
+                                 gnorm=f"{grad_norm:.2e}",
                                  best=f"{best_val_acc:.4f}")
 
                 if val_acc > best_val_acc:
@@ -204,7 +199,7 @@ def run(cfg, task_cfg, batch_size, run_number, device,
 
     csv_rows.append({
         "framework": FRAMEWORK, "task": task_cfg["name"],
-        "K": K, "grad_opt": grad_opt_name, "proj_opt": proj_opt_name,
+        "K": K, "opt": opt_name,
         "loss": loss_name, "run": run_number,
         "step": step, "phase": "test",
         "val_acc": test_acc, "wall_time_s": total_time,
@@ -222,24 +217,24 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Hybrid gradient/projection CNN training")
     parser.add_argument("--config",
                         default=os.path.join(os.path.dirname(__file__), "config.yaml"))
-    parser.add_argument("--K",        type=int,   default=50,
+    parser.add_argument("--K",        type=int,   default=200,
                         help="Steps per phase before switching")
-    parser.add_argument("--grad_opt", default="Adam",
-                        help="torch.optim class for gradient phase")
-    parser.add_argument("--grad_lr",  type=float, default=1e-3)
-    parser.add_argument("--proj_opt", default="ProjectionAdam",
-                        help="ptorch.optim_static class for projection phase")
-    parser.add_argument("--proj_lr",  type=float, default=1e-3)
+    parser.add_argument("--opt",      default="ProjectionAdam",
+                        help="ptorch.optim_static class used in both phases")
+    parser.add_argument("--grad_lr",  type=float, default=1e-3,
+                        help="Learning rate during gradient phase")
+    parser.add_argument("--proj_lr",  type=float, default=1e-3,
+                        help="Learning rate during projection phase")
     parser.add_argument("--loss",     default="CrossEntropy")
-    parser.add_argument("--grad_clip", type=float, default=1.0,
-                        help="Max gradient norm during gradient phase (0 = disabled)")
+    parser.add_argument("--grad_clip", type=float, default=0.0,
+
+                        help="Max gradient norm during grad phase (0 = disabled)")
     args = parser.parse_args()
 
     cfg    = yaml.safe_load(open(args.config))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
-    print(f"K={args.K}  grad={args.grad_opt}(lr={args.grad_lr})"
-          f"  proj={args.proj_opt}(lr={args.proj_lr})")
+    print(f"K={args.K}  opt={args.opt}(grad_lr={args.grad_lr}, proj_lr={args.proj_lr})")
 
     for batch_size in cfg["batch_sizes"]:
         for task_cfg in cfg["tasks"]:
@@ -249,12 +244,10 @@ if __name__ == "__main__":
             for run_number in range(1, cfg["num_runs"] + 1):
                 run(cfg, task_cfg, batch_size, run_number, device,
                     K=args.K,
-                    grad_opt_name=args.grad_opt,
-                    grad_opt_kwargs={"lr": args.grad_lr},
-                    proj_opt_name=args.proj_opt,
-                    proj_opt_kwargs={"lr": args.proj_lr},
+                    opt_name=args.opt,
                     loss_name=args.loss,
-                    grad_clip=args.grad_clip if args.grad_clip > 0 else None)
+                    grad_clip=args.grad_clip if args.grad_clip > 0 else None,
+                    grad_lr=args.grad_lr, proj_lr=args.proj_lr)
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()

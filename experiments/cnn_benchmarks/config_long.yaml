@@ -1,0 +1,14 @@
+experiment_name: long_hybrid
+random_seed: 43
+max_steps: 3000
+num_runs: 1
+eval_every: 25
+patience: 10000
+conv_widths: [4]
+batch_sizes: [64]
+results_dir: results_long
+
+tasks:
+  - name: MNIST
+    classes: 10
+    in_channels: 1
