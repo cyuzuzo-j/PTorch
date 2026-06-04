@@ -31,17 +31,17 @@ CFG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
 FRAMEWORK_LABELS = {
     "ptorch_cnn": r"$\mathcal{P}$Torch",
     "ptorch_cyclic_cnn": r"$\mathcal{P}$Torch",
-    "torch":  "torch",
-    "pjax":   "pjax",
-    "pjax_orr": "pjax_orr"
+    "torch":  "Torch",
+    "pjax":   "PJAX",
+    "pjax_orr": "PJAX (original)"
 }
 
 # Curated palette (viridis-derived) — one color per framework
 FRAMEWORK_COLORS = {
     r"$\mathcal{P}$Torch": sns.color_palette("viridis", 3)[0],
-    "torch":               sns.color_palette("viridis", 3)[1],
-    "pjax":                sns.color_palette("viridis", 3)[2],
-    "pjax_orr":            sns.color_palette("magma", 3)[1],
+    "Torch":               sns.color_palette("viridis", 3)[1],
+    "PJAX":                sns.color_palette("viridis", 3)[2],
+    "PJAX (original)":            sns.color_palette("magma", 3)[1],
 }
 
 
@@ -73,7 +73,7 @@ def plot_task(df: pd.DataFrame, task_name: str, output_dir: str):
     dataset_label = task_name.split("_")[0]  # "MNIST" or "CIFAR10"
 
     # ── (a) Accuracy vs. Step ────────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig, ax = plt.subplots(figsize=(14, 5))
     sns.lineplot(
         data=df, x="step", y="val_acc",
         hue="Framework", estimator="mean", errorbar=("ci", 95),
@@ -91,7 +91,7 @@ def plot_task(df: pd.DataFrame, task_name: str, output_dir: str):
     print(f"  Saved {out_path}")
 
     # ── (b) Accuracy vs. Wall-Clock Time ─────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig, ax = plt.subplots(figsize=(14, 5))
 
     # Bin unaligned wall-clock times into uniform intervals for clean averaging
     time_data = df.dropna(subset=["wall_time_s", "val_acc"]).copy()

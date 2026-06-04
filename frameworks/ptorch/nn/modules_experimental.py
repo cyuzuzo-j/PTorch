@@ -17,7 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ..config import config
-from ..core.ops import MatMulProjection, SoftmaxProjection, RMSNormProjection, Conversion as ConversionFn, LogitSoftcapInversion, SeqMaxPoolProjection, SeqAvgPoolProjection, BranchProjection
+from ..core.ops import MatMulProjection, SoftmaxProjection, RMSNormProjection, Conversion as ConversionFn, SeqMaxPoolProjection, SeqAvgPoolProjection, BranchProjection
 from .modules import Linear, ProjectionModule
 
 class GQAConsensusProjection(torch.autograd.Function):

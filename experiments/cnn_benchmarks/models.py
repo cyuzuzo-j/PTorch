@@ -2,15 +2,11 @@ import sys
 import os
 import torch
 import torch.nn as tnn
-import jax
-import jax.numpy as jnp
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../frameworks')))
 
-import ptorch
 import ptorch.nn.modules as pnn
-import torch.nn as tnn
 
 from ptorch.nn.modules_experimental import Branch, RMSNorm
 from ptorch.config import config as _ptorch_config

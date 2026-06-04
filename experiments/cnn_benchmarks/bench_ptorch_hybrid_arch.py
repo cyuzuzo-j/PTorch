@@ -14,9 +14,7 @@ import torch.nn.functional as F
 import pandas as pd
 import ptorch.nn.modules as pnn
 from ptorch.nn.modules_experimental import Conversion
-from ptorch.nn.modules import (
-    ProjectionModule, CrossEntropy, HardMarginLoss, ProximalHingeMarginLoss
-)
+from ptorch.nn.modules import CrossEntropy
 from ptorch import config as ptorch_config
 import ptorch.optim_static as ptorch_optim_static
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
@@ -243,9 +241,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PTorch CNN benchmark")
     parser.add_argument("--config", default=os.path.join(os.path.dirname(__file__), "config.yaml"),
                         help="Path to YAML config file")
+    parser.add_argument("--max-steps", type=int, default=None, help="Override cfg['max_steps']")
+    parser.add_argument("--num-runs", type=int, default=None, help="Override cfg['num_runs']")
     args = parser.parse_args()
 
     cfg    = yaml.safe_load(open(args.config))
+    if args.max_steps is not None: cfg["max_steps"] = args.max_steps
+    if args.num_runs is not None: cfg["num_runs"] = args.num_runs
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")

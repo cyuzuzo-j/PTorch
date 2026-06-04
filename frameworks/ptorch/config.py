@@ -1,7 +1,5 @@
 import threading
-import contextlib
 from dataclasses import dataclass, field, fields, MISSING
-from typing import Optional
 
 
 @dataclass
@@ -25,11 +23,7 @@ class Config:
     # ---- muon on activations ------------------------------------------------
     use_muon_activations: bool = False
     muon_activations_lr: float = 1.0
-
-    # ---- frozen-A weight solve ----------------------------------------------
-    frozen_a_weights: bool = False
-    frozen_a_g: float = 1.0
-
+    
     _lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False, compare=False
     )

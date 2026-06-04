@@ -2,32 +2,37 @@ experiment_name: deep_mlp
 random_seed: 43
 num_runs: 3
 
-max_steps: 10000
+max_steps: 5000
 eval_every: 200
 patience: 10
 batch_sizes: [32]
 
 results_dir: results/deep_mlp
 figures_dir: ../../images/mlp
-use_muon_activations: false
+use_muon_activations: [True]
+
+norms:
+  - 2
 
 tasks:
 
-  - name: MNIST_4L
-    dataset: MNIST
-    in_features: 784
-    classes: 10
-    hidden: [512, 512, 512, 512]
   - name: MNIST_1L
     dataset: MNIST
     in_features: 784
     classes: 10
     hidden: [512]
 
-ptorch_optimizer: ProjectionAdam
+
+  - name: MNIST_4L
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [512, 512, 512, 512]
+
+ptorch_optimizer: ProjectionMuonV2
 ptorch_optimizer_kwargs:
   lr: 0.001
-ptorch_loss: HardMarginLoss
+ptorch_loss: CrossEntropy
 
 torch_optimizer: Adam
 torch_optimizer_kwargs:

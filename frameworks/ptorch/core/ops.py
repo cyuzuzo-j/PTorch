@@ -86,7 +86,7 @@ def process_activation_target(A_det, A_proj):
 
         
 
-@torch.compile()
+@torch.compile(dynamic=True)
 def matmul_proj_linf(A, B, Z, eps_init=None, g=1.0, omega=1.0, num_steps=5):
     """
     Exact independent bilinear projection for A @ B = Z using the L_infinity (Chebyshev) norm.    
@@ -250,7 +250,7 @@ class MatMulProjectionLinf(torch.autograd.Function):
 
         return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None        
 
-@torch.compile()
+@torch.compile(dynamic=True)
 def matmul_proj(A, B, Z, t_init=None, alpha=1.0, g=1.0, omega=1.0, num_steps=1, residual=False):
     """
     Exact bilinear projection for A @ B = Z (or A - A @ B = Z if residual=True).
@@ -697,98 +697,6 @@ class LeakyReLUProjection(torch.autograd.Function):
         return process_activation_target(x, result), None
 
 
-def _pava_1d_numpy(values):
-    """O(n) pool-adjacent-violators on a 1D numpy array (unit weights, ascending)."""
-    import numpy as np
-    n = values.shape[0]
-    if n == 0:
-        return values.copy()
-    sums = [float(values[0])]
-    counts = [1]
-    for i in range(1, n):
-        sums.append(float(values[i]))
-        counts.append(1)
-        while len(sums) >= 2 and sums[-2] / counts[-2] > sums[-1] / counts[-1]:
-            s = sums.pop(); c = counts.pop()
-            sums[-1] += s; counts[-1] += c
-    out = np.empty(n, dtype=values.dtype)
-    idx = 0
-    for s, c in zip(sums, counts):
-        v = s / c
-        out[idx:idx + c] = v
-        idx += c
-    return out
-
-
-def isotonic_projection(x):
-    """
-    L2 projection onto the cone of non-decreasing sequences along the last dim.
-
-    Fast path: if the input is already non-decreasing along the last dim, return
-    as is (the common case when called from SortProjection.backward, where the
-    input is the midpoint of two ascending-sorted vectors). Otherwise fall back
-    to per-row PAVA via numpy.
-    """
-    if x.numel() == 0 or x.shape[-1] <= 1:
-        return x
-    diffs = x[..., 1:] - x[..., :-1]
-    if bool((diffs >= 0).all()):
-        return x
-    import numpy as np
-    orig_shape = x.shape
-    flat = x.detach().reshape(-1, orig_shape[-1]).cpu().numpy()
-    out = np.empty_like(flat)
-    for r in range(flat.shape[0]):
-        out[r] = _pava_1d_numpy(flat[r])
-    return torch.from_numpy(out).to(device=x.device, dtype=x.dtype).reshape(orig_shape)
-
-
-class SortProjection(torch.autograd.Function):
-    """
-    Projection-aware sorting layer.
-
-    Forward: returns the sorted tensor in ascending order along `dim`.
-    Backward: exact L2 projection of (x, z_target) onto the manifold
-              y = sort(x).  z_target is rank-indexed (same shape as the sorted
-              output), so the algorithm is:
-                  m = (sorted_x + z_target) / 2     (midpoint in rank space)
-                  v = isotonic_projection(m)         (PAVA: ascending v closest
-                                                      to m)
-                  x_proj[i] = v[rank_of_x(i)]        (scatter back via the
-                                                      forward sort permutation)
-              This minimises ||x' - x||² + ||sort(x') - z_target||².
-              Sorting z_target before averaging (an earlier draft) destroys
-              the per-rank target signal — that's the rearrangement-inequality
-              trap.
-    """
-    @staticmethod
-    def forward(ctx, x, dim=-1):
-        ctx.dim = dim
-        sorted_x, indices = torch.sort(x, dim=dim)
-        ctx.save_for_backward(x, sorted_x, indices)
-        return sorted_x
-
-    @staticmethod
-    def backward(ctx, z_target):
-        x, sorted_x, indices = ctx.saved_tensors
-        dim = ctx.dim
-
-        m = (sorted_x + z_target) / 2.0
-
-        last_dim = x.ndim - 1
-        moved = dim != -1 and dim != last_dim
-        if moved:
-            m = m.transpose(dim, -1)
-        v = isotonic_projection(m)
-        if moved:
-            v = v.transpose(dim, -1)
-
-        x_proj = torch.empty_like(x)
-        x_proj.scatter_(dim, indices, v)
-
-        return process_activation_target(x, x_proj), None
-
-
 class StepProjection(torch.autograd.Function):
     """
     Step activation projection.
@@ -904,52 +812,6 @@ class GappedStepProjection(torch.autograd.Function):
         result = torch.where(dist_pos <= dist_neg, x_pos, x_neg)
 
         return process_activation_target(x, result), None
-
-class DropoutProjection(torch.autograd.Function):
-    """
-    Projection-aware dropout.
-
-    Forward:  z = x * mask / (1 - p)   (standard inverted dropout)
-    Backward: projects (x, z) onto the dropout function graph.
-
-    For *dropped* positions (mask=0) the constraint is z=0 regardless of x,
-    so x is kept at its original value (identity projection).
-
-    For *kept* positions the constraint is z = x / (1-p).  Setting s = 1/(1-p):
-        min  ||x - x0||^2 + ||z - z0||^2   s.t. z = s*x
-        =>   x* = (x0 + s*z0) / (1 + s^2)
-             z* = s * x*
-    """
-    @staticmethod
-    def forward(ctx, x, p=0.5, training=True):
-        if training and p > 0.0:
-            mask = (torch.rand_like(x) > p).to(x.dtype)
-            scale = 1.0 / (1.0 - p)
-            y = x * mask * scale
-        else:
-            mask = torch.ones_like(x)
-            scale = 1.0
-            y = x
-
-        ctx.save_for_backward(x, mask)
-        ctx.p = p
-        ctx.scale = scale
-        ctx.training = training
-        return y
-
-    @staticmethod
-    def backward(ctx, z_target):
-        x, mask = ctx.saved_tensors
-        s = ctx.scale  # 1 / (1 - p)
-
-        # Kept positions: project onto z = s*x
-        x_proj = (x + s * z_target) / (1.0 + s * s)
-
-        # Dropped positions: x stays at original (output is forced to 0)
-        x_star = torch.where(mask > 0, x_proj, x)
-
-        # Return None for p, training (non-differentiable args)
-        return x_star, None, None
 
 
 def max_proj_pt_batch(a, z):
@@ -1229,44 +1091,6 @@ class RMSNormProjection(torch.autograd.Function):
         x_bar = sigma_bar * z_bar
 
         return process_activation_target(x, x_bar), None
-
-
-
-
-
-
-class LogitSoftcapInversion(torch.autograd.Function):
-    """
-    Sets the new input target directly based on the target z.
-    Uses the exact mathematical inverse of the softcap function.
-    """
-    @staticmethod
-    def forward(ctx, x, logit_softcap):
-        # Save the softcap constant for the backward pass
-        ctx.logit_softcap = logit_softcap
-        
-        # We don't need to save 'x' because pure inversion only relies on 'z'
-        return logit_softcap * torch.tanh(x / logit_softcap)
-
-    @staticmethod
-    def backward(ctx, z):
-        # In Target Propagation, 'z' is the target output. 
-        # We must return 'x_target', the input that would produce 'z'.
-        C = ctx.logit_softcap
-        
-        # CRITICAL SAFETY STEP: 
-        # arctanh is only valid for inputs strictly between -1 and 1.
-        # If the network asks for a target 'z' that is outside the bounds of the softcap,
-        # we MUST clamp it slightly inside the bounds to avoid returning NaNs.
-        eps = 1e-6
-        z_clipped = torch.clamp(z, min=-C + eps, max=C - eps)
-        
-        # Direct mathematical inversion
-        x_target = C * torch.arctanh(z_clipped / C)
-        
-        # We return x_target for 'x', and None for 'logit_softcap' (as it's a fixed hyperparameter)
-        return x_target, None
-
 
 
 

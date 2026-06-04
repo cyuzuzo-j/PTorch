@@ -146,9 +146,13 @@ import argparse
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Torch MLP baseline")
     parser.add_argument("--config", default=CFG_PATH, help="Path to YAML config file")
+    parser.add_argument("--max-steps", type=int, default=None, help="Override cfg['max_steps']")
+    parser.add_argument("--num-runs", type=int, default=None, help="Override cfg['num_runs']")
     args = parser.parse_args()
 
     cfg    = yaml.safe_load(open(args.config))
+    if args.max_steps is not None: cfg["max_steps"] = args.max_steps
+    if args.num_runs is not None: cfg["num_runs"] = args.num_runs
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
