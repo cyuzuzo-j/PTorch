@@ -1,6 +1,6 @@
 # PTorch
 
-> **Attribution:** A significant portion of this code is based on or directly copied from [AndreasBergmeister/pjax](https://github.com/AndreasBergmeister/pjax).
+> **Attribution:** A significant portion of this code is based on [AndreasBergmeister/pjax](https://github.com/AndreasBergmeister/pjax).
 
 A PyTorch-based framework for training neural networks via **cyclic projections** instead of backpropagation. Rather than computing gradients, each layer's backward pass finds the nearest point satisfying its local constraint (a projection), and optimizers consume these projection targets as pseudo-gradients.
 
@@ -75,8 +75,7 @@ All wrap their standard PyTorch counterpart and convert projection targets to ps
 
 | Notebook | Description |
 |---|---|
-| `xor_from_scratch.ipynb` | Cyclic projections on XOR from scratch in JAX — best starting point to understand the algorithm |
-| `mnist_from_scratch.ipynb` | MNIST classification built manually without ptorch abstractions |
+| `mnist_from_scratch.ipynb` | MNIST classification built manually without ptorch abstractions — best starting point to understand the algorithm |
 
 ### MLP benchmark (MNIST / CIFAR-10)
 
@@ -107,5 +106,53 @@ python bench_ptorch.py --config config.yaml
 python bench_torch.py --config config.yaml
 
 python plot_results.py
+```
+
+### Attention / ViT benchmark (CIFAR-10)
+
+```bash
+cd experiments/attention
+
+# ptorch ViT (Projection optimizers)
+python bench_ptorch_vit.py --config config.yaml
+
+# Baseline (AdamW)
+python bench_torch_vit.py --config config.yaml
+
+python plot_results.py
+```
+
+### Non-differentiable activations (MNIST)
+
+Trains MLPs with piecewise-constant activations (Step, GappedStep, QuantizedRelu, Sort) — networks autograd cannot handle.
+
+```bash
+cd experiments/non_differentiable
+python quantized_relu.py --config config.yaml
+python plot_results.py
+```
+
+### Deep network analysis
+
+Theoretical/empirical studies on deep linear MLPs.
+
+```bash
+# Local non-expansiveness of the (forward, backward target) projection pair across depths
+python experiments/deep/local_nonexpansiveness_deep.py
+
+# Vanishing target signal as it backpropagates through depth
+python experiments/deep/vanishing_target.py
+```
+
+Both scripts use hardcoded constants at the top of the file (edit them to scale runs up/down).
+
+### Quick smoke test
+
+Every config-driven benchmark accepts `--max-steps N --num-runs M` to override the YAML for a fast end-to-end check:
+
+```bash
+python experiments/mlp/bench_ptorch.py --max-steps 10 --num-runs 1
+python experiments/cnn_benchmarks/bench_ptorch.py --max-steps 10 --num-runs 1
+python experiments/attention/bench_ptorch_vit.py --max-steps 5 --num-runs 1
 ```
 

@@ -15,10 +15,10 @@ import pandas as pd
 import tqdm
 
 import ptorch.nn.modules as pnn
-from ptorch.nn.modules import CrossEntropy, HardMarginLoss
+from ptorch.nn.modules import CrossEntropy
 from ptorch import config as ptorch_config
 import ptorch.optim_static as ptorch_optim_static
-from experiments.cnn_benchmarks.models import SimpleCNN_PTorch, ResidualCNN_PTorch
+from experiments.cnn_benchmarks.models import SimpleCNN_PTorch
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 
 DATASETS  = {"MNIST": MNISTDataModule, "CIFAR10": InfiniteCifarDataModule}
@@ -229,9 +229,13 @@ if __name__ == "__main__":
     parser.add_argument("--grad_clip", type=float, default=0.0,
 
                         help="Max gradient norm during grad phase (0 = disabled)")
+    parser.add_argument("--max-steps", type=int, default=None, help="Override cfg['max_steps']")
+    parser.add_argument("--num-runs", type=int, default=None, help="Override cfg['num_runs']")
     args = parser.parse_args()
 
     cfg    = yaml.safe_load(open(args.config))
+    if args.max_steps is not None: cfg["max_steps"] = args.max_steps
+    if args.num_runs is not None: cfg["num_runs"] = args.num_runs
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     print(f"K={args.K}  opt={args.opt}(grad_lr={args.grad_lr}, proj_lr={args.proj_lr})")

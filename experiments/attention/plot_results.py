@@ -1,130 +1,154 @@
 """
 Plot Attention Benchmark Results
-====================================
-Reads CSV logs and produces publication-quality figures:
+================================
+Reads all CSV logs under `results/` (both the ptorch projection runs and the
+vanilla torch baseline) and produces:
 
-  attention_STEP.pdf — Accuracy vs. optimization step
-  attention_TIME.pdf — Accuracy vs. wall-clock time
+    plots/attention_<task>_STEP.pdf — accuracy vs. optimization step
+    plots/attention_<task>_TIME.pdf — accuracy vs. wall-clock time
 """
 
 import os
+import glob
 import argparse
+
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import seaborn as sns
-import glob
 
-# ── Seaborn theme ────────────────────────────────────────────────────────────
+
 sns.set_theme(style="whitegrid", context="paper", font_scale=2.0)
 
-def plot_attention_results(results_dir: str = "results", output_dir: str = "plots"):
-    os.makedirs(output_dir, exist_ok=True)
 
-    # ── Load Data ────────────────────────────────────────────────────────────
-    all_files = glob.glob(os.path.join(results_dir, "*.csv"))
-    if not all_files:
+def _label(row):
+    """Build a legend label for a row, distinguishing torch vs ptorch."""
+    opt = row.get("optimizer", "?")
+    loss = row.get("loss", "?")
+    if row["framework"] == "torch":
+        return f"Torch ({opt}, {loss})"
+    norm = row.get("norm", "l2")
+    return r"$\mathcal{P}$Torch" + f" ({norm}, {opt}, {loss})"
+
+
+def _load(results_dir):
+    files = glob.glob(os.path.join(results_dir, "*.csv"))
+    if not files:
         print(f"  ⚠  No CSV files found in {results_dir}")
-        return
+        return None
 
-    df_list = []
-    for f in all_files:
+    frames = []
+    for f in files:
         try:
-            df_list.append(pd.read_csv(f))
+            frames.append(pd.read_csv(f))
         except Exception as e:
-            print(f"Error reading {f}: {e}")
+            print(f"  ⚠  Error reading {f}: {e}")
 
-    if not df_list:
+    if not frames:
+        return None
+
+    df = pd.concat(frames, ignore_index=True)
+    df = df[df["step"] >= 0].copy()
+    df["Framework"] = df.apply(_label, axis=1)
+    return df
+
+
+def _plot_one(df, x_col, x_label, title, out_path, has_train, color_map,
+              n_time_bins=50):
+    """Plot val (solid) + train (dashed) accuracy against x_col."""
+    fig, ax = plt.subplots(figsize=(14, 5))
+
+    plot_df = df.dropna(subset=[x_col, "val_acc"]).copy()
+    if plot_df.empty:
+        plt.close(fig)
         return
 
-    df = pd.concat(df_list, ignore_index=True)
-    df = df[df['step'] >= 0]
+    # Bin wall-clock time onto a uniform grid so multiple runs average cleanly.
+    if x_col == "wall_time_s":
+        plot_df["x_mid"] = (
+            pd.cut(plot_df[x_col], bins=n_time_bins)
+              .apply(lambda iv: iv.mid if iv is not None else None)
+              .astype(float)
+        )
+        x_plot = "x_mid"
+    else:
+        x_plot = x_col
 
-    def create_label(row):
-        if row['framework'] == 'torch':
-            return f"Torch (AdamW, {row['loss']})"
-        norm = row.get('norm', 'l2')
-        opt = row.get('optimizer', 'ProjMuon')
-        loss = row.get('loss', 'CE')
-        return r"$\mathcal{P}$Torch" + f" ({norm}, {opt}, {loss})"
-
-    df['Framework'] = df.apply(create_label, axis=1)
-    has_train = 'train_acc' in df.columns and df['train_acc'].notna().any()
-
-    # Create a dynamic palette using seaborn's viridis mapped to unique frameworks
-    unique_frameworks = sorted(df['Framework'].unique())
-    palette = sns.color_palette("viridis", len(unique_frameworks))
-    color_map = dict(zip(unique_frameworks, palette))
-
-    # ── (a) Accuracy vs. Step ────────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(7, 5))
-    
-    # Plot Validation Accuracy (Solid, Mean + CI)
     sns.lineplot(
-        data=df, x="step", y="val_acc",
+        data=plot_df, x=x_plot, y="val_acc",
         hue="Framework", estimator="mean", errorbar=("ci", 95),
         palette=color_map, linewidth=2, ax=ax,
     )
 
-    # Plot Train Accuracy (Dashed, Mean only to reduce visual clutter)
-    if has_train:
+    train_plotted = False
+    if has_train and plot_df["train_acc"].notna().any():
         sns.lineplot(
-            data=df, x="step", y="train_acc",
+            data=plot_df, x=x_plot, y="train_acc",
             hue="Framework", estimator="mean", errorbar=None,
-            palette=color_map, linewidth=2, linestyle="--", alpha=0.8, ax=ax, legend=False
+            palette=color_map, linewidth=2, linestyle="--",
+            alpha=0.8, ax=ax, legend=False,
         )
+        train_plotted = True
 
-    ax.set_xlabel("Optimization Step")
+    ax.set_xlabel(x_label)
     ax.set_ylabel("Accuracy")
-    ax.set_title(r"$\mathcal{P}$Torch Attention — Accuracy vs. Step")
-    ax.legend(loc="lower right", fontsize=12, frameon=False)
+    ax.set_title(title)
+    ax.tick_params(axis="both", labelsize=12)
+    ax.xaxis.get_offset_text().set_fontsize(12)
+
+    framework_legend = ax.legend(loc="lower right", fontsize=11, frameon=False)
+
+    if train_plotted:
+        style_handles = [
+            Line2D([0], [0], color="black", linewidth=2, linestyle="-",  label="Val"),
+            Line2D([0], [0], color="black", linewidth=2, linestyle="--", label="Train"),
+        ]
+        ax.add_artist(framework_legend)
+        ax.legend(handles=style_handles, loc="upper left",
+                  fontsize=11, frameon=False)
 
     plt.tight_layout()
-    out_path = os.path.join(output_dir, "attention_STEP.pdf")
     fig.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved {out_path}")
 
-    # ── (b) Accuracy vs. Wall-Clock Time ─────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(7, 5))
 
-    # Bin unaligned wall-clock times into uniform intervals for clean averaging
-    time_data = df.dropna(subset=["wall_time_s", "val_acc"]).copy()
-    if not time_data.empty:
-        n_bins = 50
-        time_data["time_bin"] = pd.cut(time_data["wall_time_s"], bins=n_bins)
-        time_data["time_mid"] = time_data["time_bin"].apply(
-            lambda iv: iv.mid if iv is not None else None
-        ).astype(float)
+def plot_attention_results(results_dir="results", output_dir="plots"):
+    os.makedirs(output_dir, exist_ok=True)
+    df = _load(results_dir)
+    if df is None:
+        return
 
-        sns.lineplot(
-            data=time_data, x="time_mid", y="val_acc",
-            hue="Framework", estimator="mean", errorbar=("ci", 95),
-            palette=color_map, linewidth=2, ax=ax,
+    has_train = "train_acc" in df.columns and df["train_acc"].notna().any()
+
+    # Stable color per Framework across all subplots / both axes.
+    frameworks = sorted(df["Framework"].unique())
+    palette = sns.color_palette("viridis", max(len(frameworks), 2))
+    color_map = dict(zip(frameworks, palette))
+
+    tasks = sorted(df["task"].dropna().unique())
+    for task in tasks:
+        task_df = df[df["task"] == task]
+        _plot_one(
+            task_df, "step", "Optimization Step",
+            f"{task} — Accuracy vs. Step",
+            os.path.join(output_dir, f"attention_{task}_STEP.pdf"),
+            has_train, color_map,
         )
-
-        if has_train and "train_acc" in time_data.columns:
-            sns.lineplot(
-                data=time_data, x="time_mid", y="train_acc",
-                hue="Framework", estimator="mean", errorbar=None,
-                palette=color_map, linewidth=2, linestyle="--", alpha=0.8, ax=ax, legend=False
-            )
-
-    ax.set_xlabel("Wall-clock Time (s)")
-    ax.set_ylabel("Accuracy")
-    ax.set_title(r"$\mathcal{P}$Torch Attention — Accuracy vs. Time")
-    ax.legend(loc="lower right", fontsize=12, frameon=False)
-
-    plt.tight_layout()
-    out_path_time = os.path.join(output_dir, "attention_TIME.pdf")
-    fig.savefig(out_path_time, dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    print(f"  Saved {out_path_time}")
+        _plot_one(
+            task_df, "wall_time_s", "Wall-clock Time (s)",
+            f"{task} — Accuracy vs. Time",
+            os.path.join(output_dir, f"attention_{task}_TIME.pdf"),
+            has_train, color_map,
+        )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--results", default="results", help="Directory containing CSV results")
-    parser.add_argument("--output", default="plots", help="Directory to save plots")
+    parser.add_argument("--results", default="results",
+                        help="Directory containing CSV results")
+    parser.add_argument("--output", default="plots",
+                        help="Directory to save plots")
     args = parser.parse_args()
 
     os.chdir(os.path.dirname(os.path.abspath(__file__)))

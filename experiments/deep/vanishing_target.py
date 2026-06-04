@@ -33,7 +33,6 @@ N_STEPS = 5000
 N_SEEDS = 3
 DEPTHS = [2, 4, 8]
 BATCH_SIZE = 16
-LR = 0.001
 
 
 class IdentityMLP(nn.Module):

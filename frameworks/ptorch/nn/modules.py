@@ -128,23 +128,6 @@ class Step(ProjectionModule):
         return torch.where(input >= 0, torch.tensor(1.0, dtype=input.dtype, device=input.device),
                            torch.tensor(-1.0, dtype=input.dtype, device=input.device))
 
-class Sort(ProjectionModule):
-    """Sort activation.
-
-    Forward:  ascending sort along `dim`.
-    Backward: projection-aware via SortProjection (rank-match + midpoint +
-              PAVA + inverse permutation). With config.use_projections=False
-              falls back to a plain sort (gradients go through torch.sort).
-    """
-    def __init__(self, dim: int = -1):
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, input):
-        if config.use_projections:
-            return SortProjection.apply(input, self.dim)
-        return torch.sort(input, dim=self.dim).values
-
 class QuantizedRelu(ProjectionModule):
     """Quantized ReLU activation.
 
@@ -190,25 +173,6 @@ class GappedStep(ProjectionModule):
         return torch.where(input >= half, torch.tensor(1.0, dtype=input.dtype, device=input.device),
                torch.where(input <= -half, torch.tensor(-1.0, dtype=input.dtype, device=input.device),
                             torch.tensor(0.0, dtype=input.dtype, device=input.device)))
-
-class Dropout(ProjectionModule):
-    """Projection-aware dropout.
-
-    Forward: standard inverted dropout (zero with probability *p*,
-    scale survivors by 1/(1-p)).
-    Backward: projects inputs onto the dropout constraint graph.
-    """
-    def __init__(self, p: float = 0.5):
-        super().__init__()
-        self.p = p
-
-    def forward(self, input):
-        if config.use_projections:
-            return DropoutProjection.apply(input, self.p, self.training)
-        if self.training and self.p > 0.0:
-            mask = (torch.rand_like(input) > self.p).to(input.dtype)
-            return input * mask * (1.0 / (1.0 - self.p))
-        return input
 
 
 class CrossEntropy(ProjectionModule):

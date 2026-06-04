@@ -12,13 +12,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pandas as pd
 import tqdm
-from ptorch.core.ops import process_activation_target
 from frameworks.ptorch.nn.modules import Linear, CrossEntropy, LeakyReLU, ReLU
-from frameworks.ptorch.core.ops import SoftmaxProjection
-from frameworks.ptorch.nn.modules_experimental import RMSNorm, MultiheadAttention, Branch, Softcap, SeqAvgPool, SeqMaxPool
+from frameworks.ptorch.nn.modules_experimental import RMSNorm, MultiheadAttention, Branch, SeqAvgPool, SeqMaxPool
 from frameworks.ptorch import config as ptorch_config
 import frameworks.ptorch.optim_static as ptorch_optim_static
-from frameworks.ptorch.core.overrides import apply_overrides
 
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 
@@ -101,14 +98,14 @@ class TransformerEncoderBlock(nn.Module):
         # Attention Sublayer
         x_res1, x_skip1 = self.branch_res_attn(x)
         x_norm1 = self.norm1(x_res1)
-        q, k, v = self.branch_qkv(x_norm1)
+        q, k, v = self.branch_qkv(x_res1)
         attn_out = self.attn(q, k, v)
         x = ResidualAdd.apply(x_skip1, attn_out)
 
         # MLP Sublayer
         x_res2, x_skip2 = self.branch_res_mlp(x)
         x_norm2 = self.norm2(x_res2)
-        mlp_out = self.mlp(x_norm2)
+        mlp_out = self.mlp(x_res2)
         x = ResidualAdd.apply(x_skip2, mlp_out)
 
         return x
@@ -311,9 +308,13 @@ def run(cfg, task_cfg, batch_size, run_number, device,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PTorch ViT benchmark")
     parser.add_argument("--config", default=os.path.join(os.path.dirname(__file__), "config.yaml"))
+    parser.add_argument("--max-steps", type=int, default=None, help="Override cfg['max_steps']")
+    parser.add_argument("--num-runs", type=int, default=None, help="Override cfg['num_runs']")
     args = parser.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
+    if args.max_steps is not None: cfg["max_steps"] = args.max_steps
+    if args.num_runs is not None: cfg["num_runs"] = args.num_runs
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 

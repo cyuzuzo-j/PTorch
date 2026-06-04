@@ -22,8 +22,8 @@ import pandas as pd
 import tqdm
 
 from ptorch.nn.modules import (
-    Linear, ReLU, Step, GappedStep, QuantizedRelu, Sort,
-    CrossEntropy, HardMarginLoss,
+    Linear, ReLU, Step, GappedStep, QuantizedRelu,
+    CrossEntropy,
 )
 import ptorch.nn.modules as ptorch_modules
 from ptorch import config as ptorch_config
@@ -42,10 +42,6 @@ ACTIVATIONS = {
     "Step":         (lambda norm, **kw: Step(),              False),
     "GappedStep":   (lambda norm, **kw: GappedStep(**kw),    False),
     "QuantizedRelu":(lambda norm, **kw: QuantizedRelu(**kw), False),
-    # Sort is non-differentiable as an activation: torch.sort has a zero
-    # gradient w.r.t. its values (only the permutation is data-dependent),
-    # so the projection backward is what makes training possible here.
-    "Sort":         (lambda norm, **kw: Sort(**kw),          False),
 }
 
 
@@ -187,9 +183,13 @@ if __name__ == "__main__":
                         help="Path to YAML config file")
     parser.add_argument("--activations", nargs="*", default=None,
                         help="Subset of activations to run (default: all four)")
+    parser.add_argument("--max-steps", type=int, default=None, help="Override cfg['max_steps']")
+    parser.add_argument("--num-runs", type=int, default=None, help="Override cfg['num_runs']")
     args = parser.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
+    if args.max_steps is not None: cfg["max_steps"] = args.max_steps
+    if args.num_runs is not None: cfg["num_runs"] = args.num_runs
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
