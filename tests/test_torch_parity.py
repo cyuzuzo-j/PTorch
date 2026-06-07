@@ -6,9 +6,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from frameworks.ptorch.config import config
-from frameworks.ptorch.nn.modules import Linear as PLinear, ReLU as PReLU, Conv2D as PConv2D, MaxPool2d as PMaxPool2d, CrossEntropy as PCrossEntropy
-from frameworks.ptorch.optim_static import ProjectionSGD
+from ptorch.config import config
+from ptorch.nn.modules import Linear as PLinear, ReLU as PReLU, Conv2D as PConv2D, MaxPool2d as PMaxPool2d, CrossEntropy as PCrossEntropy
+from ptorch.optim_static import ProjectionSGD
 
 
 @pytest.fixture(autouse=True)

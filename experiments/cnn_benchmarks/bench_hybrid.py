@@ -5,9 +5,6 @@
 ##################################################
 import sys, os, argparse, copy, gc, time
 from collections import defaultdict
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../frameworks')))
-
 import yaml
 import torch
 import torch.nn.functional as F

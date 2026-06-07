@@ -55,9 +55,6 @@ import tracemalloc
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), "../..")))
-sys.path.insert(0, osp.abspath(osp.join(osp.dirname(__file__), "../../frameworks")))
-
 WARMUP_STEPS = 3
 MEASURE_STEPS = 5
 

@@ -32,12 +32,9 @@ import seaborn as sns
 import torch
 import torch.nn as nn
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../frameworks')))
-
-from frameworks.ptorch.core.ops import MSEProjection, matmul_proj
-from frameworks.ptorch.nn.modules import Linear
-from frameworks.ptorch.optim_static import ProjectionSGD
+from ptorch.core.ops import MSEProjection, matmul_proj
+from ptorch.nn.modules import Linear
+from ptorch.optim_static import ProjectionSGD
 
 
 sns.set_theme(style="whitegrid", context="paper", font_scale=1.3)

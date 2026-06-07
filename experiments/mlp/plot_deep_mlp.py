@@ -26,8 +26,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-
 sns.set_theme(style="whitegrid", context="paper", font_scale=2.0)
 
 CFG_PATH = os.path.join(os.path.dirname(__file__), "deep_mlp_config.yaml")

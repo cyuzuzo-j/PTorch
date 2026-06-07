@@ -13,8 +13,8 @@ Covers:
 import numpy as np
 import torch
 
-from frameworks.ptorch import config as ptorch_config
-from frameworks.ptorch.core import ops
+from ptorch import config as ptorch_config
+from ptorch.core import ops
 
 
 class _MockCtx:

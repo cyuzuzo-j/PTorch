@@ -19,12 +19,9 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../frameworks')))
-
-from frameworks.ptorch.nn.modules import Linear
-from frameworks.ptorch.optim_static import ProjectionMuonV2
-from frameworks.ptorch.core.ops import MSEProjection
+from ptorch.nn.modules import Linear
+from ptorch.optim_static import ProjectionMuonV2
+from ptorch.core.ops import MSEProjection
 
 sns.set_theme(style="whitegrid", context="paper", font_scale=2.0)
 

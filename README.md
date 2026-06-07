@@ -2,6 +2,8 @@
 
 > **Attribution:** A significant portion of this code is based on [AndreasBergmeister/pjax](https://github.com/AndreasBergmeister/pjax).
 
+Full documentation lives on the [PTorch Wiki](https://github.com/cyuzuzo-j/PTorch/wiki) — code-first reference with thesis cross-links. Wiki source is in `docs_src/`; sync via `./tools/wiki/publish.sh`.
+
 A PyTorch-based framework for training neural networks via **cyclic projections** instead of backpropagation. Rather than computing gradients, each layer's backward pass finds the nearest point satisfying its local constraint (a projection), and optimizers consume these projection targets as pseudo-gradients.
 
 ## How it works
@@ -11,27 +13,32 @@ ptorch: `loss.backward()` propagates *projection targets* — each layer project
 
 ## Installation
 
+Requires Python 3.10+.
+
 ```bash
+# Editable install (core + experiments + dev tooling)
+pip install -e ".[experiments,dev]"
 
-# Install dependencies (Python 3.10+)
-pip install torch numpy pandas tqdm pyyaml
-
-cd frameworks
-git clone https://github.com/AndreasBergmeister/pjax.git pjax_orr # download pjax
+# pjax is not on PyPI — install from GitHub
+pip install git+https://github.com/AndreasBergmeister/pjax.git
 ```
 
-The `frameworks/` directory is used directly from source — no `pip install` needed. Scripts add it to `sys.path` automatically.
+For a minimal install without the benchmark stack: `pip install -e .`
 
 ## Quick start
 
 ```python
-import sys
-sys.path.insert(0, "frameworks")
-
+import torch
+import torch.nn.functional as F
 import ptorch                          # applies projection overrides to torch
 import ptorch.nn.modules as pnn
 import ptorch.optim_static as poptim
 from ptorch.config import config
+
+# Dummy MNIST-shaped batch
+x = torch.randn(8, 784)
+y = torch.randint(0, 10, (8,))
+y_onehot = F.one_hot(y, num_classes=10).float()
 
 model = pnn.Linear(784, 10)
 criterion = pnn.CrossEntropy()
@@ -42,6 +49,16 @@ criterion(logits, y_onehot).sum().backward()
 optimizer.step()
 optimizer.zero_grad()
 ```
+
+> **First-run latency.** The first import takes ~30–60 s because several hot
+> projection ops (`zeropower_via_polarexpress`, `process_activation_target`,
+> `matmul_proj_linf`, `matmul_proj`) are wrapped in `@torch.compile()`. After
+> the first trace they're fast for the rest of the session. If you're
+> experimenting locally and don't need full throughput, comment out the
+> `@torch.compile(...)` decorators on those functions in
+> `src/ptorch/core/ops.py` and `src/ptorch/optim_static.py` —
+> everything still runs in
+> eager mode, just slower.
 
 ## Modules
 
@@ -77,59 +94,46 @@ All wrap their standard PyTorch counterpart and convert projection targets to ps
 |---|---|
 | `mnist_from_scratch.ipynb` | MNIST classification built manually without ptorch abstractions — best starting point to understand the algorithm |
 
+All commands below are run from the **repo root** as modules (`python -m ...`) so that `from experiments.shared.data import ...` resolves cleanly.
+
 ### MLP benchmark (MNIST / CIFAR-10)
 
 ```bash
-cd experiments/mlp
-
 # Run ptorch benchmark with default config (linf norm, ProjectionMuon, CrossEntropy)
-python bench_ptorch.py --config config.yaml
+python -m experiments.mlp.bench_ptorch --config experiments/mlp/config.yaml
 
 # Run baseline PyTorch (Adam) for comparison
-python bench_torch.py --config config.yaml
+python -m experiments.mlp.bench_torch --config experiments/mlp/config.yaml
 
 # Plot results
-python plot_mlp_benchmark.py
+python -m experiments.mlp.plot_mlp_benchmark
 ```
 
-Edit `config.yaml` to sweep norms (`l2`/`linf`), optimizers, and loss functions.
+Edit `experiments/mlp/config.yaml` to sweep norms (`l2`/`linf`), optimizers, and loss functions.
 
 ### CNN benchmark (CIFAR-10)
 
 ```bash
-cd experiments/cnn_benchmarks
-
-# ptorch CNN
-python bench_ptorch.py --config config.yaml
-
-# Baseline
-python bench_torch.py --config config.yaml
-
-python plot_results.py
+python -m experiments.cnn_benchmarks.bench_ptorch --config experiments/cnn_benchmarks/config.yaml
+python -m experiments.cnn_benchmarks.bench_torch  --config experiments/cnn_benchmarks/config.yaml
+python -m experiments.cnn_benchmarks.plot_results
 ```
 
 ### Attention / ViT benchmark (CIFAR-10)
 
 ```bash
-cd experiments/attention
-
-# ptorch ViT (Projection optimizers)
-python bench_ptorch_vit.py --config config.yaml
-
-# Baseline (AdamW)
-python bench_torch_vit.py --config config.yaml
-
-python plot_results.py
+python -m experiments.attention.bench_ptorch_vit --config experiments/attention/config.yaml
+python -m experiments.attention.bench_torch_vit  --config experiments/attention/config.yaml
+python -m experiments.attention.plot_results
 ```
 
 ### Non-differentiable activations (MNIST)
 
-Trains MLPs with piecewise-constant activations (Step, GappedStep, QuantizedRelu, Sort) — networks autograd cannot handle.
+Trains MLPs with piecewise-constant activations (Step, GappedStep, QuantizedRelu) — networks autograd cannot handle.
 
 ```bash
-cd experiments/non_differentiable
-python quantized_relu.py --config config.yaml
-python plot_results.py
+python -m experiments.non_differentiable.quantized_relu --config experiments/non_differentiable/config.yaml
+python -m experiments.non_differentiable.plot_results
 ```
 
 ### Deep network analysis
@@ -138,10 +142,10 @@ Theoretical/empirical studies on deep linear MLPs.
 
 ```bash
 # Local non-expansiveness of the (forward, backward target) projection pair across depths
-python experiments/deep/local_nonexpansiveness_deep.py
+python -m experiments.deep.local_nonexpansiveness_deep
 
 # Vanishing target signal as it backpropagates through depth
-python experiments/deep/vanishing_target.py
+python -m experiments.deep.vanishing_target
 ```
 
 Both scripts use hardcoded constants at the top of the file (edit them to scale runs up/down).
@@ -151,8 +155,8 @@ Both scripts use hardcoded constants at the top of the file (edit them to scale 
 Every config-driven benchmark accepts `--max-steps N --num-runs M` to override the YAML for a fast end-to-end check:
 
 ```bash
-python experiments/mlp/bench_ptorch.py --max-steps 10 --num-runs 1
-python experiments/cnn_benchmarks/bench_ptorch.py --max-steps 10 --num-runs 1
-python experiments/attention/bench_ptorch_vit.py --max-steps 5 --num-runs 1
+python -m experiments.mlp.bench_ptorch --max-steps 10 --num-runs 1
+python -m experiments.cnn_benchmarks.bench_ptorch --max-steps 10 --num-runs 1
+python -m experiments.attention.bench_ptorch_vit --max-steps 5 --num-runs 1
 ```
 

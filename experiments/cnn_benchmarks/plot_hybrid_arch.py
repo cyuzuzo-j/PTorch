@@ -20,8 +20,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-
 sns.set_theme(style="whitegrid", context="paper", font_scale=1.6)
 
 HERE = os.path.dirname(os.path.abspath(__file__))

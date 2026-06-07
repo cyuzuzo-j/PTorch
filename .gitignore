@@ -40,3 +40,15 @@ experiments/attention/attention_debug/
 *.aux
 *.fdb_latexmk
 *.fls
+
+# Python packaging build artifacts
+build/
+dist/
+*.egg-info/
+.ruff_cache/
+
+# Wiki working tree (when cloned alongside this repo by tools/wiki/publish.sh)
+PTorch.wiki/
+
+# Regenerated wiki figures (re-runnable via tools/wiki/build_figures.py)
+docs_src/images/

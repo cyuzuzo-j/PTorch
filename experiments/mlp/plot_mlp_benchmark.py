@@ -20,8 +20,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-
 # ── Seaborn theme — identical to vanishing_target.py ─────────────────────────
 sns.set_theme(style="whitegrid", context="paper", font_scale=2.0)
 

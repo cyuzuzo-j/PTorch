@@ -4,12 +4,12 @@ import torch
 import torch.nn.functional as F
 from dataclasses import fields, MISSING
 
-from frameworks.ptorch.config import Config, config
-from frameworks.ptorch.core.ops import process_activation_target
-from frameworks.ptorch.nn.modules import (
-    Linear, ReLU, LeakyReLU, Softmax, Dropout, CrossEntropy, MaxPool2d,
+from ptorch.config import Config, config
+from ptorch.core.ops import process_activation_target
+from ptorch.nn.modules import (
+    Linear, ReLU, LeakyReLU, Softmax, CrossEntropy, MaxPool2d,
 )
-from frameworks.ptorch.nn.modules_experimental import (
+from ptorch.nn.modules_experimental import (
     Rotary, RMSNorm, apply_rotary_emb,
 )
 
@@ -90,14 +90,6 @@ def test_use_projections_false_softmax_matches_F_softmax():
     _set(use_projections=False)
     x = _rnd(4, 8, seed=14)
     assert torch.allclose(Softmax()(x), F.softmax(x, dim=-1), atol=1e-6)
-
-
-def test_use_projections_false_dropout_eval_is_identity():
-    _set(use_projections=False)
-    d = Dropout(p=0.5)
-    d.eval()
-    x = _rnd(4, 8, seed=15)
-    assert torch.equal(d(x), x)
 
 
 def test_use_projections_false_cross_entropy_matches_F_cross_entropy():

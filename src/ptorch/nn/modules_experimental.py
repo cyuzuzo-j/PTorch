@@ -10,7 +10,7 @@ re-verified end-to-end.
 """
 
 from typing import Tuple, Optional
-from frameworks.ptorch.core.ops import MaskedAddProjection
+from ptorch.core.ops import MaskedAddProjection
 
 import torch
 import torch.nn as nn
@@ -390,7 +390,7 @@ class CausalSelfAttention(nn.Module):
         bsz, seqlen, dim = x.shape
         
         if config.use_projections:
-            from frameworks.ptorch.core.ops import BranchProjection
+            from ptorch.core.ops import BranchProjection
             x_branched = BranchProjection.apply(x, 3)
         else:
             x_branched = x

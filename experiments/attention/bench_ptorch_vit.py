@@ -3,19 +3,16 @@
 ###   Regular ViT with Projection Optimizers   ###
 ##################################################
 import sys, os, argparse, gc, time
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../frameworks')))
-
 import yaml
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import pandas as pd
 import tqdm
-from frameworks.ptorch.nn.modules import Linear, CrossEntropy, LeakyReLU, ReLU
-from frameworks.ptorch.nn.modules_experimental import RMSNorm, MultiheadAttention, Branch, SeqAvgPool, SeqMaxPool
-from frameworks.ptorch import config as ptorch_config
-import frameworks.ptorch.optim_static as ptorch_optim_static
+from ptorch.nn.modules import Linear, CrossEntropy, LeakyReLU, ReLU
+from ptorch.nn.modules_experimental import RMSNorm, MultiheadAttention, Branch, SeqAvgPool, SeqMaxPool
+from ptorch import config as ptorch_config
+import ptorch.optim_static as ptorch_optim_static
 
 from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
 
@@ -203,7 +200,7 @@ def run(cfg, task_cfg, batch_size, run_number, device,
     criterion = getattr(nn, loss_name, None)
     if criterion is None:
         # try ptorch modules
-        import frameworks.ptorch.nn.modules as pnn
+        import ptorch.nn.modules as pnn
         criterion = getattr(pnn, loss_name, CrossEntropy)
     criterion = criterion()
 

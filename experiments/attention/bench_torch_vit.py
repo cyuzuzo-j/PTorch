@@ -3,9 +3,6 @@
 ###   Standard ViT with stock optimizers        ###
 ##################################################
 import sys, os, argparse, gc, time
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../frameworks')))
-
 import yaml
 import torch
 import torch.nn as nn
