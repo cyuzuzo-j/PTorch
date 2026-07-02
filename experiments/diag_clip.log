@@ -1,0 +1,68 @@
+
+Projection policy gradient (ptorch) for continuous control, with value baseline.
+
+/rhea/scratch/brussel/vo/000/bvo00004/vsc38352/learning_with_projections/experiments/bipedal_walker.py:304: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:836.)
+  pol_acc += float(pol); val_acc += float(val); nb += 1
+epoch:   0 	 pol:    -0.21 	 val:     9.33 	 clipfrac: 0.52 	 return:   -97.36 	 ep_len:  1340.0 	 log_std: -0.700
+epoch:   1 	 pol:    -0.01 	 val:   108.38 	 clipfrac: 0.86 	 return:  -123.44 	 ep_len:   199.4 	 log_std: -0.703
+epoch:   2 	 pol:     0.02 	 val:    28.11 	 clipfrac: 0.85 	 return:  -119.44 	 ep_len:   355.8 	 log_std: -0.706
+epoch:   3 	 pol:     0.19 	 val:    93.38 	 clipfrac: 0.50 	 return:  -120.33 	 ep_len:   202.2 	 log_std: -0.716
+epoch:   4 	 pol:     0.19 	 val:    60.70 	 clipfrac: 0.40 	 return:  -120.78 	 ep_len:   231.2 	 log_std: -0.734
+epoch:   5 	 pol:     0.20 	 val:    37.36 	 clipfrac: 0.23 	 return:  -123.52 	 ep_len:   478.7 	 log_std: -0.752
+epoch:   6 	 pol:     0.00 	 val:    20.93 	 clipfrac: 0.25 	 return:  -132.51 	 ep_len:  1025.4 	 log_std: -0.775
+epoch:   7 	 pol:     0.09 	 val:    19.41 	 clipfrac: 0.19 	 return:  -112.67 	 ep_len:   853.3 	 log_std: -0.792
+epoch:   8 	 pol:    -0.02 	 val:    14.39 	 clipfrac: 0.16 	 return:  -116.38 	 ep_len:  1197.3 	 log_std: -0.822
+epoch:   9 	 pol:    -0.07 	 val:     1.88 	 clipfrac: 0.20 	 return:   -51.84 	 ep_len:  1600.0 	 log_std: -0.841
+epoch:  10 	 pol:    -0.04 	 val:     1.23 	 clipfrac: 0.20 	 return:   -51.24 	 ep_len:  1600.0 	 log_std: -0.862
+epoch:  11 	 pol:    -0.04 	 val:     1.71 	 clipfrac: 0.17 	 return:   -54.94 	 ep_len:  1600.0 	 log_std: -0.889
+epoch:  12 	 pol:     0.01 	 val:     1.64 	 clipfrac: 0.16 	 return:   -64.25 	 ep_len:  1600.0 	 log_std: -0.912
+epoch:  13 	 pol:     0.02 	 val:     0.72 	 clipfrac: 0.15 	 return:   -52.04 	 ep_len:  1600.0 	 log_std: -0.927
+epoch:  14 	 pol:     0.04 	 val:     0.74 	 clipfrac: 0.16 	 return:   -54.13 	 ep_len:  1600.0 	 log_std: -0.939
+epoch:  15 	 pol:     0.04 	 val:     1.24 	 clipfrac: 0.13 	 return:   -56.37 	 ep_len:  1600.0 	 log_std: -0.949
+epoch:  16 	 pol:     0.07 	 val:     3.94 	 clipfrac: 0.07 	 return:   -63.53 	 ep_len:  1345.2 	 log_std: -0.954
+epoch:  17 	 pol:     0.02 	 val:     0.56 	 clipfrac: 0.13 	 return:   -49.28 	 ep_len:  1600.0 	 log_std: -0.969
+epoch:  18 	 pol:     0.08 	 val:     9.04 	 clipfrac: 0.15 	 return:   -75.58 	 ep_len:  1155.4 	 log_std: -0.974
+epoch:  19 	 pol:     0.06 	 val:    16.39 	 clipfrac: 0.15 	 return:   -86.82 	 ep_len:   909.4 	 log_std: -0.984
+epoch:  20 	 pol:    -0.01 	 val:    13.74 	 clipfrac: 0.10 	 return:   -81.03 	 ep_len:  1017.1 	 log_std: -0.996
+epoch:  21 	 pol:     0.01 	 val:    22.34 	 clipfrac: 0.13 	 return:   -95.97 	 ep_len:   810.6 	 log_std: -1.000
+epoch:  22 	 pol:    -0.00 	 val:     4.75 	 clipfrac: 0.11 	 return:   -62.48 	 ep_len:  1341.0 	 log_std: -1.000
+epoch:  23 	 pol:    -0.15 	 val:     1.85 	 clipfrac: 0.23 	 return:   -51.29 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  24 	 pol:    -0.05 	 val:     9.10 	 clipfrac: 0.09 	 return:   -72.53 	 ep_len:  1156.0 	 log_std: -1.000
+epoch:  25 	 pol:    -0.01 	 val:     9.88 	 clipfrac: 0.10 	 return:   -76.84 	 ep_len:  1017.5 	 log_std: -1.000
+epoch:  26 	 pol:    -0.04 	 val:     8.90 	 clipfrac: 0.10 	 return:   -71.07 	 ep_len:  1156.3 	 log_std: -1.000
+epoch:  27 	 pol:    -0.01 	 val:     8.59 	 clipfrac: 0.13 	 return:   -53.09 	 ep_len:  1352.8 	 log_std: -1.000
+epoch:  28 	 pol:    -0.08 	 val:     0.81 	 clipfrac: 0.17 	 return:   -48.19 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  29 	 pol:    -0.03 	 val:     0.73 	 clipfrac: 0.15 	 return:   -46.07 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  30 	 pol:    -0.04 	 val:     1.36 	 clipfrac: 0.14 	 return:   -57.39 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  31 	 pol:    -0.02 	 val:     3.16 	 clipfrac: 0.11 	 return:   -55.15 	 ep_len:  1342.2 	 log_std: -1.000
+epoch:  32 	 pol:    -0.07 	 val:     0.59 	 clipfrac: 0.16 	 return:   -47.46 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  33 	 pol:    -0.01 	 val:     0.46 	 clipfrac: 0.17 	 return:   -39.95 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  34 	 pol:    -0.03 	 val:     2.08 	 clipfrac: 0.13 	 return:   -62.02 	 ep_len:  1569.8 	 log_std: -1.000
+epoch:  35 	 pol:     0.00 	 val:     0.67 	 clipfrac: 0.18 	 return:   -47.80 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  36 	 pol:    -0.04 	 val:     0.71 	 clipfrac: 0.16 	 return:   -46.51 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  37 	 pol:     0.05 	 val:     0.73 	 clipfrac: 0.15 	 return:   -47.08 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  38 	 pol:    -0.04 	 val:     0.39 	 clipfrac: 0.15 	 return:   -51.78 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  39 	 pol:    -0.03 	 val:     0.38 	 clipfrac: 0.17 	 return:   -43.53 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  40 	 pol:     0.05 	 val:     0.39 	 clipfrac: 0.18 	 return:   -48.60 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  41 	 pol:    -0.03 	 val:     0.27 	 clipfrac: 0.18 	 return:   -32.62 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  42 	 pol:    -0.04 	 val:     0.23 	 clipfrac: 0.18 	 return:   -34.12 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  43 	 pol:    -0.28 	 val:     3.66 	 clipfrac: 0.19 	 return:   -67.51 	 ep_len:  1342.3 	 log_std: -1.000
+epoch:  44 	 pol:     0.04 	 val:     0.32 	 clipfrac: 0.20 	 return:   -43.55 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  45 	 pol:    -0.01 	 val:     0.26 	 clipfrac: 0.18 	 return:   -33.80 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  46 	 pol:    -0.01 	 val:     0.25 	 clipfrac: 0.17 	 return:   -36.61 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  47 	 pol:    -0.12 	 val:     8.15 	 clipfrac: 0.24 	 return:   -73.51 	 ep_len:  1019.5 	 log_std: -1.000
+epoch:  48 	 pol:    -0.04 	 val:     3.20 	 clipfrac: 0.12 	 return:   -51.31 	 ep_len:  1342.2 	 log_std: -1.000
+epoch:  49 	 pol:    -0.15 	 val:     3.09 	 clipfrac: 0.11 	 return:   -52.13 	 ep_len:  1342.8 	 log_std: -1.000
+epoch:  50 	 pol:    -0.08 	 val:     0.31 	 clipfrac: 0.19 	 return:   -30.63 	 ep_len:  1600.0 	 log_std: -1.000
+epoch:  51 	 pol:    -0.22 	 val:    10.68 	 clipfrac: 0.20 	 return:   -75.38 	 ep_len:  1019.8 	 log_std: -1.000
+epoch:  52 	 pol:    -0.24 	 val:    12.75 	 clipfrac: 0.23 	 return:   -82.71 	 ep_len:   825.6 	 log_std: -1.000
+epoch:  53 	 pol:    -0.07 	 val:    17.45 	 clipfrac: 0.21 	 return:   -87.29 	 ep_len:   757.5 	 log_std: -1.000
+epoch:  54 	 pol:    -0.15 	 val:    10.33 	 clipfrac: 0.14 	 return:   -70.84 	 ep_len:  1019.0 	 log_std: -1.000
+epoch:  55 	 pol:    -0.27 	 val:    16.70 	 clipfrac: 0.21 	 return:   -80.36 	 ep_len:   910.8 	 log_std: -1.000
+epoch:  56 	 pol:    -0.12 	 val:    18.54 	 clipfrac: 0.14 	 return:   -82.79 	 ep_len:   753.5 	 log_std: -1.000
+epoch:  57 	 pol:    -0.32 	 val:    12.95 	 clipfrac: 0.18 	 return:   -81.67 	 ep_len:   824.2 	 log_std: -1.000
+epoch:  58 	 pol:    -0.09 	 val:     5.20 	 clipfrac: 0.20 	 return:   -47.80 	 ep_len:  1341.0 	 log_std: -1.000
+epoch:  59 	 pol:    -0.05 	 val:     4.50 	 clipfrac: 0.18 	 return:   -48.54 	 ep_len:  1340.8 	 log_std: -1.000
+
+Saved training plot to bipedal_walker_training_BipedalWalker-v3.png

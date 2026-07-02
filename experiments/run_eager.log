@@ -1,0 +1,313 @@
+
+Projection policy gradient (ptorch) for continuous control, with value baseline.
+
+Saved rollout gif -> bipedal_walker_gifs/epoch_0000.gif
+epoch:   0 	 pol:    -0.00 	 val:     0.80 	 clipfrac: 0.84 	 return:  -112.31 	 ep_len:   323.0 	 log_std: -0.684	 det_ret:  -106.66 	 det_len:   55.0  <-- best
+epoch:   1 	 pol:     0.10 	 val:     0.65 	 clipfrac: 0.67 	 return:  -113.88 	 ep_len:    84.2 	 log_std: -0.673
+epoch:   2 	 pol:     0.12 	 val:     0.46 	 clipfrac: 0.49 	 return:  -114.99 	 ep_len:    89.2 	 log_std: -0.663
+epoch:   3 	 pol:    -0.04 	 val:     0.35 	 clipfrac: 0.36 	 return:  -115.61 	 ep_len:    90.4 	 log_std: -0.659
+epoch:   4 	 pol:     0.06 	 val:     0.26 	 clipfrac: 0.33 	 return:  -114.47 	 ep_len:    88.3 	 log_std: -0.657
+epoch:   5 	 pol:     0.04 	 val:     0.27 	 clipfrac: 0.30 	 return:  -114.00 	 ep_len:    83.8 	 log_std: -0.657
+epoch:   6 	 pol:     0.06 	 val:     0.22 	 clipfrac: 0.33 	 return:  -114.79 	 ep_len:    86.3 	 log_std: -0.653
+epoch:   7 	 pol:     0.05 	 val:     0.19 	 clipfrac: 0.34 	 return:  -115.62 	 ep_len:    85.4 	 log_std: -0.648
+epoch:   8 	 pol:     0.13 	 val:     0.16 	 clipfrac: 0.40 	 return:  -116.05 	 ep_len:    82.0 	 log_std: -0.643
+epoch:   9 	 pol:     0.05 	 val:     0.18 	 clipfrac: 0.33 	 return:  -116.63 	 ep_len:    83.0 	 log_std: -0.643
+epoch:  10 	 pol:     0.08 	 val:     0.12 	 clipfrac: 0.30 	 return:  -113.74 	 ep_len:    76.5 	 log_std: -0.648	 det_ret:  -137.00 	 det_len:  128.0
+epoch:  11 	 pol:     0.07 	 val:     0.17 	 clipfrac: 0.30 	 return:  -112.95 	 ep_len:    75.1 	 log_std: -0.645
+epoch:  12 	 pol:     0.05 	 val:     0.14 	 clipfrac: 0.28 	 return:  -113.40 	 ep_len:    72.6 	 log_std: -0.655
+epoch:  13 	 pol:     0.03 	 val:     0.13 	 clipfrac: 0.32 	 return:  -113.01 	 ep_len:    69.7 	 log_std: -0.666
+epoch:  14 	 pol:     0.08 	 val:     0.13 	 clipfrac: 0.33 	 return:  -112.60 	 ep_len:    69.6 	 log_std: -0.674
+epoch:  15 	 pol:     0.07 	 val:     0.12 	 clipfrac: 0.27 	 return:  -112.06 	 ep_len:    68.4 	 log_std: -0.686
+epoch:  16 	 pol:     0.11 	 val:     0.15 	 clipfrac: 0.25 	 return:  -117.05 	 ep_len:    85.7 	 log_std: -0.700
+epoch:  17 	 pol:     0.02 	 val:     0.13 	 clipfrac: 0.28 	 return:  -118.52 	 ep_len:    92.1 	 log_std: -0.713
+epoch:  18 	 pol:     0.10 	 val:     0.12 	 clipfrac: 0.23 	 return:  -117.03 	 ep_len:    90.6 	 log_std: -0.728
+epoch:  19 	 pol:     0.06 	 val:     0.12 	 clipfrac: 0.25 	 return:  -115.55 	 ep_len:    92.7 	 log_std: -0.747
+epoch:  20 	 pol:     0.11 	 val:     0.12 	 clipfrac: 0.24 	 return:  -115.51 	 ep_len:    88.5 	 log_std: -0.764	 det_ret:  -114.41 	 det_len:   87.0
+epoch:  21 	 pol:     0.00 	 val:     0.11 	 clipfrac: 0.29 	 return:  -115.27 	 ep_len:    91.2 	 log_std: -0.782
+epoch:  22 	 pol:     0.10 	 val:     0.12 	 clipfrac: 0.25 	 return:  -116.86 	 ep_len:    96.8 	 log_std: -0.797
+epoch:  23 	 pol:     0.03 	 val:     0.15 	 clipfrac: 0.28 	 return:  -117.01 	 ep_len:    98.5 	 log_std: -0.814
+epoch:  24 	 pol:     0.06 	 val:     0.11 	 clipfrac: 0.29 	 return:  -117.46 	 ep_len:    96.6 	 log_std: -0.835
+epoch:  25 	 pol:     0.04 	 val:     0.12 	 clipfrac: 0.29 	 return:  -122.74 	 ep_len:   113.7 	 log_std: -0.857
+epoch:  26 	 pol:     0.06 	 val:     0.12 	 clipfrac: 0.29 	 return:  -120.63 	 ep_len:   109.3 	 log_std: -0.875
+epoch:  27 	 pol:     0.02 	 val:     0.09 	 clipfrac: 0.32 	 return:  -122.06 	 ep_len:   111.6 	 log_std: -0.894
+epoch:  28 	 pol:     0.06 	 val:     0.09 	 clipfrac: 0.35 	 return:  -122.33 	 ep_len:   115.3 	 log_std: -0.917
+epoch:  29 	 pol:     0.07 	 val:     0.09 	 clipfrac: 0.29 	 return:  -124.31 	 ep_len:   113.3 	 log_std: -0.936
+epoch:  30 	 pol:     0.03 	 val:     0.11 	 clipfrac: 0.24 	 return:  -125.67 	 ep_len:   113.4 	 log_std: -0.961	 det_ret:  -137.72 	 det_len:  143.0
+epoch:  31 	 pol:     0.06 	 val:     0.12 	 clipfrac: 0.26 	 return:  -127.36 	 ep_len:   114.4 	 log_std: -0.977
+epoch:  32 	 pol:    -0.00 	 val:     0.10 	 clipfrac: 0.31 	 return:  -122.30 	 ep_len:   116.5 	 log_std: -0.993
+epoch:  33 	 pol:    -0.03 	 val:     0.09 	 clipfrac: 0.29 	 return:  -121.57 	 ep_len:   118.0 	 log_std: -1.006
+epoch:  34 	 pol:    -0.05 	 val:     0.12 	 clipfrac: 0.25 	 return:  -122.12 	 ep_len:   114.8 	 log_std: -1.016
+epoch:  35 	 pol:    -0.02 	 val:     0.10 	 clipfrac: 0.27 	 return:  -122.95 	 ep_len:   116.0 	 log_std: -1.027
+epoch:  36 	 pol:    -0.05 	 val:     0.15 	 clipfrac: 0.27 	 return:  -122.88 	 ep_len:   114.7 	 log_std: -1.035
+epoch:  37 	 pol:     0.03 	 val:     0.09 	 clipfrac: 0.28 	 return:  -122.18 	 ep_len:   117.3 	 log_std: -1.048
+epoch:  38 	 pol:    -0.03 	 val:     0.08 	 clipfrac: 0.25 	 return:  -124.27 	 ep_len:   121.1 	 log_std: -1.058
+epoch:  39 	 pol:    -0.05 	 val:     0.09 	 clipfrac: 0.27 	 return:  -124.14 	 ep_len:   121.5 	 log_std: -1.060
+epoch:  40 	 pol:    -0.10 	 val:     0.09 	 clipfrac: 0.29 	 return:  -122.77 	 ep_len:   116.8 	 log_std: -1.063	 det_ret:  -141.35 	 det_len:  165.0
+epoch:  41 	 pol:    -0.00 	 val:     0.15 	 clipfrac: 0.28 	 return:  -120.01 	 ep_len:   117.0 	 log_std: -1.066
+epoch:  42 	 pol:    -0.04 	 val:     0.17 	 clipfrac: 0.29 	 return:  -123.14 	 ep_len:   119.3 	 log_std: -1.069
+epoch:  43 	 pol:    -0.07 	 val:     0.09 	 clipfrac: 0.27 	 return:  -122.71 	 ep_len:   123.2 	 log_std: -1.073
+epoch:  44 	 pol:    -0.00 	 val:     0.13 	 clipfrac: 0.22 	 return:  -124.96 	 ep_len:   118.8 	 log_std: -1.074
+epoch:  45 	 pol:    -0.03 	 val:     0.16 	 clipfrac: 0.26 	 return:  -125.62 	 ep_len:   125.5 	 log_std: -1.077
+epoch:  46 	 pol:    -0.04 	 val:     0.11 	 clipfrac: 0.23 	 return:  -123.88 	 ep_len:   121.0 	 log_std: -1.079
+epoch:  47 	 pol:     0.02 	 val:     0.19 	 clipfrac: 0.29 	 return:  -122.57 	 ep_len:   125.3 	 log_std: -1.082
+epoch:  48 	 pol:    -0.04 	 val:     0.10 	 clipfrac: 0.27 	 return:  -125.44 	 ep_len:   126.1 	 log_std: -1.086
+epoch:  49 	 pol:     0.09 	 val:     0.16 	 clipfrac: 0.34 	 return:  -124.01 	 ep_len:   127.3 	 log_std: -1.089
+Saved rollout gif -> bipedal_walker_gifs/epoch_0050.gif
+epoch:  50 	 pol:    -0.01 	 val:     0.09 	 clipfrac: 0.36 	 return:  -126.38 	 ep_len:   130.7 	 log_std: -1.091	 det_ret:  -106.33 	 det_len:  175.0  <-- best
+epoch:  51 	 pol:     0.04 	 val:     0.10 	 clipfrac: 0.31 	 return:  -122.93 	 ep_len:   131.7 	 log_std: -1.092
+epoch:  52 	 pol:    -0.07 	 val:     0.15 	 clipfrac: 0.25 	 return:  -121.73 	 ep_len:   122.9 	 log_std: -1.095
+epoch:  53 	 pol:    -0.04 	 val:     0.10 	 clipfrac: 0.24 	 return:  -122.56 	 ep_len:   125.5 	 log_std: -1.096
+epoch:  54 	 pol:     0.13 	 val:     0.17 	 clipfrac: 0.27 	 return:  -122.24 	 ep_len:   127.7 	 log_std: -1.103
+epoch:  55 	 pol:     0.06 	 val:     0.16 	 clipfrac: 0.29 	 return:  -121.51 	 ep_len:   124.2 	 log_std: -1.106
+epoch:  56 	 pol:    -0.01 	 val:     0.16 	 clipfrac: 0.27 	 return:  -125.22 	 ep_len:   131.4 	 log_std: -1.108
+epoch:  57 	 pol:     0.07 	 val:     0.17 	 clipfrac: 0.34 	 return:  -124.50 	 ep_len:   133.7 	 log_std: -1.112
+epoch:  58 	 pol:    -0.03 	 val:     0.14 	 clipfrac: 0.31 	 return:  -122.15 	 ep_len:   131.8 	 log_std: -1.118
+epoch:  59 	 pol:     0.11 	 val:     0.20 	 clipfrac: 0.34 	 return:  -126.10 	 ep_len:   145.6 	 log_std: -1.122
+epoch:  60 	 pol:     0.05 	 val:     0.21 	 clipfrac: 0.25 	 return:  -121.89 	 ep_len:   136.0 	 log_std: -1.126	 det_ret:  -112.34 	 det_len:  143.0
+epoch:  61 	 pol:    -0.02 	 val:     0.14 	 clipfrac: 0.29 	 return:  -122.85 	 ep_len:   126.0 	 log_std: -1.129
+epoch:  62 	 pol:     0.07 	 val:     0.15 	 clipfrac: 0.29 	 return:  -124.50 	 ep_len:   125.7 	 log_std: -1.132
+epoch:  63 	 pol:     0.03 	 val:     0.15 	 clipfrac: 0.26 	 return:  -121.86 	 ep_len:   132.2 	 log_std: -1.135
+epoch:  64 	 pol:     0.02 	 val:     0.16 	 clipfrac: 0.26 	 return:  -123.86 	 ep_len:   130.0 	 log_std: -1.139
+epoch:  65 	 pol:     0.00 	 val:     0.19 	 clipfrac: 0.31 	 return:  -125.00 	 ep_len:   140.1 	 log_std: -1.145
+epoch:  66 	 pol:    -0.09 	 val:     0.17 	 clipfrac: 0.30 	 return:  -118.38 	 ep_len:   136.6 	 log_std: -1.148
+epoch:  67 	 pol:    -0.05 	 val:     0.20 	 clipfrac: 0.27 	 return:  -120.32 	 ep_len:   132.7 	 log_std: -1.155
+epoch:  68 	 pol:    -0.04 	 val:     0.18 	 clipfrac: 0.30 	 return:  -119.33 	 ep_len:   136.5 	 log_std: -1.159
+epoch:  69 	 pol:     0.00 	 val:     0.20 	 clipfrac: 0.27 	 return:  -120.61 	 ep_len:   131.9 	 log_std: -1.167
+epoch:  70 	 pol:    -0.21 	 val:     0.18 	 clipfrac: 0.28 	 return:  -122.71 	 ep_len:   146.7 	 log_std: -1.170	 det_ret:  -107.59 	 det_len:  145.0
+epoch:  71 	 pol:    -0.06 	 val:     0.19 	 clipfrac: 0.26 	 return:  -120.46 	 ep_len:   139.7 	 log_std: -1.173
+epoch:  72 	 pol:    -0.01 	 val:     0.25 	 clipfrac: 0.30 	 return:  -121.79 	 ep_len:   138.6 	 log_std: -1.179
+epoch:  73 	 pol:    -0.02 	 val:     0.22 	 clipfrac: 0.27 	 return:  -124.95 	 ep_len:   142.9 	 log_std: -1.185
+epoch:  74 	 pol:    -0.07 	 val:     0.25 	 clipfrac: 0.29 	 return:  -121.26 	 ep_len:   138.0 	 log_std: -1.192
+epoch:  75 	 pol:    -0.09 	 val:     0.22 	 clipfrac: 0.29 	 return:  -118.03 	 ep_len:   138.9 	 log_std: -1.198
+epoch:  76 	 pol:     0.08 	 val:     0.18 	 clipfrac: 0.28 	 return:  -118.93 	 ep_len:   137.2 	 log_std: -1.200
+epoch:  77 	 pol:    -0.04 	 val:     0.19 	 clipfrac: 0.28 	 return:  -121.56 	 ep_len:   137.9 	 log_std: -1.200
+epoch:  78 	 pol:    -0.04 	 val:     0.22 	 clipfrac: 0.28 	 return:  -118.78 	 ep_len:   141.0 	 log_std: -1.200
+epoch:  79 	 pol:    -0.23 	 val:     0.25 	 clipfrac: 0.30 	 return:  -118.98 	 ep_len:   139.7 	 log_std: -1.200
+epoch:  80 	 pol:    -0.26 	 val:     0.25 	 clipfrac: 0.32 	 return:  -119.99 	 ep_len:   138.1 	 log_std: -1.200	 det_ret:  -106.74 	 det_len:  161.0
+epoch:  81 	 pol:    -0.13 	 val:     0.23 	 clipfrac: 0.29 	 return:  -121.39 	 ep_len:   136.4 	 log_std: -1.200
+epoch:  82 	 pol:    -0.19 	 val:     0.27 	 clipfrac: 0.30 	 return:  -122.66 	 ep_len:   147.2 	 log_std: -1.200
+epoch:  83 	 pol:    -0.14 	 val:     0.20 	 clipfrac: 0.30 	 return:  -124.37 	 ep_len:   137.7 	 log_std: -1.200
+epoch:  84 	 pol:    -0.11 	 val:     0.18 	 clipfrac: 0.31 	 return:  -121.71 	 ep_len:   138.8 	 log_std: -1.200
+epoch:  85 	 pol:    -0.07 	 val:     0.19 	 clipfrac: 0.32 	 return:  -123.69 	 ep_len:   143.4 	 log_std: -1.200
+epoch:  86 	 pol:    -0.22 	 val:     0.20 	 clipfrac: 0.31 	 return:  -120.36 	 ep_len:   135.7 	 log_std: -1.200
+epoch:  87 	 pol:    -0.34 	 val:     0.21 	 clipfrac: 0.32 	 return:  -122.12 	 ep_len:   144.9 	 log_std: -1.200
+epoch:  88 	 pol:    -0.15 	 val:     0.18 	 clipfrac: 0.32 	 return:  -119.34 	 ep_len:   134.1 	 log_std: -1.200
+epoch:  89 	 pol:     0.12 	 val:     0.29 	 clipfrac: 0.36 	 return:  -118.97 	 ep_len:   151.2 	 log_std: -1.200
+epoch:  90 	 pol:    -0.23 	 val:     0.21 	 clipfrac: 0.29 	 return:  -119.30 	 ep_len:   140.4 	 log_std: -1.200	 det_ret:  -112.78 	 det_len:  169.0
+epoch:  91 	 pol:    -0.20 	 val:     0.22 	 clipfrac: 0.31 	 return:  -118.72 	 ep_len:   141.5 	 log_std: -1.200
+epoch:  92 	 pol:    -0.05 	 val:     0.24 	 clipfrac: 0.31 	 return:  -118.65 	 ep_len:   138.9 	 log_std: -1.200
+epoch:  93 	 pol:    -0.13 	 val:     0.25 	 clipfrac: 0.33 	 return:  -117.06 	 ep_len:   128.0 	 log_std: -1.200
+epoch:  94 	 pol:    -0.22 	 val:     0.25 	 clipfrac: 0.36 	 return:  -123.61 	 ep_len:   161.3 	 log_std: -1.200
+epoch:  95 	 pol:    -0.26 	 val:     0.26 	 clipfrac: 0.32 	 return:  -119.73 	 ep_len:   140.7 	 log_std: -1.200
+epoch:  96 	 pol:    -0.14 	 val:     0.22 	 clipfrac: 0.35 	 return:  -120.55 	 ep_len:   140.0 	 log_std: -1.200
+epoch:  97 	 pol:    -0.16 	 val:     0.31 	 clipfrac: 0.38 	 return:  -117.63 	 ep_len:   144.0 	 log_std: -1.200
+epoch:  98 	 pol:    -0.19 	 val:     0.26 	 clipfrac: 0.36 	 return:  -120.02 	 ep_len:   152.5 	 log_std: -1.200
+epoch:  99 	 pol:    -0.15 	 val:     0.29 	 clipfrac: 0.33 	 return:  -121.30 	 ep_len:   147.9 	 log_std: -1.200
+Saved rollout gif -> bipedal_walker_gifs/epoch_0100.gif
+epoch: 100 	 pol:    -0.12 	 val:     0.29 	 clipfrac: 0.34 	 return:  -120.49 	 ep_len:   154.9 	 log_std: -1.200	 det_ret:  -131.11 	 det_len:  250.0
+epoch: 101 	 pol:    -0.17 	 val:     0.29 	 clipfrac: 0.31 	 return:  -119.46 	 ep_len:   137.8 	 log_std: -1.200
+epoch: 102 	 pol:    -0.10 	 val:     0.30 	 clipfrac: 0.32 	 return:  -120.85 	 ep_len:   143.4 	 log_std: -1.200
+epoch: 103 	 pol:    -0.29 	 val:     0.26 	 clipfrac: 0.33 	 return:  -119.15 	 ep_len:   130.4 	 log_std: -1.200
+epoch: 104 	 pol:    -0.28 	 val:     0.23 	 clipfrac: 0.31 	 return:  -116.32 	 ep_len:   140.0 	 log_std: -1.200
+epoch: 105 	 pol:    -0.27 	 val:     0.27 	 clipfrac: 0.34 	 return:  -117.25 	 ep_len:   151.5 	 log_std: -1.200
+epoch: 106 	 pol:    -0.11 	 val:     0.32 	 clipfrac: 0.31 	 return:  -120.13 	 ep_len:   152.7 	 log_std: -1.200
+epoch: 107 	 pol:    -0.17 	 val:     0.33 	 clipfrac: 0.35 	 return:  -121.73 	 ep_len:   147.7 	 log_std: -1.200
+epoch: 108 	 pol:    -0.22 	 val:     0.32 	 clipfrac: 0.31 	 return:  -120.63 	 ep_len:   157.9 	 log_std: -1.200
+epoch: 109 	 pol:    -0.10 	 val:     0.32 	 clipfrac: 0.33 	 return:  -120.43 	 ep_len:   140.1 	 log_std: -1.200
+epoch: 110 	 pol:    -0.21 	 val:     0.30 	 clipfrac: 0.33 	 return:  -118.72 	 ep_len:   135.9 	 log_std: -1.200	 det_ret:  -103.36 	 det_len:  166.0  <-- best
+epoch: 111 	 pol:    -0.24 	 val:     0.36 	 clipfrac: 0.32 	 return:  -118.14 	 ep_len:   144.4 	 log_std: -1.200
+epoch: 112 	 pol:    -0.32 	 val:     0.29 	 clipfrac: 0.30 	 return:  -118.78 	 ep_len:   133.5 	 log_std: -1.200
+epoch: 113 	 pol:    -0.16 	 val:     0.32 	 clipfrac: 0.36 	 return:  -120.38 	 ep_len:   158.4 	 log_std: -1.200
+epoch: 114 	 pol:    -0.48 	 val:     0.35 	 clipfrac: 0.35 	 return:  -121.71 	 ep_len:   145.6 	 log_std: -1.200
+epoch: 115 	 pol:    -0.08 	 val:     0.29 	 clipfrac: 0.33 	 return:  -116.21 	 ep_len:   138.3 	 log_std: -1.200
+epoch: 116 	 pol:    -0.30 	 val:     0.31 	 clipfrac: 0.38 	 return:  -119.21 	 ep_len:   141.9 	 log_std: -1.200
+epoch: 117 	 pol:    -0.20 	 val:     0.32 	 clipfrac: 0.31 	 return:  -124.52 	 ep_len:   160.9 	 log_std: -1.200
+epoch: 118 	 pol:    -0.22 	 val:     0.31 	 clipfrac: 0.34 	 return:  -118.62 	 ep_len:   138.5 	 log_std: -1.200
+epoch: 119 	 pol:    -0.08 	 val:     0.38 	 clipfrac: 0.35 	 return:  -118.86 	 ep_len:   145.2 	 log_std: -1.200
+epoch: 120 	 pol:    -0.12 	 val:     0.33 	 clipfrac: 0.32 	 return:  -118.74 	 ep_len:   139.1 	 log_std: -1.200	 det_ret:  -137.11 	 det_len:  188.0
+epoch: 121 	 pol:    -0.08 	 val:     0.37 	 clipfrac: 0.35 	 return:  -118.21 	 ep_len:   149.4 	 log_std: -1.200
+epoch: 122 	 pol:    -0.04 	 val:     0.37 	 clipfrac: 0.37 	 return:  -115.19 	 ep_len:   148.7 	 log_std: -1.200
+epoch: 123 	 pol:    -0.26 	 val:     0.34 	 clipfrac: 0.33 	 return:  -117.58 	 ep_len:   137.4 	 log_std: -1.200
+epoch: 124 	 pol:     0.05 	 val:     0.38 	 clipfrac: 0.36 	 return:  -118.80 	 ep_len:   137.8 	 log_std: -1.200
+epoch: 125 	 pol:    -0.10 	 val:     0.33 	 clipfrac: 0.38 	 return:  -116.70 	 ep_len:   150.1 	 log_std: -1.200
+epoch: 126 	 pol:    -0.18 	 val:     0.34 	 clipfrac: 0.33 	 return:  -119.96 	 ep_len:   148.9 	 log_std: -1.200
+epoch: 127 	 pol:    -0.30 	 val:     0.34 	 clipfrac: 0.33 	 return:  -119.20 	 ep_len:   140.0 	 log_std: -1.200
+epoch: 128 	 pol:    -0.20 	 val:     0.28 	 clipfrac: 0.34 	 return:  -119.85 	 ep_len:   152.3 	 log_std: -1.200
+epoch: 129 	 pol:     0.02 	 val:     0.30 	 clipfrac: 0.32 	 return:  -118.38 	 ep_len:   142.1 	 log_std: -1.200
+epoch: 130 	 pol:    -0.24 	 val:     0.33 	 clipfrac: 0.34 	 return:  -116.22 	 ep_len:   146.1 	 log_std: -1.200	 det_ret:  -108.59 	 det_len:  169.0
+epoch: 131 	 pol:    -0.21 	 val:     0.32 	 clipfrac: 0.35 	 return:  -121.13 	 ep_len:   144.2 	 log_std: -1.200
+epoch: 132 	 pol:    -0.29 	 val:     0.31 	 clipfrac: 0.37 	 return:  -119.11 	 ep_len:   137.9 	 log_std: -1.200
+epoch: 133 	 pol:    -0.33 	 val:     0.36 	 clipfrac: 0.39 	 return:  -120.25 	 ep_len:   168.7 	 log_std: -1.200
+epoch: 134 	 pol:     0.25 	 val:     0.31 	 clipfrac: 0.34 	 return:  -118.42 	 ep_len:   149.8 	 log_std: -1.200
+epoch: 135 	 pol:    -0.08 	 val:     0.30 	 clipfrac: 0.36 	 return:  -118.04 	 ep_len:   131.2 	 log_std: -1.200
+epoch: 136 	 pol:    -0.27 	 val:     0.26 	 clipfrac: 0.35 	 return:  -118.91 	 ep_len:   149.4 	 log_std: -1.200
+epoch: 137 	 pol:    -0.24 	 val:     0.31 	 clipfrac: 0.32 	 return:  -118.61 	 ep_len:   146.2 	 log_std: -1.200
+epoch: 138 	 pol:     0.10 	 val:     0.31 	 clipfrac: 0.36 	 return:  -118.93 	 ep_len:   146.9 	 log_std: -1.200
+epoch: 139 	 pol:     0.07 	 val:     0.29 	 clipfrac: 0.30 	 return:  -118.02 	 ep_len:   135.4 	 log_std: -1.200
+epoch: 140 	 pol:     0.01 	 val:     0.27 	 clipfrac: 0.29 	 return:  -120.15 	 ep_len:   148.2 	 log_std: -1.200	 det_ret:  -129.60 	 det_len:  137.0
+epoch: 141 	 pol:    -0.09 	 val:     0.32 	 clipfrac: 0.32 	 return:  -118.00 	 ep_len:   158.5 	 log_std: -1.200
+epoch: 142 	 pol:    -0.02 	 val:     0.29 	 clipfrac: 0.33 	 return:  -118.23 	 ep_len:   146.2 	 log_std: -1.200
+epoch: 143 	 pol:     0.16 	 val:     0.25 	 clipfrac: 0.29 	 return:  -117.10 	 ep_len:   142.8 	 log_std: -1.200
+epoch: 144 	 pol:    -0.18 	 val:     0.26 	 clipfrac: 0.30 	 return:  -118.85 	 ep_len:   149.3 	 log_std: -1.200
+epoch: 145 	 pol:     0.23 	 val:     0.32 	 clipfrac: 0.30 	 return:  -116.03 	 ep_len:   149.7 	 log_std: -1.200
+epoch: 146 	 pol:    -0.07 	 val:     0.26 	 clipfrac: 0.34 	 return:  -117.55 	 ep_len:   159.2 	 log_std: -1.200
+epoch: 147 	 pol:    -0.05 	 val:     0.26 	 clipfrac: 0.37 	 return:  -118.10 	 ep_len:   158.8 	 log_std: -1.200
+epoch: 148 	 pol:    -0.28 	 val:     0.37 	 clipfrac: 0.31 	 return:  -121.97 	 ep_len:   157.2 	 log_std: -1.200
+epoch: 149 	 pol:    -0.33 	 val:     0.36 	 clipfrac: 0.32 	 return:  -123.33 	 ep_len:   157.8 	 log_std: -1.200
+Saved rollout gif -> bipedal_walker_gifs/epoch_0150.gif
+epoch: 150 	 pol:    -0.32 	 val:     0.32 	 clipfrac: 0.29 	 return:  -120.33 	 ep_len:   147.6 	 log_std: -1.200	 det_ret:  -109.82 	 det_len:  130.0
+epoch: 151 	 pol:     0.13 	 val:     0.35 	 clipfrac: 0.31 	 return:  -121.11 	 ep_len:   158.1 	 log_std: -1.200
+epoch: 152 	 pol:    -0.02 	 val:     0.33 	 clipfrac: 0.31 	 return:  -118.34 	 ep_len:   156.5 	 log_std: -1.200
+epoch: 153 	 pol:    -0.05 	 val:     0.30 	 clipfrac: 0.34 	 return:  -121.08 	 ep_len:   158.9 	 log_std: -1.200
+epoch: 154 	 pol:    -0.07 	 val:     0.30 	 clipfrac: 0.36 	 return:  -118.19 	 ep_len:   157.5 	 log_std: -1.200
+epoch: 155 	 pol:     0.06 	 val:     0.29 	 clipfrac: 0.29 	 return:  -119.61 	 ep_len:   155.0 	 log_std: -1.200
+epoch: 156 	 pol:    -0.12 	 val:     0.32 	 clipfrac: 0.31 	 return:  -119.16 	 ep_len:   140.4 	 log_std: -1.200
+epoch: 157 	 pol:    -0.01 	 val:     0.34 	 clipfrac: 0.32 	 return:  -119.09 	 ep_len:   158.7 	 log_std: -1.200
+epoch: 158 	 pol:    -0.26 	 val:     0.35 	 clipfrac: 0.31 	 return:  -118.96 	 ep_len:   154.8 	 log_std: -1.200
+epoch: 159 	 pol:    -0.18 	 val:     0.30 	 clipfrac: 0.36 	 return:  -117.91 	 ep_len:   149.3 	 log_std: -1.200
+epoch: 160 	 pol:    -0.02 	 val:     0.30 	 clipfrac: 0.36 	 return:  -118.88 	 ep_len:   167.8 	 log_std: -1.200	 det_ret:  -130.69 	 det_len:  157.0
+epoch: 161 	 pol:    -0.40 	 val:     0.31 	 clipfrac: 0.34 	 return:  -120.06 	 ep_len:   159.2 	 log_std: -1.200
+epoch: 162 	 pol:    -0.27 	 val:     0.34 	 clipfrac: 0.32 	 return:  -118.79 	 ep_len:   164.5 	 log_std: -1.200
+epoch: 163 	 pol:    -0.50 	 val:     0.25 	 clipfrac: 0.30 	 return:  -116.79 	 ep_len:   148.2 	 log_std: -1.200
+epoch: 164 	 pol:     0.20 	 val:     0.28 	 clipfrac: 0.31 	 return:  -117.67 	 ep_len:   149.1 	 log_std: -1.200
+epoch: 165 	 pol:    -0.11 	 val:     0.26 	 clipfrac: 0.29 	 return:  -117.51 	 ep_len:   161.5 	 log_std: -1.200
+epoch: 166 	 pol:    -0.25 	 val:     0.25 	 clipfrac: 0.32 	 return:  -116.37 	 ep_len:   152.3 	 log_std: -1.200
+epoch: 167 	 pol:     0.21 	 val:     0.28 	 clipfrac: 0.33 	 return:  -116.49 	 ep_len:   154.9 	 log_std: -1.200
+epoch: 168 	 pol:    -0.38 	 val:     0.29 	 clipfrac: 0.35 	 return:  -122.04 	 ep_len:   159.2 	 log_std: -1.200
+epoch: 169 	 pol:    -0.06 	 val:     0.30 	 clipfrac: 0.31 	 return:  -119.81 	 ep_len:   149.3 	 log_std: -1.200
+epoch: 170 	 pol:    -0.27 	 val:     0.30 	 clipfrac: 0.33 	 return:  -119.53 	 ep_len:   154.8 	 log_std: -1.200	 det_ret:  -129.59 	 det_len:  138.0
+epoch: 171 	 pol:    -0.19 	 val:     0.30 	 clipfrac: 0.32 	 return:  -121.29 	 ep_len:   156.0 	 log_std: -1.200
+epoch: 172 	 pol:    -0.20 	 val:     0.34 	 clipfrac: 0.35 	 return:  -120.08 	 ep_len:   169.8 	 log_std: -1.200
+epoch: 173 	 pol:    -0.41 	 val:     0.31 	 clipfrac: 0.35 	 return:  -118.57 	 ep_len:   180.1 	 log_std: -1.200
+epoch: 174 	 pol:    -0.25 	 val:     0.31 	 clipfrac: 0.37 	 return:  -118.79 	 ep_len:   154.8 	 log_std: -1.200
+epoch: 175 	 pol:    -0.35 	 val:     0.31 	 clipfrac: 0.32 	 return:  -119.02 	 ep_len:   151.5 	 log_std: -1.200
+epoch: 176 	 pol:    -0.33 	 val:     0.28 	 clipfrac: 0.30 	 return:  -116.94 	 ep_len:   164.6 	 log_std: -1.200
+epoch: 177 	 pol:    -0.23 	 val:     0.25 	 clipfrac: 0.33 	 return:  -113.33 	 ep_len:   155.1 	 log_std: -1.200
+epoch: 178 	 pol:    -0.27 	 val:     0.31 	 clipfrac: 0.32 	 return:  -118.30 	 ep_len:   156.5 	 log_std: -1.200
+epoch: 179 	 pol:    -0.34 	 val:     0.31 	 clipfrac: 0.30 	 return:  -117.70 	 ep_len:   149.7 	 log_std: -1.200
+epoch: 180 	 pol:    -0.45 	 val:     0.32 	 clipfrac: 0.32 	 return:  -117.99 	 ep_len:   163.6 	 log_std: -1.200	 det_ret:  -114.04 	 det_len:  121.0
+epoch: 181 	 pol:    -0.24 	 val:     0.31 	 clipfrac: 0.32 	 return:  -118.58 	 ep_len:   143.5 	 log_std: -1.200
+epoch: 182 	 pol:    -0.24 	 val:     0.33 	 clipfrac: 0.36 	 return:  -119.14 	 ep_len:   186.1 	 log_std: -1.200
+epoch: 183 	 pol:    -0.26 	 val:     0.29 	 clipfrac: 0.32 	 return:  -114.86 	 ep_len:   143.7 	 log_std: -1.200
+epoch: 184 	 pol:    -0.27 	 val:     0.32 	 clipfrac: 0.29 	 return:  -117.00 	 ep_len:   161.7 	 log_std: -1.200
+epoch: 185 	 pol:    -0.40 	 val:     0.31 	 clipfrac: 0.29 	 return:  -116.83 	 ep_len:   143.0 	 log_std: -1.200
+epoch: 186 	 pol:    -0.31 	 val:     0.23 	 clipfrac: 0.34 	 return:  -118.20 	 ep_len:   161.8 	 log_std: -1.200
+epoch: 187 	 pol:    -0.15 	 val:     0.30 	 clipfrac: 0.29 	 return:  -114.99 	 ep_len:   157.7 	 log_std: -1.200
+epoch: 188 	 pol:    -0.11 	 val:     0.26 	 clipfrac: 0.29 	 return:  -115.90 	 ep_len:   142.8 	 log_std: -1.200
+epoch: 189 	 pol:    -0.26 	 val:     0.25 	 clipfrac: 0.35 	 return:  -116.93 	 ep_len:   168.2 	 log_std: -1.200
+epoch: 190 	 pol:    -0.51 	 val:     0.27 	 clipfrac: 0.30 	 return:  -117.34 	 ep_len:   157.5 	 log_std: -1.200	 det_ret:  -137.02 	 det_len:  200.0
+epoch: 191 	 pol:    -0.28 	 val:     0.32 	 clipfrac: 0.31 	 return:  -118.65 	 ep_len:   151.4 	 log_std: -1.200
+epoch: 192 	 pol:    -0.28 	 val:     0.34 	 clipfrac: 0.32 	 return:  -118.10 	 ep_len:   165.3 	 log_std: -1.200
+epoch: 193 	 pol:    -0.73 	 val:     0.31 	 clipfrac: 0.31 	 return:  -118.21 	 ep_len:   162.8 	 log_std: -1.200
+epoch: 194 	 pol:     0.06 	 val:     0.35 	 clipfrac: 0.32 	 return:  -119.42 	 ep_len:   170.6 	 log_std: -1.200
+epoch: 195 	 pol:    -0.40 	 val:     0.29 	 clipfrac: 0.32 	 return:  -119.10 	 ep_len:   168.0 	 log_std: -1.200
+epoch: 196 	 pol:    -0.50 	 val:     0.29 	 clipfrac: 0.30 	 return:  -117.68 	 ep_len:   155.3 	 log_std: -1.200
+epoch: 197 	 pol:    -0.33 	 val:     0.35 	 clipfrac: 0.32 	 return:  -121.76 	 ep_len:   172.3 	 log_std: -1.200
+epoch: 198 	 pol:    -0.24 	 val:     0.34 	 clipfrac: 0.30 	 return:  -118.74 	 ep_len:   164.1 	 log_std: -1.200
+epoch: 199 	 pol:    -0.10 	 val:     0.30 	 clipfrac: 0.30 	 return:  -117.35 	 ep_len:   154.8 	 log_std: -1.200
+Saved rollout gif -> bipedal_walker_gifs/epoch_0200.gif
+epoch: 200 	 pol:    -0.77 	 val:     0.34 	 clipfrac: 0.30 	 return:  -117.61 	 ep_len:   161.4 	 log_std: -1.200	 det_ret:  -112.23 	 det_len:  162.0
+epoch: 201 	 pol:    -0.34 	 val:     0.28 	 clipfrac: 0.27 	 return:  -117.90 	 ep_len:   166.2 	 log_std: -1.200
+epoch: 202 	 pol:    -0.78 	 val:     0.32 	 clipfrac: 0.39 	 return:  -118.60 	 ep_len:   167.2 	 log_std: -1.200
+epoch: 203 	 pol:    -1.68 	 val:     0.36 	 clipfrac: 0.46 	 return:  -117.54 	 ep_len:   162.7 	 log_std: -1.200
+epoch: 204 	 pol:    -0.59 	 val:     0.34 	 clipfrac: 0.32 	 return:  -119.82 	 ep_len:   166.5 	 log_std: -1.200
+epoch: 205 	 pol:    -0.20 	 val:     0.35 	 clipfrac: 0.30 	 return:  -117.14 	 ep_len:   158.0 	 log_std: -1.200
+epoch: 206 	 pol:    -0.56 	 val:     0.36 	 clipfrac: 0.27 	 return:  -116.25 	 ep_len:   147.6 	 log_std: -1.200
+epoch: 207 	 pol:    -0.31 	 val:     0.32 	 clipfrac: 0.34 	 return:  -114.76 	 ep_len:   130.2 	 log_std: -1.200
+epoch: 208 	 pol:    -0.32 	 val:     0.31 	 clipfrac: 0.28 	 return:  -116.11 	 ep_len:   143.0 	 log_std: -1.200
+epoch: 209 	 pol:    -0.62 	 val:     0.32 	 clipfrac: 0.31 	 return:  -119.47 	 ep_len:   161.1 	 log_std: -1.200
+epoch: 210 	 pol:    -0.44 	 val:     0.30 	 clipfrac: 0.28 	 return:  -118.14 	 ep_len:   150.4 	 log_std: -1.200	 det_ret:  -103.14 	 det_len:  180.0  <-- best
+epoch: 211 	 pol:    -0.48 	 val:     0.29 	 clipfrac: 0.34 	 return:  -116.85 	 ep_len:   161.9 	 log_std: -1.200
+epoch: 212 	 pol:    -0.41 	 val:     0.33 	 clipfrac: 0.31 	 return:  -117.78 	 ep_len:   152.4 	 log_std: -1.200
+epoch: 213 	 pol:    -0.67 	 val:     0.31 	 clipfrac: 0.31 	 return:  -118.23 	 ep_len:   152.5 	 log_std: -1.200
+epoch: 214 	 pol:    -0.85 	 val:     0.32 	 clipfrac: 0.27 	 return:  -119.01 	 ep_len:   159.6 	 log_std: -1.200
+epoch: 215 	 pol:    -0.33 	 val:     0.31 	 clipfrac: 0.29 	 return:  -118.99 	 ep_len:   156.9 	 log_std: -1.200
+epoch: 216 	 pol:    -0.53 	 val:     0.31 	 clipfrac: 0.31 	 return:  -118.10 	 ep_len:   161.1 	 log_std: -1.200
+epoch: 217 	 pol:    -0.43 	 val:     0.30 	 clipfrac: 0.30 	 return:  -117.44 	 ep_len:   151.1 	 log_std: -1.200
+epoch: 218 	 pol:     0.15 	 val:     0.32 	 clipfrac: 0.28 	 return:  -118.84 	 ep_len:   162.1 	 log_std: -1.200
+epoch: 219 	 pol:    -0.93 	 val:     0.28 	 clipfrac: 0.31 	 return:  -117.70 	 ep_len:   158.9 	 log_std: -1.200
+epoch: 220 	 pol:    -0.37 	 val:     0.27 	 clipfrac: 0.33 	 return:  -119.56 	 ep_len:   174.0 	 log_std: -1.200	 det_ret:  -128.77 	 det_len:  119.0
+epoch: 221 	 pol:    -0.43 	 val:     0.31 	 clipfrac: 0.29 	 return:  -118.01 	 ep_len:   146.2 	 log_std: -1.200
+epoch: 222 	 pol:    -0.68 	 val:     0.29 	 clipfrac: 0.30 	 return:  -116.85 	 ep_len:   151.0 	 log_std: -1.200
+epoch: 223 	 pol:    -0.95 	 val:     0.31 	 clipfrac: 0.26 	 return:  -117.27 	 ep_len:   158.5 	 log_std: -1.200
+epoch: 224 	 pol:    -0.64 	 val:     0.25 	 clipfrac: 0.32 	 return:  -118.47 	 ep_len:   169.5 	 log_std: -1.200
+epoch: 225 	 pol:    -0.77 	 val:     0.32 	 clipfrac: 0.31 	 return:  -118.87 	 ep_len:   150.5 	 log_std: -1.200
+epoch: 226 	 pol:    -0.57 	 val:     0.28 	 clipfrac: 0.27 	 return:  -116.25 	 ep_len:   138.7 	 log_std: -1.200
+epoch: 227 	 pol:    -0.87 	 val:     0.28 	 clipfrac: 0.32 	 return:  -118.25 	 ep_len:   174.6 	 log_std: -1.200
+epoch: 228 	 pol:    -0.92 	 val:     0.28 	 clipfrac: 0.33 	 return:  -116.99 	 ep_len:   161.7 	 log_std: -1.200
+epoch: 229 	 pol:    -0.90 	 val:     0.28 	 clipfrac: 0.28 	 return:  -117.02 	 ep_len:   158.2 	 log_std: -1.200
+epoch: 230 	 pol:    -0.48 	 val:     0.29 	 clipfrac: 0.31 	 return:  -118.57 	 ep_len:   153.5 	 log_std: -1.200	 det_ret:  -122.13 	 det_len:  300.0
+epoch: 231 	 pol:    -0.51 	 val:     0.32 	 clipfrac: 0.32 	 return:  -117.93 	 ep_len:   148.2 	 log_std: -1.200
+epoch: 232 	 pol:    -0.73 	 val:     0.28 	 clipfrac: 0.24 	 return:  -118.37 	 ep_len:   150.1 	 log_std: -1.200
+epoch: 233 	 pol:    -0.60 	 val:     0.26 	 clipfrac: 0.29 	 return:  -118.33 	 ep_len:   159.5 	 log_std: -1.200
+epoch: 234 	 pol:    -0.79 	 val:     0.29 	 clipfrac: 0.27 	 return:  -116.94 	 ep_len:   152.2 	 log_std: -1.200
+epoch: 235 	 pol:    -0.45 	 val:     0.25 	 clipfrac: 0.29 	 return:  -119.03 	 ep_len:   166.1 	 log_std: -1.200
+epoch: 236 	 pol:    -1.04 	 val:     0.30 	 clipfrac: 0.31 	 return:  -119.66 	 ep_len:   171.0 	 log_std: -1.200
+epoch: 237 	 pol:    -0.73 	 val:     0.33 	 clipfrac: 0.27 	 return:  -119.31 	 ep_len:   167.6 	 log_std: -1.200
+epoch: 238 	 pol:    -0.88 	 val:     0.29 	 clipfrac: 0.28 	 return:  -119.50 	 ep_len:   163.7 	 log_std: -1.200
+epoch: 239 	 pol:    -0.86 	 val:     0.27 	 clipfrac: 0.27 	 return:  -119.31 	 ep_len:   171.8 	 log_std: -1.200
+epoch: 240 	 pol:    -0.86 	 val:     0.27 	 clipfrac: 0.29 	 return:  -118.77 	 ep_len:   151.5 	 log_std: -1.200	 det_ret:  -135.28 	 det_len:  189.0
+epoch: 241 	 pol:    -0.87 	 val:     0.26 	 clipfrac: 0.27 	 return:  -118.01 	 ep_len:   147.7 	 log_std: -1.200
+epoch: 242 	 pol:    -0.91 	 val:     0.30 	 clipfrac: 0.24 	 return:  -117.91 	 ep_len:   155.2 	 log_std: -1.200
+epoch: 243 	 pol:    -0.49 	 val:     0.26 	 clipfrac: 0.28 	 return:  -118.45 	 ep_len:   147.1 	 log_std: -1.200
+epoch: 244 	 pol:    -0.71 	 val:     0.28 	 clipfrac: 0.29 	 return:  -118.19 	 ep_len:   160.1 	 log_std: -1.200
+epoch: 245 	 pol:    -1.31 	 val:     0.34 	 clipfrac: 0.25 	 return:  -119.49 	 ep_len:   150.2 	 log_std: -1.200
+epoch: 246 	 pol:    -1.35 	 val:     0.26 	 clipfrac: 0.26 	 return:  -120.02 	 ep_len:   151.5 	 log_std: -1.200
+epoch: 247 	 pol:    -0.39 	 val:     0.27 	 clipfrac: 0.24 	 return:  -117.89 	 ep_len:   144.0 	 log_std: -1.200
+epoch: 248 	 pol:    -0.80 	 val:     0.24 	 clipfrac: 0.28 	 return:  -119.57 	 ep_len:   147.5 	 log_std: -1.200
+epoch: 249 	 pol:    -1.59 	 val:     0.27 	 clipfrac: 0.25 	 return:  -118.96 	 ep_len:   154.2 	 log_std: -1.200
+Saved rollout gif -> bipedal_walker_gifs/epoch_0250.gif
+epoch: 250 	 pol:    -0.47 	 val:     0.24 	 clipfrac: 0.29 	 return:  -118.57 	 ep_len:   167.9 	 log_std: -1.200	 det_ret:  -134.70 	 det_len:  192.0
+epoch: 251 	 pol:     0.32 	 val:     0.25 	 clipfrac: 0.33 	 return:  -119.52 	 ep_len:   141.2 	 log_std: -1.200
+epoch: 252 	 pol:    -0.87 	 val:     0.25 	 clipfrac: 0.26 	 return:  -118.28 	 ep_len:   151.9 	 log_std: -1.200
+epoch: 253 	 pol:    -0.51 	 val:     0.22 	 clipfrac: 0.33 	 return:  -118.10 	 ep_len:   165.4 	 log_std: -1.200
+epoch: 254 	 pol:    -0.76 	 val:     0.24 	 clipfrac: 0.26 	 return:  -120.32 	 ep_len:   157.1 	 log_std: -1.200
+epoch: 255 	 pol:    -0.84 	 val:     0.21 	 clipfrac: 0.32 	 return:  -118.89 	 ep_len:   168.3 	 log_std: -1.200
+epoch: 256 	 pol:    -1.38 	 val:     0.26 	 clipfrac: 0.27 	 return:  -121.04 	 ep_len:   170.1 	 log_std: -1.200
+epoch: 257 	 pol:    -1.63 	 val:     0.28 	 clipfrac: 0.34 	 return:  -120.98 	 ep_len:   167.3 	 log_std: -1.200
+epoch: 258 	 pol:    -3.55 	 val:     0.27 	 clipfrac: 0.35 	 return:  -120.63 	 ep_len:   167.3 	 log_std: -1.200
+epoch: 259 	 pol:    -1.32 	 val:     0.25 	 clipfrac: 0.31 	 return:  -121.09 	 ep_len:   168.7 	 log_std: -1.200
+epoch: 260 	 pol:    -0.87 	 val:     0.22 	 clipfrac: 0.26 	 return:  -119.35 	 ep_len:   167.1 	 log_std: -1.200	 det_ret:  -108.80 	 det_len:  175.0
+epoch: 261 	 pol:    -0.72 	 val:     0.23 	 clipfrac: 0.27 	 return:  -119.34 	 ep_len:   149.3 	 log_std: -1.200
+epoch: 262 	 pol:    -1.08 	 val:     0.23 	 clipfrac: 0.26 	 return:  -121.11 	 ep_len:   165.3 	 log_std: -1.200
+epoch: 263 	 pol:    -1.09 	 val:     0.25 	 clipfrac: 0.22 	 return:  -121.16 	 ep_len:   162.3 	 log_std: -1.200
+epoch: 264 	 pol:    -0.95 	 val:     0.22 	 clipfrac: 0.26 	 return:  -119.61 	 ep_len:   154.9 	 log_std: -1.200
+epoch: 265 	 pol:    -0.92 	 val:     0.23 	 clipfrac: 0.24 	 return:  -120.92 	 ep_len:   164.7 	 log_std: -1.200
+epoch: 266 	 pol:    -1.34 	 val:     0.23 	 clipfrac: 0.24 	 return:  -121.80 	 ep_len:   169.8 	 log_std: -1.200
+epoch: 267 	 pol:    -1.25 	 val:     0.29 	 clipfrac: 0.26 	 return:  -122.76 	 ep_len:   175.1 	 log_std: -1.200
+epoch: 268 	 pol:    -0.81 	 val:     0.23 	 clipfrac: 0.23 	 return:  -120.63 	 ep_len:   152.8 	 log_std: -1.200
+epoch: 269 	 pol:    -1.21 	 val:     0.25 	 clipfrac: 0.24 	 return:  -121.71 	 ep_len:   167.1 	 log_std: -1.200
+epoch: 270 	 pol:    -0.20 	 val:     0.26 	 clipfrac: 0.25 	 return:  -121.70 	 ep_len:   164.1 	 log_std: -1.200	 det_ret:  -140.65 	 det_len:  217.0
+epoch: 271 	 pol:    -1.10 	 val:     0.29 	 clipfrac: 0.22 	 return:  -121.92 	 ep_len:   169.1 	 log_std: -1.200
+epoch: 272 	 pol:    -1.01 	 val:     0.22 	 clipfrac: 0.26 	 return:  -120.98 	 ep_len:   165.4 	 log_std: -1.200
+epoch: 273 	 pol:    -0.83 	 val:     0.24 	 clipfrac: 0.23 	 return:  -121.39 	 ep_len:   163.0 	 log_std: -1.200
+epoch: 274 	 pol:    -0.88 	 val:     0.27 	 clipfrac: 0.21 	 return:  -120.98 	 ep_len:   167.1 	 log_std: -1.200
+epoch: 275 	 pol:    -1.42 	 val:     0.22 	 clipfrac: 0.24 	 return:  -120.42 	 ep_len:   168.1 	 log_std: -1.200
+epoch: 276 	 pol:    -1.37 	 val:     0.24 	 clipfrac: 0.21 	 return:  -120.26 	 ep_len:   153.1 	 log_std: -1.200
+epoch: 277 	 pol:    -1.25 	 val:     0.29 	 clipfrac: 0.21 	 return:  -121.33 	 ep_len:   166.9 	 log_std: -1.200
+epoch: 278 	 pol:    -1.26 	 val:     0.23 	 clipfrac: 0.22 	 return:  -121.03 	 ep_len:   158.4 	 log_std: -1.200
+epoch: 279 	 pol:    -1.83 	 val:     0.22 	 clipfrac: 0.22 	 return:  -120.99 	 ep_len:   171.8 	 log_std: -1.200
+epoch: 280 	 pol:    -0.15 	 val:     0.26 	 clipfrac: 0.18 	 return:  -121.58 	 ep_len:   167.7 	 log_std: -1.200	 det_ret:  -145.38 	 det_len:  296.0
+epoch: 281 	 pol:    -0.75 	 val:     0.23 	 clipfrac: 0.22 	 return:  -122.28 	 ep_len:   165.5 	 log_std: -1.200
+epoch: 282 	 pol:    -2.08 	 val:     0.24 	 clipfrac: 0.22 	 return:  -122.42 	 ep_len:   171.0 	 log_std: -1.200
+epoch: 283 	 pol:    -1.29 	 val:     0.27 	 clipfrac: 0.21 	 return:  -122.37 	 ep_len:   154.0 	 log_std: -1.200
+epoch: 284 	 pol:    -0.94 	 val:     0.27 	 clipfrac: 0.22 	 return:  -122.87 	 ep_len:   175.4 	 log_std: -1.200
+epoch: 285 	 pol:    -1.41 	 val:     0.25 	 clipfrac: 0.24 	 return:  -122.02 	 ep_len:   170.3 	 log_std: -1.200
+epoch: 286 	 pol:    -1.57 	 val:     0.19 	 clipfrac: 0.20 	 return:  -120.73 	 ep_len:   163.5 	 log_std: -1.200
+epoch: 287 	 pol:    -0.77 	 val:     0.24 	 clipfrac: 0.22 	 return:  -122.21 	 ep_len:   171.0 	 log_std: -1.200
+epoch: 288 	 pol:     0.46 	 val:     0.21 	 clipfrac: 0.22 	 return:  -122.44 	 ep_len:   167.9 	 log_std: -1.200
+epoch: 289 	 pol:    -1.40 	 val:     0.27 	 clipfrac: 0.19 	 return:  -120.88 	 ep_len:   157.3 	 log_std: -1.200
+epoch: 290 	 pol:    -1.77 	 val:     0.22 	 clipfrac: 0.19 	 return:  -121.84 	 ep_len:   163.8 	 log_std: -1.200	 det_ret:  -135.58 	 det_len:  234.0
+epoch: 291 	 pol:    -0.49 	 val:     0.27 	 clipfrac: 0.20 	 return:  -123.48 	 ep_len:   174.0 	 log_std: -1.200
+epoch: 292 	 pol:    -1.70 	 val:     0.22 	 clipfrac: 0.20 	 return:  -121.97 	 ep_len:   170.8 	 log_std: -1.200
+epoch: 293 	 pol:    -1.58 	 val:     0.30 	 clipfrac: 0.14 	 return:  -123.27 	 ep_len:   170.3 	 log_std: -1.200
+epoch: 294 	 pol:    -1.45 	 val:     0.26 	 clipfrac: 0.13 	 return:  -121.76 	 ep_len:   168.3 	 log_std: -1.200
+epoch: 295 	 pol:    -0.83 	 val:     0.25 	 clipfrac: 0.15 	 return:  -123.20 	 ep_len:   176.2 	 log_std: -1.200
+epoch: 296 	 pol:    -3.51 	 val:     0.25 	 clipfrac: 0.17 	 return:  -123.05 	 ep_len:   167.3 	 log_std: -1.200
+epoch: 297 	 pol:    -2.85 	 val:     0.22 	 clipfrac: 0.12 	 return:  -122.39 	 ep_len:   166.1 	 log_std: -1.200
+epoch: 298 	 pol:    -1.42 	 val:     0.24 	 clipfrac: 0.15 	 return:  -123.07 	 ep_len:   172.0 	 log_std: -1.200
+epoch: 299 	 pol:    -2.89 	 val:     0.26 	 clipfrac: 0.10 	 return:  -123.48 	 ep_len:   177.0 	 log_std: -1.200	 det_ret:  -120.51 	 det_len:  160.0
+Saved rollout gif -> bipedal_walker_gifs/epoch_0300.gif
+Best deterministic return -103.14 -> saved bipedal_walker_gifs/best_det-103.gif + bipedal_walker_best.pt
+
+Saved training plot to bipedal_walker_training_BipedalWalker-v3.png

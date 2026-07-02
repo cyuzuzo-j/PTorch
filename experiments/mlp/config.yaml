@@ -15,7 +15,7 @@ patience: 100
 batch_sizes: [32]
 
 norms:
-  - linf
+  - 2
 
 # ── Output ────────────────────────────────────────
 results_dir: results          # CSV logs go here
@@ -35,6 +35,42 @@ tasks:
     in_features: 784
     classes: 10
     hidden: [512]
+
+# ── Q&A: can the deep-MLP gap be brought to zero? ─────────────────────────
+# (Answer to "how do we bring this gap to zero — a 4-layer MLP should
+#  outperform a 1-layer one", 2026-07-02.)
+#
+# Two-part answer, measured on the deep_mlp_config.yaml protocol (norm=2,
+# ProjectionMuonV2, CrossEntropy, 5k steps, 3 runs):
+#
+# 1. The framework-vs-backprop gap at fixed depth IS closed — by the
+#    "direction pipe" (TD trace, norm mode + deflation), not by tuning:
+#        4L: 92.14% (plain) -> 97.21% (pipe)   vs Adam 4L: 97.08%  (parity)
+#        1L: 95.88% (plain) -> 97.60% (pipe)   vs Adam 1L: 97.76%
+#    Recipe:  use_muon_activations: false  (the pipe supersedes it)
+#             --td-lambda 0.3  --td-mode norm  --td-deflate
+#             (config keys: td_lambda / td_mode / td_deflate / td_eps_lin;
+#              keep num_iters=1 — more Newton steps per solve are harmful)
+#    Why it works: the bilinear solve already transports the *correct*
+#    (adjoint, B^T) direction; only its amplitude vanishes (x0.06/layer) until
+#    numerical annihilation. The pipe re-amplifies that direction with a
+#    frame-invariant scalar floor capped into the solver's linear-transport
+#    window, and deflates the solve's activation-parallel artifact.
+#    Full analysis: experiments/deep/FINDINGS_td.md and the paper appendix.
+#
+# 2. "4L should outperform 1L" is not achievable on MNIST for ANY method at
+#    this budget: even backprop-Adam's 4L (97.08%) trails its own 1L (97.76%).
+#    MNIST is ~linearly separable; depth adds an optimization tax (deep linear
+#    factorization conditioning), not needed capacity. The pipe's depth tax
+#    (0.39 pts) is now *smaller* than backprop's (0.68 pts). To see depth
+#    genuinely pay, use a capacity-limited task (CIFAR-10, or narrow widths).
+#
+# NOTE for THIS config: norms=[linf] below — the direction pipe is only
+# implemented in the l2 bilinear solve (MatMulProjectionLinf has no trace),
+# so td_* keys are deliberately NOT enabled here. The tested invocation is:
+#   bench_ptorch.py --config deep_mlp_config.yaml --muon 0 \
+#       --td-lambda 0.3 --td-deflate
+# ───────────────────────────────────────────────────────────────────────────
 
 # ── Optimizers per framework ──────────────────────
 use_muon_activations: false

@@ -1,0 +1,522 @@
+\chapter{Scalable Projection-Based Training}
+
+Existing frameworks \cite{elser2019learning,bergmeister2025projection} partition the constraints in \eqref{eq:feasibility} into two disjoint sets and apply the Douglas--Rachford algorithm. This approach has two main limitations, both rooted in the requirement that the projections onto each set be implementable. 
+
+First, implementability demands that the constraints contain no coupling between datapoints in a batch. The frameworks achieve this by duplicating the network parameters $\theta$ across the batch. While this successfully decouples the per-datapoint constraints, it introduces a substantial memory overhead that constitutes a fundamental computational bottleneck to scaling. Second, the projections require the computation graph to be bipartitioned (i.e., 2-colorable). Forcing this 2-colorability requires inserting identity operation nodes to break edges that would otherwise violate the coloring \cite{bergmeister2025projection}. In the current implementation of PJAX, this partition is recomputed for each batch, introducing an unnecessary baseline overhead.
+
+To overcome these limitations, we maintain the  constraint partition defined in \eqref{eq:feasibility} and build upon the method of cyclic projections instead, which successively projects onto each of the sets in a specific cyclic order. We choose an order that corresponds to the PyTorch computational graph: by reinterpreting each functional node in the graph to an associated projection operator, we overwrite the standard backward pass. Consequently, the forward pass remains identical to gradient-based methods, while the backward pass computes a local projection rather than a gradient at each node. The pseudocode for this procedure is detailed in \cref{alg:cyclic}.
+\begin{algorithm}
+\caption{Cyclic projections method on the PyTorch computational graph.}\label{alg:cyclic}
+\begin{algorithmic}[1]
+\State $h^{(N)}_b \gets y_b \quad b=1,\ldots, B$  \Comment{Batch constraint output}
+\For{$i=N-1$ \textbf{downto} $0$}\Comment{Traverses the computational graph backwards}
+    \For{$b=1$ \textbf{upto} $B$}
+        \State $(\bar h^{(i)}_b, \bar \theta^{(i+1)}_b, \bar h^{(i+1)}_b) \in \Pi_{A_{b,i+1}}(h^{(i)}_b, \theta^{(i+1)}_b, h^{(i+1)}_b)$  
+        \State $(h^{(i)}_b, \theta^{(i+1)}_b, h^{(i+1)}_b) \gets (\bar h^{(i)}_b, \bar \theta^{(i+1)}_b, \bar h^{(i+1)}_b)$ \Comment{Architectural constraint}
+    \EndFor
+    \State $\bar \theta^{(i+1)} \gets \frac{1}{B}\sum_{b=1}^B \theta_{b}^{(i+1)}$
+    \State $\theta^{(i+1)}_b \gets \bar \theta^{(i+1) \quad} b=1,\ldots, B$   \Comment{Consensus constraint}
+\EndFor
+\State $h^{(0)}_b \gets x_b \quad b=1,\ldots,B$ \Comment{Batch constraint input}
+\end{algorithmic}
+\end{algorithm}
+\newpage
+Although the projection-based algorithm is now integrated with the PyTorch toolchain, \Cref{alg:cyclic} still requires duplication of the variables, while also not having performance on par with standard methods on shallow networks. We now describe the key innovations of $\mathcal{P}$Torch to resolve these issues.
+
+
+\section{Scaling the Linear Layer Projection}
+The linear layer is a ubiquitous component of modern neural network architectures. However, its associated projection currently represents the primary computational bottleneck in projection-based frameworks. Because optimizing this operation is essential for scalability, we introduce two key innovations. First, we propose a memory-efficient $\ell_2$-projection that resolves the memory constraints of existing tools like PJAX. Second, we introduce an $\ell_\infty$-projection that, despite a higher computational cost and memory usage, empirically yields better final accuracy.
+\label{sec:matmul}
+\subsection{Fused consensus and bilinear constraint} \label{subsec:fused}
+\paragraph{Motivation.}
+As discussed previously, in \cite{elser2019learning,bergmeister2025projection}, the duplication of the network parameters per batch is a primary memory bottleneck. A naive implementation requires constructing an $N_{\mathrm{in}} \times N_{\mathrm{out}} \times B$ tensor, where $N_{\mathrm{in}}, N_{\mathrm{out}}$ are the input and output dimensions of the linear layer respectively, and $B$ is the batch size. This $\mathcal{O}(N_{\mathrm{in}}N_{\mathrm{out}}B)$ memory footprint routinely causes out-of-memory errors on standard hardware, that we also empirically observe in \cref{sec:exp-memory-optimizer}. The authors of PJAX~\cite{bergmeister2025projection} note: 
+
+\vspace{0.5em}
+\textit{``the high memory demands of the 4-layer CNN necessitated reducing the number of hidden units per layer to 16 to fit within the available 96GB GPU memory''}
+\vspace{0.5em}
+
+By contrast, our benchmarks include a successfully trained CNN with channel widths of 32-64-128 (\cref{sec:exp-cnn}). Furthermore, we successfully ran a ResNet-8 model, as well as CNNs with 2048 filters. However while they are computationally tractable, deeper networks result in very weak convergence due to the vanishing target problem that we describe in \cref{sec:vanishing-target}.
+\paragraph{Derivation.}
+One iteration of the cyclic projections algorithm applied to $\omega\in\Omega$ takes the form $(\Pi_{\tilde{C}_1} \circ \Pi_{\tilde{C}_2} \circ \dots \circ \Pi_{\tilde{C}_N})(\omega)$ on some closed sets $\tilde{C}_1,\ldots,\tilde{C}_N$. Because operator composition is associative, we are free to group projections and evaluate them as a single, unified operator. We leverage this property to calculate the fused projection $\Pi_C \circ \Pi_A$ onto the bilinear constraint set $A$ (encoding one row of a matrix-vector product) and the consensus set $C$ without introducing duplicated variables.
+
+Concretely, fix a sample $b$, layer $i$, and output neuron $j$. The weight
+matrix is $\theta_b^{(i)} \in \mathbb{R}^{N_{\mathrm{out}} \times N_{\mathrm{in}}}$,
+the input is $h^{(i)}_{b} \in \mathbb{R}^{N_{\mathrm{in}}}$, and the output is
+$h^{(i+1)}_{b} \in \mathbb{R}^{N_{\mathrm{out}}}$. We denote the $j$th row of
+$\theta_b^{(i)}$ as $\theta^{(i)}_b[j,:]$, interpreted as a column vector in
+$\mathbb{R}^{N_{\mathrm{in}}}$, so that $h^{(i)}_{b}$ and $\theta^{(i)}_b[j,:]$
+share the same dimension. The projection onto the bilinear constraint set that encodes $\theta^{(i)}_b[j,:]^\top h^{(i)}_{b} = h^{(i+1)}_{b}[j]$ then requires solving the optimization problem
+\[
+\begin{aligned}
+    &\minimize_{\substack{\overline{h}^{(i+1)}_b\in\mathbb{R};\overline{h}^{(i)}_b,\,\overline{\theta}_b^{(i)}[j,:]\in\mathbb{R}^{N_{\mathrm{in}}}}}
+    \lVert \overline{h}^{(i)}_b - h^{(i)}_b \rVert^2_2
+    + \alpha^2 \lVert \overline{\theta}_b^{(i)}[j,:] - \theta_b^{(i)}[j,:] \rVert^2_2
+    + \gamma^2 (\overline{h}^{(i+1)}_b - h^{(i+1)}_b)^2 \\
+    &\text{s.t.} \quad \overline{h}^{(i+1)}_b = \overline{\theta}_b^{(i)}[j,:]^\top \overline{h}^{(i)}_b
+\end{aligned}
+\]
+
+In this objective, $\alpha, \gamma > 0$ are hyperparameters that reweigh the relative
+importance of the input, weight, and output terms in the projection. As shown in \cref{sec:linear_layer}, this problem is solved by first computing a scalar $t_{jb}$ via a Newton iteration, where we omitted the superscript $(i)$ for ease of notation. The projected weight then takes the form
+\[
+    \bar\theta^{(i)}_{b}[j,:] = u_{jb}\,\theta^{(i)}[j,:] + v_{jb}\, h^{(i)}_{b}{}, \qquad \text{where} \quad u_{jb} := \frac{\alpha}{\alpha - t_{jb}^{2}}, \quad v_{jb} := \frac{t_{jb}}{\alpha - t_{jb}^{2}}.
+\]
+Next, from \cref{ex:consensus}, it follows that the projection onto the consensus set forces all weights to agree by taking the batch average. Therefore,
+\[
+    \bar\theta^{(i)}[j,:] = \frac{1}{B} \sum_{b=1}^{B} \bar\theta^{(i)}_{b}[j,:] \implies    \bar\theta^{(i)}[j,:] =\frac{1}{B}\!\left[\, \theta^{(i)}[j,:] \sum_{b=1}^{B} u_{jb} + \sum_{b=1}^{B} v_{jb}\, h^{(i)}_{b}{} \right].
+\]
+By stacking the scalars $u_{jb}$ and $v_{jb}$ into matrices $U, V \in \mathbb{R}^{N_{\mathrm{out}} \times B}$, and stacking the hidden states into $H \in \mathbb{R}^{B \times N_{\mathrm{in}}}$, we can assemble the update across all output rows simultaneously:
+\[
+    \bar{\theta}^{(i)} = \frac{1}{B} \left( \theta^{(i)} \odot (U\mathbf{1}_{B\times N_{\mathrm{in}}}) + V H \right),
+\]
+where $\odot$ denotes the Hadamard product and $\mathbf{1}_{B\times N_{\mathrm{in}}}$ is a $B\times N_{\mathrm{in}}$ matrix of all ones. The second term is evaluated as a single $N_{\mathrm{out}} \times B$ by $B \times N_{\mathrm{in}}$ matrix multiplication. Because these computations are fused, no three-dimensional intermediate tensor is ever formed. As a result, peak memory usage drops from $O(N_{\mathrm{in}}N_{\mathrm{out}}B)$ to $\mathcal{O}(N_{\mathrm{in}}B + N_{\mathrm{out}}B + N_{\mathrm{in}}N_{\mathrm{out}})$.
+
+\subsection{Projection in a different geometry}
+Motivated by the fact that Adam \cite{kingma2014adam} can be seen as an approximation of steepest descent with respect to the $\ell_\infty$-norm  \cite{xie2024implicit} and the recently popular optimizer Muon~\cite{jordan2024muon} is related to steepest descent under the spectral norm, we also propose an $\ell_\infty$ variant of the projection onto the bilinear constraint set. The local optimization objective then takes the form
+\begin{equation}
+\label{eq:bilinf-proj-bilinear-layer}
+\minimize_{\bar{h} \in \mathbb{R}^{N_{\mathrm{in}}}, \bar{\theta} \in \mathbb{R}^{N_{\mathrm{in}}}, \bar{h}^+ \in \mathbb{R}} \| (\bar{h}, \bar{\theta}, \gamma^2 \bar{h}^+) - (h, \theta, \gamma^2 h^+) \|_\infty \quad \text{s.t.} \quad \bar{\theta}^\top \bar{h} = \bar{h}^+
+\end{equation}
+where $\gamma$ is again a hyperparameter to reweigh the relative importance of input and output in the projection.
+
+\paragraph{$\ell_\infty$ derivation}
+\label{sec:bilinear-inf}
+\label{sec:linf}
+
+Throughout this derivation we consider a \emph{single output neuron}, i.e., one row of
+the weight matrix. Concretely, $\theta, h \in \mathbb{R}^{N_{\mathrm{in}}}$, the
+pre-activation target $h^{+} \in \mathbb{R}$ is a scalar, and the constraint is the
+scalar bilinear equation ${\bar\theta}^\top \bar{h} = \bar{h}^{+}$.
+
+The key is finding the smallest feasible box radius $\epsilon^\star \geq 0$ such
+that all constraints are simultaneously satisfiable. Let $\Delta h = \bar h - h$ and
+$\Delta \theta = \bar \theta - \theta$, and write $D = \theta^\top h \in \mathbb{R}$,
+$\bar D = \bar\theta^\top \bar h $ for the current and projected dot
+products. We search for the optimal $\epsilon^\star$ found by
+\[
+\minimize_{\epsilon \ge 0,\,\bar h,\,\bar\theta,\,\bar h^{+}} \epsilon
+\quad\text{s.t.}\quad
+|\Delta h_k| \le \epsilon,\,
+|\Delta \theta_k| \le \epsilon\ k\in1,\dots,N_{\mathrm{in}},\,
+|\bar h^{+}-h^{+}| \le \tfrac{\epsilon}{\gamma^2},\,
+\bar\theta^\top \bar h = \bar h^{+}.
+\]
+If $D = \theta^\top h = h^+$ the forward state
+already satisfies the constraint, so $\epsilon^\star = 0$ and the projection is the
+identity.
+
+Now assume that $D = \theta^\top h < h^+$. We aim to increase $D$. To this end, note that the inner product is a sum over input coordinates,
+$D = \sum_{k=1}^{N_{\mathrm{in}}} \theta_k h_k$, so its change splits termwise:
+\[
+  \Delta D := \bar D - D
+    = \sum_{k=1}^{N_{\mathrm{in}}} \bigl(\bar\theta_k \bar h_k - \theta_k h_k\bigr)
+    = \sum_{k=1}^{N_{\mathrm{in}}} \Delta D_k \in \mathbb{R}
+\]
+where $\Delta D_k = \bar\theta_k \bar h_k - \theta_k h_k$.
+
+Now consider only the $k$th coordinate. The maximum contribution to $\Delta D_k$ happens at one of the corners, so we only need to consider the points in \cref{tab:effect_dk} and \cref{fig:effect_dk}.
+
+\begin{figure}[htbp]
+    \centering
+    \begin{minipage}{0.4\textwidth}
+        \renewcommand{\arraystretch}{1.35}
+        \captionof{table}{Points that maximally change $\Delta D_k$ given $\epsilon$}
+        \begin{tabular}{@{} ccc @{}}
+        \hline
+        $\Delta h_k$ & $\Delta \theta_{k}$ & $\Delta D_k$ \\
+        \hline
+        $+\epsilon$ & $+\epsilon$ & $\phantom{-}\epsilon(h_k+\theta_{k})+\epsilon^2$ \\
+        $-\epsilon$ & $-\epsilon$ & $-\epsilon(h_k+\theta_{k})+\epsilon^2$ \\
+        \hline
+        $+\epsilon$ & $-\epsilon$ & $\phantom{-}\epsilon(\theta_{k}-h_k)-\epsilon^2$ \\
+        $-\epsilon$ & $+\epsilon$ & $\phantom{-}\epsilon(h_k-\theta_{k})-\epsilon^2$ \\
+        \hline
+        \end{tabular}
+        \label{tab:effect_dk}
+    \end{minipage}\hfill
+    \begin{minipage}{0.6\textwidth}
+        \centering
+        \safeinputdiagram{drawings/location_extrema_inf_norm}{0.9\linewidth}
+        \vspace{-1.0pt}
+        \caption{Graphical interpretation of $\Delta D_k$}
+        \label{fig:effect_dk}
+
+    \end{minipage}
+\end{figure}
+The maximum positive contribution is given by
+\begin{equation}
+\label{eq:bilinf-Mk}
+  M_k(\epsilon)
+    = \max\Bigl(
+      \epsilon|h_k+\theta_{k}|+\epsilon^2,
+      \epsilon|h_k-\theta_{k}|-\epsilon^2
+    \Bigr).
+\end{equation}
+Thus, the smallest feasible radius $\epsilon^\star$ is the unique positive root of
+\[
+    D+\sum_{k=1}^{N_{\mathrm{in}}} M_k(\epsilon)
+      = h^{+} - \frac{\epsilon}{\gamma^2}
+    \quad\iff\quad
+    F(\epsilon)
+      \coloneqq \sum_{k=1}^{N_{\mathrm{in}}} M_k(\epsilon) + \frac{\epsilon}{\gamma^2} - (h^{+} - D)
+      = 0.
+\]
+$F$ is continuous, strictly monotone increasing, and piecewise quadratic in
+$\epsilon$. Each coordinate contributes at most one kink to $F$, occurring at
+\[
+  \epsilon_k^{\mathrm{kink}}
+    = \max\left\{0,
+      \frac{|h_k-\theta_{k}|-|h_k+\theta_{k}|}{2}
+    \right\}.
+\]
+Sorting these kink points requires $\mathcal{O}(N_{\mathrm{in}}\log N_{\mathrm{in}})$
+time, with root evaluation linear in $N_{\mathrm{in}}$ on each interval.
+
+The remaining case $D > h^+$ follows by symmetry. In particular, the inner product must decrease, which is the previous
+case under the sign flip $(h^+ - D) \to |h^+ - D|$ with the displacements
+reversed. Both branches are captured uniformly by defining
+$\sigma := \operatorname{sign}(h^+ - \theta^\top h)$, and using the reconstruction
+\[
+\overline{h}^{+}=h^{+}-\sigma\,\frac{\epsilon^\star}{\gamma^2},
+\qquad \Delta D_k \text{ taken in the direction of } \sigma.
+\]
+
+\paragraph{Removing the sorting procedure.}
+Maximizing the contribution of coordinate $k$ to $\Delta D$ subject to
+$|\Delta h_k|\le\epsilon$ and $|\Delta\theta_k|\le\epsilon$ amounts to maximizing 
+\begin{equation}
+\label{eq:bilinf-Mk-branches}
+  M_k(\epsilon)
+    = \max\bigl\{a_k\epsilon + \epsilon^2, b_k\epsilon - \epsilon^2\bigr\},
+  \qquad a_k := |h_k+\theta_k|,\quad b_k := |h_k-\theta_k|
+\end{equation}
+where we performed a change of variables from $(h_k,\theta_k)$ to $(a_k,b_k)$. Geometrically, this transformation is a (scaled) $45$ degrees rotation followed by a folding into the nonnegative quadrant, which better matches the geometry of the problem.
+
+The two branches coincide when
+\[
+  a_k\epsilon + \epsilon^2 = b_k\epsilon - \epsilon^2
+  \Longleftrightarrow 2\epsilon^2 = (b_k - a_k)\epsilon
+  \Longleftrightarrow \epsilon = \tfrac{1}{2}(b_k - a_k)
+  \quad (\epsilon>0).
+\]
+For larger $\epsilon$ the $a_k$ branch dominates; for smaller $\epsilon$ the
+$b_k$ branch does. The branches only cross in the positive orthant when
+$b_k > a_k$, i.e.\ when $h_k\theta_k < 0$; otherwise the $a_k$ branch dominates for
+all $\epsilon\ge 0$. The unique kink of $M_k$ is therefore
+\[
+  \epsilon_k^{\mathrm{kink}} = \max\Bigl\{0,\tfrac{1}{2}(b_k - a_k)\Bigr\},
+\]
+and we select the active branch with the indicator
+\[
+  m_k(\epsilon) := \mathbf{1}\!\left[\,2\epsilon \ge b_k - a_k\,\right] \in \{0,1\},
+\]
+where $m_k = 1$ chooses the equal-sign branch. This gives the branch-free form
+\begin{equation}
+\label{eq:bilinf-Mk-masked}
+  M_k(\epsilon)
+    = m_k(\epsilon)\bigl(a_k\epsilon+\epsilon^2\bigr)
+        + \bigl(1-m_k(\epsilon)\bigr)\bigl(b_k\epsilon-\epsilon^2\bigr).
+\end{equation}
+\begin{tcolorbox}[shift_card]
+Because this formula for $M_k$ relies on a simple indicator mask rather than conditionals, it can be executed efficiently without any sorting.
+\end{tcolorbox}
+\paragraph{$F$ is continuous and strictly increasing.}
+At the kink both branches in \eqref{eq:bilinf-Mk-branches} are equal, so $M_k$ is
+continuous. It is also non-decreasing on $[0,\infty)$: on the equal-sign branch
+$M_k'(\epsilon) = a_k + 2\epsilon \ge 0$, and on the opposite-sign branch
+$M_k'(\epsilon) = b_k - 2\epsilon$, which is active only for
+$\epsilon \le \tfrac{1}{2}(b_k-a_k)$ and thus satisfies $b_k - 2\epsilon \ge a_k \ge 0$.
+Adding the strictly increasing term $\epsilon/\gamma^2$, the residual
+\[
+  F(\epsilon) = \sum_{k=1}^{N_\mathrm{in}} M_k(\epsilon) + \frac{\epsilon}{\gamma^2} - (h^{+} - D)
+\]
+is continuous and strictly increasing, with $F(0) = -(h^{+}-D) < 0$ (the case
+$D < h^{+}$) and $F(\epsilon)\to+\infty$ as $\epsilon\to+\infty$. Hence $F$ has a unique root $\epsilon^\star > 0$.
+Its derivative on each side of every kink is
+\begin{equation}
+  F'(\epsilon)
+    = \sum_{k=1}^{N_\mathrm{in}}\Bigl[
+        m_k(\epsilon)\bigl(a_k + 2\epsilon\bigr)
+      + \bigl(1-m_k(\epsilon)\bigr)\bigl(b_k - 2\epsilon\bigr)
+    \Bigr] + \frac{1}{\gamma^2}.
+\end{equation}
+
+\paragraph{Solving for $\epsilon^\star$.}
+Both $F(\epsilon)$ and $F'(\epsilon)$ are evaluated in a single $\mathcal{O}(n)$ pass:
+form $a_k,b_k$ and the masks $m_k(\epsilon)$, then sum. No sorting of kinks and no
+data-dependent control flow is required. We bracket the root in $[\ell_0, r_0] = [0,\,\epsilon_{\max}]$
+(any $\epsilon_{\max}$ with $F(\epsilon_{\max})\ge 0$) and run a safeguarded Newton iteration,
+\[
+  \epsilon_{t+1}
+    = \max\!\left(\ell_t,\min\!\left(r_t,
+      \epsilon_t - \frac{F(\epsilon_t)}{F'(\epsilon_t)}\right)\right).
+\]
+A bisection safeguard guarantees our Newton iteration converges to $\epsilon^\star$. Because $F$ is piecewise quadratic, Newton steps find exact roots within a given piece quickly. Bisection caps the maximum iterations at a constant $\mathcal{O}(\log(1/\delta))$, avoiding $\mathcal{O}(n^2)$ worst-case scenarios. Thus, evaluating $F$ and $F'$ in one pass guarantees $\mathcal{O}(n)$ overall complexity. Empirically, only 5 iterations are needed. 
+
+\paragraph{result}
+While this formulation improves final model accuracy, it comes with a computational trade-off. Because the $\ell_\infty$ update depends non-linearly on the absolute values of individual sample-neuron pairs, it cannot be cleanly factored across the batch dimension like the $\ell_2$ case. Consequently, it retains the heavier $\mathcal{O}(N_{\mathrm{in}}N_{\mathrm{out}}B)$ memory footprint. Optimizing this computational bottleneck represents an interesting area for future work, particularly as finding efficient approximations could bridge the gap between this superior accuracy and the memory efficiency required for larger-scale architectures.
+
+\subsection{Choosing the appropriate geometry}
+This section highlights a trade-off: we introduce one layer that performs better empirically and another that is more memory efficient, but not one that achieves both simultaneously. Although this hybrid design is conceptually inelegant, there is no practical reason not to mix and match projections. In particular, we can use the memory-efficient projections for large layers with substantial parameter sharing, where memory usage is the primary bottleneck, and use the $\ell_\infty$ projection for all other layers. This strategy allows us to train arbitrary networks while balancing performance and memory efficiency.
+
+\section{From Cyclic Projections to a Practical Optimizer}
+
+\subsection{Connection to incremental gradient descent and non-linear relaxation }
+\label{sec:incremental-grad-descent}
+To motivate the non-linear relaxations (\cref{sec:relaxation}), we make the connection between cyclic projections and the incremental gradient method \cite[Section 2.4.1]{bertsekas1997nonlinear}. Recall from \cref{sec:feasibility} that if the problem \eqref{eq:feasibility} is feasible, it is equivalent to the minimization problem
+\[
+    \minimize_{\omega\in\Omega} F(\omega)
+\]
+where
+\[
+    F(\omega) \coloneqq \frac{1}{2}\left\{\sum_{b=1}^B \sum_{i=1}^N \dist^2(A_{bi}, \omega)   + \dist^2(B_{\mathrm{in}}, \omega) + \dist^2(B_{\mathrm{out}}, \omega) + \sum_{i=1}^N \dist^2(C_i, \omega)\right\}
+\]
+which has the form $F(\omega) = \sum_{j=1}^{M} f_j(\omega)$, with each component $f_j(\omega) = \frac12\dist^{2}(C_j, \omega)$ a squared distance to a constraint set $\tilde{C}_j$. Wherever the projection $\Pi_{\tilde{C}_j}$ is single-valued, $f_j$ is differentiable with
+\begin{equation}
+    \nabla f_j(\omega) = \omega - \Pi_{\tilde{C}_j}(\omega).
+    \label{eq:dist_gradient}
+\end{equation}
+
+A subtlety is that the constraint sets induced by the network are non-convex, so $\Pi_{\tilde{C}_j}(\omega)$ need not be unique. At points $\omega$ that are equidistant from two or more elements of $\tilde{C}_j$, the projection is ambiguous and~\eqref{eq:dist_gradient} is not well defined. This issue is benign for two reasons. First, the set of such points has Lebesgue measure zero, so~\eqref{eq:dist_gradient} holds almost everywhere by Rademacher's theorem. Second, on this set the residual $\omega - \Pi_{\tilde{C}_j}(\omega)$ remains a valid subgradient under any choice of $\Pi_{\tilde{C}_j}(\omega)$ in light of \cite[Proposition 2.1.10]{guidolin2024morse}, so the update direction is well-defined in either case. The situation is identical to that of $\mathrm{ReLU}$ at the origin: non-differentiable at a single point, yet trained without difficulty using a subgradient selection. 
+
+With~\eqref{eq:dist_gradient} in hand, the cyclic projection update of \cref{alg:cyclic} is exactly an incremental gradient step on $F$. The plain projection step
+\begin{equation}
+    \bar \theta^{(i+1)} \gets \Pi_{\tilde{C}_j}\!\bigl(\theta^{i+1}\bigr)
+    \label{eq:plain_projection}
+\end{equation}
+can be rewritten as
+\begin{equation} \
+    \bar \theta^{(i+1)}\gets (1-\alpha)\,\theta^{(i+1)} + \alpha\, \Pi_{\tilde{C}_j}\!\bigl(\theta^{(i+1)}\bigr)
+    \qquad \alpha = 1,
+    \label{eq:relaxed_projection}
+\end{equation}
+This is a relaxed projection with relaxation factor $\alpha$. Rearranging~\eqref{eq:relaxed_projection} and substituting~\eqref{eq:dist_gradient} gives
+\begin{equation}
+    \bar \theta^{(i+1)} \gets \theta^{(i+1)} - \alpha\bigl(\theta^{(i+1)} - \Pi_{\tilde{C}_j}(\theta^{(i+1)})\bigr) = \theta^{(i+1)} - \alpha\,\nabla f_j\!\bigl(\theta^{(i+1)}\bigr),
+    \label{eq:projection_as_gradient_step}
+\end{equation}
+which is precisely the incremental gradient update~\cite[Eq.~(2.78)]{bertsekas1997nonlinear}
+\begin{equation}
+    \omega^{k+1} = \omega^{k} - \alpha^{k}\,\nabla f_{j_k}(\omega^{k})
+    \label{eq:incremental_gradient}
+\end{equation}
+applied to the finite-sum objective $F(\omega)$, where the step size is $\alpha^k$ and the index $j_k$ is chosen according to the cyclic order induced by the computational graph. This connection motivates the use of first-order optimizers, since the projection residuals we provide are gradients of the finite-sum problem.
+
+\paragraph{Non-linear Relaxation}
+\label{sec:relaxation}
+This last observation is what significantly increases performance. Equation
+\eqref{eq:incremental_gradient} is a linear relaxation. But since the residual is a genuine gradient of
+$F$, nothing requires the update to be linear in it. Replacing the scaled-residual step with the update rule of any first-order optimizer (e.g Adam) yields a non-linear relaxation, in which the residual is consumed by an adaptive, generally non-linear update.
+
+Because $\mathcal{P}$Torch already channels projection residuals through Torch's
+\texttt{autograd}, this requires no algorithmic modification: the residual directly populates
+the \texttt{.grad} attribute, and standard optimizers are invoked exactly as in a conventional
+training loop (e.g.\ line 5 of \cref{alg:minibatch}). In practice, we apply this scheme to the
+weight residuals $\bigl(\bar{\theta}^{(i+1)}_b - \theta^{(i+1)}_b\bigr)$ to obtain
+adaptive-learning-rate gradient descent on the weights, while treating the hidden-state
+residuals as plain projections (equivalent to basic gradient descent, $\alpha = 1$). Using
+distinct optimization strategies for different parameter groups mirrors the combined use of
+Muon and Adam \cite{jordan2024muon} in standard gradient-based optimization.
+
+
+\subsection{Proximal Projections at the Loss node}
+\label{sec:moreau}
+The rigid target-assignment step replaces the network's final prediction
+$h^{N}$ with the true target $y$. We can view this as a projection onto the
+loss constraint set
+\begin{equation}
+B_{\mathrm{out}} := \argmin_u\, \mathcal{L}(u,y),
+\label{eq:loss-set}
+\end{equation}
+where $\mathcal{L}(\cdot,y)$ is any loss minimized iff its arguments are
+equal, so $B_{\mathrm{out}}=\{y\}$ and the update is $h^{N}\leftarrow y$.
+
+The proximal-loss \cite{bergmeister2025projection} variant relaxes this:
+rather than snapping to the exact minimizer, it applies the proximal operator
+of the loss at the current prediction,
+\begin{equation}
+h^{N}\leftarrow\bar h^{N} := \prox_{\lambda\mathcal{L}(\cdot,y)}\!\bigl(h^{N}\bigr)
+\label{eq:prox-update}
+\end{equation}
+which we call the proximal target. Recall that for a proper, lower
+semicontinuous $f$ and parameter $\lambda>0$,
+$\prox_{\lambda f}(v):=\argmin_{u}\{f(u)+\tfrac{1}{2\lambda}\|u-v\|^{2}\}$.
+Unpacking this with $f=\mathcal{L}(\cdot,y)$ shows the intuition explicitly:
+\begin{equation}
+\bar h^{N} = \argmin_{u}\,
+\underbrace{\mathcal{L}(u,y)}_{\text{loss at }u}
++
+\underbrace{\frac{1}{2\lambda}\,\bigl\|u-h^{N}\bigr\|^{2}}_{\text{stay near }h^{N}} ,
+\label{eq:prox-def}
+\end{equation}
+a $\lambda$-controlled compromise between staying close to $h^{N}$ and reducing
+$\mathcal{L}(\cdot,y)$, where $\lambda$ sets both the smoothing strength and the
+step size. The minimum value attained defines a new function of $h^{N}$:
+\begin{equation}
+\mathcal{L}_{\lambda}(h^{N},y)
+:=
+\min_{u}\Bigl\{\,\mathcal{L}(u,y)+\tfrac{1}{2\lambda}\bigl\|u-h^{N}\bigr\|^{2}\Bigr\}.
+\label{eq:env-def}
+\end{equation}
+Provided $\mathcal{L}(\cdot,y)$ is proper, lower semicontinuous, and bounded
+below by an affine function, the objective in~\eqref{eq:env-def} is coercive
+for every $\lambda>0$, so the infimum is attained and the $\min$ is
+well-defined. This is the Moreau envelope of $\mathcal{L}$ at strength
+$\lambda$. It is a smoothed lower bound: $\mathcal{L}_{\lambda}\le\mathcal{L}$
+pointwise, $\mathcal{L}_{\lambda}\to\mathcal{L}$ as $\lambda\to 0$, and
+$\mathcal{L}_{\lambda}$ is differentiable in $h^{N}$ even when $\mathcal{L}$ is
+not. A direct calculation gives the gradient in closed form:
+\begin{equation}
+\nabla_{\!h^{N}}\,\mathcal{L}_{\lambda}(h^{N},y)
+=
+\tfrac{1}{\lambda}\,\bigl(h^{N}-\bar h^{N}\bigr).
+\label{eq:moreau-grad}
+\end{equation}
+This is the key identity: the displacement produced by the proximal step,
+scaled by $1/\lambda$, is the gradient of the smoothed loss.
+Consequently, the update $h^{N}\leftarrow\bar h^{N}$ is exactly one
+gradient-descent step of step size $\lambda$ on $\mathcal{L}_{\lambda}(\cdot,y)$:
+\[
+h^{N}\leftarrow\bar h^{N}
+=h^{N}-\lambda\,\nabla_{\!h^{N}}\mathcal{L}_{\lambda}(h^{N},y).
+\]
+Globally, the proximal-loss variant therefore optimizes the surrogate
+\begin{equation}
+\widetilde{F}_{\lambda}(\omega)
+=
+\Phi_{\mathrm{net}}(\omega)+\mathcal{L}_{\lambda}\!\bigl(h^{N}(\omega),\,y\bigr),
+\end{equation}
+where $\Phi_{\mathrm{net}}(\omega)$ collects all internal network terms. Together with \cref{sec:incremental-grad-descent}, this places the loss node on
+the same footing as every other constraint: the rigid snap $h^N\leftarrow y$ is no
+longer a special-cased operation but the $\lambda\to 0$ limit of a genuine
+gradient step on a single differentiable surrogate.
+
+An important property of this is that the optimum is preserved. For convex
+$\mathcal{L}(\cdot,y)$, $\mathcal{L}_{\lambda}$ and $\mathcal{L}$ share the same
+set of minimizers for every $\lambda>0$~\cite{rockafellar1998variational}, so
+choosing $\lambda$ trades smoothness against surrogate tightness without moving
+the solution.
+
+\Cref{fig:effect-of-loss} shows a performance improvement under the proximal
+formulation. We can explain this empirical gain through the bounded backward
+signal. The residual that initiates the backward pass is
+$\tfrac{1}{\lambda}(h^{N}-\bar h^{N})$, which for mean-squared-error loss equals
+$\tfrac{1}{1+\lambda}(h^{N}-y)$, i.e.\ the rigid residual $h^{N}-y$ contracted
+by a factor in $(0,1)$. This contraction is what keeps the backward signal
+bounded.
+
+This behavior is not special to MSE. Whenever $\mathcal{L}(\cdot,y)$ is convex, the proximal residual is no larger than the rigid (sub)gradient of the loss at $h^{N}$, and whenever $\mathcal{L}$ is itself Lipschitz (e.g.\ hinge, Huber) the
+residual is bounded uniformly in $h^{N}$ by the Lipschitz constant of
+$\mathcal{L}$.
+
+\subsection
+{Extension to Mini-Batches and the Full Algorithm}
+To extend our algorithm to mini-batches, we introduce an inner loop that repeats the backward pass $K$ times for each batch. The hyperparameter $K$ determines how strictly the constraints induced by the current mini-batch are enforced before the algorithm proceeds to the next batch.
+
+This creates a natural optimization trade-off. Larger values of $K$ allow the network to satisfy the current batch constraints more closely, but may lead to overfitting or cause training to stall. Conversely, smaller values of $K$ produce noisier, more stochastic dynamics, as the network switches more rapidly between the potentially conflicting constraints imposed by different mini-batches. This yields the algorithm in \cref{alg:minibatch}. 
+\begin{algorithm}[htbp] 
+\caption{Mini-Batch $\mathcal{P}$Torch}
+\label{alg:minibatch}
+\begin{algorithmic}[1]
+
+\State $h^{(N)}_b \gets \operatorname{prox}_{\lambda \mathcal{L}}\!\left(h^{(N)}_b,\, y_b\right), \quad b=1,\ldots,B$
+\For{$k=1$ \textbf{to} $K$} \Comment{Repeat the backward sweep $K$ times}
+    \For{$i=N-1$ \textbf{downto} $0$} \Comment{Traverse the computational graph backward}
+        \State $(\bar h^{(i)}, \bar \theta^{(i+1)}, \bar h^{(i+1)}) \in \Pi_{A_{i+1}}(h^{(i)}, \theta^{(i+1)}, h^{(i+1)})$ 
+        \State $\bigl(h^{(i)},\theta^{(i+1)},h^{(i+1)}\bigr) \gets  \operatorname{Opt}\!\left( h^{(i)} - \bar{h}^{(i)}, \theta^{(i+1)} - \bar\theta^{(i+1)}, h^{(i+1)} - \bar{h}^{(i+1)}  \right)$
+    \EndFor
+\EndFor
+\State $h^{(0)}_b \gets x_b$ for $b=1,\ldots,B$
+\end{algorithmic}
+\end{algorithm}
+
+Note that the explicit \texttt{for} loop over individual samples within a batch has been omitted by using fused operations as described in \cref{subsec:fused}.
+
+In the current $\mathcal{P}$Torch library, $K$ is fixed to one. This design choice enables a significantly more elegant
+and efficient implementation: larger values of $K$ require additional memory to propagate the
+intermediate targets $h^+$ across multiple backward sweeps and necessitate a non-standard training
+loop. With $K=1$, the framework is a near drop-in replacement for standard PyTorch.
+\section{Revisiting the XOR Example: Practical Execution in \texorpdfstring{$\mathcal{P}$Torch}{��Torch}}
+\label{app:walk-through}
+The introductory example in \cref{sec:feas} established the geometric intuition of data interpolation via projections, it abstracted away the computational graph and how it is implemented. We now build upon this foundation to demonstrate exactly how $\mathcal{P}$Torch updates the weights of the full network in practice.
+
+\subsection{Forward and Backward Semantics}
+For clarity in the following walkthrough, we drop the explicit sample index $b$ from our notation (as introduced in \cref{alg:cyclic}) and assume the use of the fused projection operators detailed in \cref{subsec:fused}.
+
+\begin{tcolorbox}[shift_card]
+\textbf{A Note on Consensus:} In the conceptual XOR example, we applied the architectural and batch constraints sample-by-sample, waiting until the very end to enforce the consensus constraint by finding the intersection of the four slices. In the actual $\mathcal{P}$Torch implementation, the fused operator executes both the architectural constraints and the consensus. This fusion is what allows the framework to bypass the memory-intensive duplication of network parameters.
+\end{tcolorbox}
+
+\subsection{Loss Projection and Target Initialization}
+ 
+\begin{figure}[htbp]
+\centering
+\begin{adjustbox}{max width=\textwidth, max totalheight=0.15\textheight, center}
+\input{drawings/init_state_backprop}
+\end{adjustbox}
+\caption{Initialization of the backward pass: the network output $h^{(3)}$ is coupled to
+the loss constraint via the proximal operator of \cref{sec:moreau}.}
+\end{figure}
+
+Let $y$ denote the data target for the batch. The backward pass is initialized by a proximal projection on the loss layer.
+
+The target for the network output $h^{(3)}$ is the proximal step:
+\begin{equation}
+\label{eq:proximal-step}
+h^{(3)} = \mathrm{prox}_{\lambda \mathcal{L}}\bigl(h^{(3)},\, y\bigr) \in \underset{u}{\mathrm{arg\,min}} \left( \mathcal{L}\bigl(u, y\bigr) + \frac{1}{2\lambda} \bigl\|u - h^{(3)}\bigr\|_2^2 \right),
+\end{equation}
+
+This $h^{(3)}$ is then propagated as the new target output of the network.
+\begin{tcolorbox}[shift_card]
+ In the conceptual XOR example, the proximal operator was effectively a straight projection ($\lambda\rightarrow\infty$), and the loss function was a hard-margin boundary (requiring $h_b^{(3)} \ge \delta$ for positive samples). 
+\end{tcolorbox}
+ \subsection{Output-Layer Update}
+\begin{figure}[htbp]
+\centering
+\begin{adjustbox}{max width=\textwidth, max totalheight=0.15\textheight, center}
+\input{drawings/next_step_backprop}
+\end{adjustbox}
+\caption{Update of the output linear layer: projection onto the architectural constraint
+$A_{3}$ couples the output target ${h}^{(3)}$ to the deepest hidden state
+$h^{(2)}$ and the weights $\theta^{(3)}$.}
+\label{fig:next_back_prop}
+\end{figure}
+
+In our XOR MLP, layer 3 is the output linear layer with weights $\theta^{(3)}$, so the forward pass behaves as $f_3\bigl(h^{(2)},\theta^{(3)}\bigr) = \theta^{(3)} h^{(2)}$. The corresponding architectural constraint set for this specific layer is:
+\begin{equation}
+A_{3} := \bigl\{\bigl(h^{(2)},\, \theta^{(3)},\, h^{(3)}\bigr) \,\bigm|\, h^{(3)} = \theta^{(3)} h^{(2)} \bigr\}.
+\end{equation}
+
+Given the current hidden state $h^{(2)}$ and weights $\theta^{(3)}$, together with the output target $h^{(3)}$ 
+\begin{equation}
+\bigl(\bar{h}^{(2)}, \bar{\theta}^{(3)}, \bar{h}^{(3)}\bigr) \in \Pi_{A_{3}}\!\bigl(h^{(2)}, \theta^{(3)}, h^{(3)}\bigr)
+\end{equation}
+simultaneously yields the target hidden state $\bar{h}^{(2)}$, the projected output weights $\bar{\theta}^{(3)}$, and the adjusted output target $\bar{h}^{(3)}$. 
+
+Following the nonlinear relaxation strategy, we do not jump to these exact projected values. Instead, the next parameter iterate is obtained by feeding the projection residual into the chosen first-order optimizer:
+\begin{equation}
+\bigl(h^{(2)},\theta^{(3)}, h^{(3)}\bigr) \gets \operatorname{Optimizer}\!\left( {h}^{(2)} - \bar h^{(2)}, {\theta}^{(3)} - \bar \theta^{(3)}, {h}^{(3)} - \bar h^{(3)} ; \eta \right)
+\end{equation}
+where the step size (or relaxation parameter) $\eta$ controls how aggressively we adjust the parameters to satisfy this single batch constraint. 
+
+\subsection{Activation function Update}
+\begin{figure}[htbp]
+\centering
+\begin{adjustbox}{max width=\textwidth, max totalheight=0.1\textheight, center}
+\input{drawings/next_update_backprop}
+\end{adjustbox}
+
+\caption{Projection through the activation constraint $A_{2}$, which carries no
+parameters.}
+\label{fig:next_back_prop_mid}
+\end{figure}
+Now consider the preceding activation layer $f_2 = \Sigma$. As the parameter variable $\theta^{(2)}$ is empty for activation layers, the architectural constraint reduces to a simple relation between two hidden states:
+\[
+A_{2} := \bigl\{\bigl(h^{(1)},\, h^{(2)}\bigr) \,\bigm|\,
+h^{(2)} = \Sigma\bigl(h^{(1)}\bigr) \bigr\}.
+\]
+
+The projection simultaneously yields the adjusted target signal for layer 2, $\bar h^{(2)}$, and the target signal for layer 1, $\bar{h}^{(1)}$. This $\bar{h}^{(1)}$ then becomes the target passed backward to the preceding linear layer's projection $\Pi_{A_{1}}$. Note that, depending on the implementation, a non-linear relaxation step may first be applied, similar to the approach used for the weights. This sequential projection procedure repeats, propagating targets backward through the computational graph $\mathcal{G}$ until the root is reached.
+
+\section{Summary of the \texorpdfstring{$\mathcal{P}$Torch}{��Torch} Algorithm}
+To give an overview of what we did: we started with plain cyclic projections, chosen because it can be implemented by overriding the PyTorch autograd functions, giving an efficient baseline. We then optimized the linear layer so that it computes the projection without duplicating its parameters, resolving the memory issue present in previous frameworks, introduced an infinity-norm variant that performs better per step empirically. Next, we added a proximal projection at the loss function to improve stability, together with a non-linear relaxation built on the common Adam and Muon optimizers which substantially improve the convergence speed.

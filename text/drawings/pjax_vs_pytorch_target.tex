@@ -1,0 +1,88 @@
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+\providecolor{KUL-RED}{RGB}{170, 30, 30}
+\providecolor{KUL-ORANGE}{RGB}{230, 140, 0}
+
+\begin{tikzpicture}[
+    scale=1,
+    >=Stealth,
+    font=\small,
+    op/.style={rectangle, rounded corners=1pt, draw=black!65, fill=black!8, thick, minimum width=2.4cm, minimum height=1.0cm, align=center},
+    focusLoss/.style={op, draw=KUL-ORANGE!85!black, fill=KUL-ORANGE!14},
+    state/.style={circle, draw=black!65, fill=black!5, thick, minimum size=1.05cm, inner sep=1pt, align=center},
+    io/.style={state, minimum size=0.88cm},
+    param/.style={state, fill=black!10, minimum size=1.1cm},
+    labelStyle/.style={font=\sffamily\small, text=black!80},
+    fwdEdge/.style={->, thick, black!55},
+    supportEdge/.style={->, thick, black!50},
+    localEdge/.style={<->, thick, dashed, KUL-ORANGE!85!black},
+    bwdEdge/.style={->, thick, dashed, KUL-RED!85!black}
+]
+
+\begin{scope}
+    \node[font=\Large\bfseries\sffamily, text=black, align=center] at (7.5, 3.2) {PJAX: Local Projections (Parallel Updates)};
+
+    \begin{scope}[shift={(0.1, 2.35)}]
+        \draw[fwdEdge]   (0,0) -- (1.0,0)      node[right, black, font=\small] {Forward pass};
+        \draw[localEdge] (0,-0.6) -- (1.0,-0.6) node[right, black, font=\small] {Local bidirectional projection};
+    \end{scope}
+
+    \node[io,    label={[labelStyle]above:Input}]  (x)    at (0,0)      {$x$};
+    \node[op,    label={[labelStyle]above:Linear}] (lin0) at (3,0)      {$W_0x+b_0$};
+    \node[state, label={[labelStyle]above:State}]  (h0)   at (6,0)      {$h_0$};
+    \node[state, label={[labelStyle]above:Logits}] (z1)   at (9,0)     {$z_1$};
+    \node[focusLoss, label={[labelStyle]above:Loss}] (L)  at (12,0)     {$L$};
+    \node[io,    label={[labelStyle]right:Target}] (y)    at (12,-2.25)  {$y$};
+
+    \node[param, label={[labelStyle]below:Weight}] (W0) at (3,-2.2) {$W_0$};
+
+    \draw[fwdEdge] (x) -- (lin0);
+    \draw[fwdEdge] (lin0) -- (h0);
+    \draw[fwdEdge] (h0) -- (z1);
+    \draw[fwdEdge] (z1) -- (L);
+    \draw[fwdEdge] (y) -- (L);
+
+    \draw[supportEdge] (W0) -- (lin0);
+
+    \draw[localEdge] (x) to[bend left=24]  (lin0);
+    \draw[localEdge] (lin0) to[bend left=24]  (h0);
+    \draw[localEdge] (h0)   to[bend left=24]  (z1);
+    \draw[localEdge] (z1)   to[bend left=24]  (L);
+    \draw[localEdge] (y)    to[bend left=24]  (L);
+
+    \draw[localEdge] (W0) to[bend right=16] (lin0);
+\end{scope}
+
+\begin{scope}[xshift=16.2cm]
+    \node[font=\Large\bfseries\sffamily, text=black, align=center] at (7.5, 3.2) {Ptorch: Sequential Target Propagation};
+
+    \begin{scope}[shift={(0.1, 2.35)}]
+        \draw[fwdEdge] (0,0) -- (1.0,0)      node[right, black, font=\small] {Forward pass};
+        \draw[bwdEdge] (0,-0.6) -- (1.0,-0.6) node[right, black, font=\small] {Sequential target propagation};
+    \end{scope}
+
+    \node[io,    label={[labelStyle]above:Input}]  (tx)    at (0,0)      {$x$};
+    \node[op,    label={[labelStyle]above:Linear}] (tlin0) at (3,0)      {$W_0x+b_0$};
+    \node[state, label={[labelStyle]above:State}]  (th0)   at (6,0)      {$h_0$};
+    \node[state, label={[labelStyle]above:Logits}] (tz1)   at (9,0)     {$z_1$};
+    \node[focusLoss, label={[labelStyle]above:Loss}] (tL)  at (12,0)     {$L$};
+    \node[io,    label={[labelStyle]right:Target}] (ty)    at (12,-2.25)  {$y$};
+
+    \node[param, label={[labelStyle]below:Weight}] (tW0) at (3,-2.2) {$W_0$};
+
+    \draw[fwdEdge] (tx) -- (tlin0);
+    \draw[fwdEdge] (tlin0) -- (th0);
+    \draw[fwdEdge] (th0) -- (tz1);
+    \draw[fwdEdge] (tz1) -- (tL);
+    \draw[fwdEdge] (ty) -- (tL);
+
+    \draw[supportEdge] (tW0) -- (tlin0);
+
+    \draw[bwdEdge] (tL)    to[bend right=32] node[above, font=\footnotesize, text=KUL-RED!85!black] {$\bar{z}_1$} (tz1);
+    \draw[bwdEdge] (tz1)   to[bend right=32] node[above, font=\footnotesize, text=KUL-RED!85!black] {$\bar{h}_0$} (th0);
+    \draw[bwdEdge] (th0)   to[bend right=32] node[above, font=\footnotesize, text=KUL-RED!85!black] {$\bar{o}_0$} (tlin0);
+    \draw[bwdEdge] (tlin0) to[bend right=32] node[above, font=\footnotesize, text=KUL-RED!85!black] {$\bar{x}$} (tx);
+
+    \draw[bwdEdge] (tlin0) to[bend right=26] node[left=1pt, font=\footnotesize, text=KUL-RED!85!black] {$\bar{W}_0$} (tW0);
+\end{scope}
+
+\end{tikzpicture}

@@ -14,7 +14,7 @@ from ptorch.nn.modules import Linear, ReLU, HardMarginLoss
 import ptorch.nn.modules as ptorch_modules
 from ptorch import config as ptorch_config
 import ptorch.optim_static as ptorch_optim_static
-from experiments.shared.data import MNISTDataModule, InfiniteCifarDataModule
+from data import MNISTDataModule, InfiniteCifarDataModule
 import tqdm, time
 
 ptorch_config.use_projections = True
@@ -28,16 +28,16 @@ DATASETS = {"MNIST": MNISTDataModule, "CIFAR10": InfiniteCifarDataModule}
 # ── Model ────────────────────────────────────────────────────────────────────
 
 class MLP(tnn.Module):
-    def __init__(self, hidden, in_features, classes, norm='l2'):
+    def __init__(self, hidden, in_features, classes, norm='l2', num_iters=1):
         super().__init__()
         last = in_features
         self.hidden_layers = tnn.ModuleList()
-        
+
         for i, f in enumerate(hidden):
-            self.hidden_layers.append(Linear(last, f, norm=norm))
+            self.hidden_layers.append(Linear(last, f, norm=norm, num_iters=num_iters))
             self.hidden_layers.append(ReLU( norm=norm))
             last = f
-        self.out = Linear(last, classes, norm=norm)
+        self.out = Linear(last, classes, norm=norm, num_iters=num_iters)
         
     def forward(self, x):
         x = x.reshape(x.shape[0], -1)
@@ -49,7 +49,9 @@ class MLP(tnn.Module):
 # ── Training ─────────────────────────────────────────────────────────────────
 
 def run(cfg, task_cfg, batch_size, run_number, device,
-        norm='l2', opt_name=None, opt_kwargs=None, loss_name='HardMarginLoss', use_muon_activations=False):
+        norm='l2', opt_name=None, opt_kwargs=None, loss_name='HardMarginLoss', use_muon_activations=False,
+        td_lambda=0.0, td_mode="norm", td_eps_lin=None, td_anneal=False,
+        td_deflate=False, num_iters=1):
     """Single training run.
 
     Parameters
@@ -75,9 +77,14 @@ def run(cfg, task_cfg, batch_size, run_number, device,
     test_loader = ds.test_dataloader()
 
     model = MLP(task_cfg["hidden"], task_cfg["in_features"],
-                task_cfg["classes"], norm=norm).to(device)
+                task_cfg["classes"], norm=norm, num_iters=num_iters).to(device)
 
     ptorch_config.config.use_muon_activations = use_muon_activations
+    ptorch_config.config.update("td_lambda", float(td_lambda))
+    ptorch_config.config.update("td_mode", td_mode)
+    if td_eps_lin is not None:
+        ptorch_config.config.update("td_eps_lin", float(td_eps_lin))
+    ptorch_config.config.update("td_deflate", bool(td_deflate))
 
     opt_name   = opt_name   or cfg["ptorch_optimizer"]
     opt_kwargs = opt_kwargs if opt_kwargs is not None else cfg.get("ptorch_optimizer_kwargs", {})
@@ -87,6 +94,16 @@ def run(cfg, task_cfg, batch_size, run_number, device,
 
     # Build a tag that distinguishes this run in the CSV
     tag = f"{FRAMEWORK}_norm={norm}_opt={opt_name}_loss={loss_name}_muon={use_muon_activations}"
+    if td_lambda != 0.0:
+        tag += f"_td={td_mode}{td_lambda}"
+        if td_eps_lin is not None:
+            tag += f"+eps{td_eps_lin}"
+        if td_anneal:
+            tag += "+anneal"
+        if td_deflate:
+            tag += "+defl"
+    if num_iters != 1:
+        tag += f"_it{num_iters}"
 
     results_dir = os.path.join(os.path.dirname(__file__), cfg.get("results_dir", "results"))
     os.makedirs(results_dir, exist_ok=True)
@@ -115,6 +132,12 @@ def run(cfg, task_cfg, batch_size, run_number, device,
         while step < cfg["max_steps"]:
             # ── Fetch a new batch ─────────────────────────────────────────
             x_np, y_np = next(train_iter)
+            if td_anneal and td_lambda != 0.0:
+                # Linear decay of the trace strength to 0 over the run: strong
+                # early-layer signal while features form, clean local
+                # projections for late fine-tuning.
+                ptorch_config.config.update(
+                    "td_lambda", float(td_lambda) * max(0.0, 1.0 - step / cfg["max_steps"]))
             x_batch = torch.tensor(x_np, dtype=torch.float32, device=device)
             y_batch = torch.tensor(y_np, dtype=torch.long, device=device)
             y_oh    = F.one_hot(y_batch, num_classes=task_cfg["classes"]).float()
@@ -186,6 +209,22 @@ if __name__ == "__main__":
                         help="Path to YAML config file")
     parser.add_argument("--max-steps", type=int, default=None, help="Override cfg['max_steps']")
     parser.add_argument("--num-runs", type=int, default=None, help="Override cfg['num_runs']")
+    parser.add_argument("--td-lambda", type=float, default=0.0,
+                        help="TD(λ) depth-trace strength (0 = off, exact legacy behavior)")
+    parser.add_argument("--td-mode", type=str, default="norm", choices=["norm", "vector"],
+                        help="trace variant (norm = seed-coupled scalar floor)")
+    parser.add_argument("--muon", type=int, default=None, choices=[0, 1],
+                        help="Override the cfg use_muon_activations sweep with a single value")
+    parser.add_argument("--td-eps-lin", type=float, default=None,
+                        help="Override config.td_eps_lin (linear-transport cap)")
+    parser.add_argument("--td-anneal", action="store_true",
+                        help="Linearly decay td_lambda to 0 over max_steps")
+    parser.add_argument("--tasks", type=str, default=None,
+                        help="Comma-separated task names to run (default: all in cfg)")
+    parser.add_argument("--td-deflate", action="store_true",
+                        help="Deflate the activation-parallel artifact from the trace residual")
+    parser.add_argument("--num-iters", type=int, default=1,
+                        help="Newton steps per bilinear solve (Linear num_iters)")
     args = parser.parse_args()
 
     cfg    = yaml.safe_load(open(args.config))
@@ -208,6 +247,12 @@ if __name__ == "__main__":
     muon_sweeps = cfg.get("use_muon_activations", [False])
     if not isinstance(muon_sweeps, list):
         muon_sweeps = [muon_sweeps]
+    if args.muon is not None:
+        muon_sweeps = [bool(args.muon)]
+
+    if args.tasks is not None:
+        wanted = set(args.tasks.split(","))
+        cfg["tasks"] = [t for t in cfg["tasks"] if t["name"] in wanted]
 
     for batch_size in cfg["batch_sizes"]:
         for task_cfg in cfg["tasks"]:
@@ -222,7 +267,10 @@ if __name__ == "__main__":
                             print(f"\n{'='*60}\n{header}")
                             for run_number in range(1, cfg["num_runs"] + 1):
                                 run(cfg, task_cfg, batch_size, run_number, device,
-                                    norm=norm, opt_name=opt_name, opt_kwargs=opt_kwargs, loss_name=loss_name, use_muon_activations=muon_act)
+                                    norm=norm, opt_name=opt_name, opt_kwargs=opt_kwargs, loss_name=loss_name, use_muon_activations=muon_act,
+                                    td_lambda=args.td_lambda, td_mode=args.td_mode,
+                                    td_eps_lin=args.td_eps_lin, td_anneal=args.td_anneal,
+                                    td_deflate=args.td_deflate, num_iters=args.num_iters)
                                 gc.collect()
                                 if torch.cuda.is_available():
                                     torch.cuda.empty_cache()

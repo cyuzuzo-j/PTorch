@@ -1,0 +1,48 @@
+% TikZ snippet (no preamble): constraint region for (W_1^0, W_B^0)
+% Include from a main document that loads tikz.
+
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+
+\begin{tikzpicture}[scale=1.0, every node/.style={font=\small}]
+  % Define limits for the plot
+  \def\xmin{-2.0}
+  \def\xmax{2.0}
+  \def\ymin{-2.0}
+  \def\ymax{2.0}
+
+  % Force a consistent bounding box (so paired subfigures match sizes)
+  \useasboundingbox (\xmin,\ymin) rectangle (\xmax,\ymax);
+
+  % Constraint region (W_B^0 + W_1^0 \le 2)
+  % With the shown tick relabeling (1 \mapsto 2), the boundary in plot coords is W_B^0 = -W_1^0 + 1.
+  \fill[KUL-BLUE, opacity=0.08]
+    (\xmin, \ymin) -- (\xmax, \ymin) --
+    (\xmax, -1.0) -- (-1.0, \ymax) --
+    (\xmin, \ymax) -- cycle;
+
+
+
+  % Axes
+  \draw[-stealth, thick, KUL-BLUE] (\xmin, 0) -- (\xmax, 0) node[right, black] {$\theta^3[0]$};
+  \draw[-stealth, thick, KUL-BLUE] (0, \ymin) -- (0, \ymax) node[above, black] {$\theta^3[2]$};
+
+  % Boundary line (W_B^0+W_1^0=2)
+  \draw[thick, dashed, KUL-BLUE] (-1.0, \ymax) -- (\xmax, -1.0);
+
+  % Origin marker
+  \fill[black] (0,0) circle (1.5pt) node[below left] {$0$};
+
+  % Add some ticks/markers for scale reference
+  \draw (1, 0.05) -- (1, -0.05) node[below] {$2$};
+  \draw (-1, 0.05) -- (-1, -0.05) node[below] {$-2$};
+  \draw (0.05, 1) -- (-0.05, 1) node[left] {$2$};
+  \draw (0.05, -1) -- (-0.05, -1) node[left] {$-2$};
+    % Legend (top-left)
+  \node[anchor=north west, draw=black!30, fill=white, fill opacity=1.0, text opacity=1,
+        rounded corners=1pt, inner sep=0.5pt, align=left,
+        text=KUL-BLUE!70!black]
+    at (\xmin, \ymin+0.4)
+    {\tikz \draw[KUL-BLUE, fill=KUL-BLUE, fill opacity=0.08] (0,0) rectangle (0.3, 0.15); \scriptsize $\theta^{(3)}_1\in A_{13}  \cap B_{\mathrm{out}}$};
+    
+
+\end{tikzpicture}

@@ -1,0 +1,35 @@
+% TikZ snippet (no preamble): constraint on W_B for the (0,0) sample
+% Styled to match the base figure (paired subfigure).
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+\providecolor{KUL-RED}{RGB}{170, 30, 30}
+\begin{tikzpicture}[scale=1.0, every node/.style={font=\small}]
+  % Define limits for the plot (match the base figure for paired sizing)
+  \def\xmin{-2.0}
+  \def\xmax{2.0}
+  \def\ymin{-2.0}
+  \def\ymax{2.0}
+  % Force a consistent bounding box (so paired subfigures match sizes)
+  \useasboundingbox (\xmin,\ymin) rectangle (\xmax,\ymax);
+  % Accepted region: W_B <= 0  (lower half-plane; value 0 maps to plot coord 0)
+  \fill[KUL-RED, opacity=0.08]
+    (\xmin, \ymin) rectangle (\xmax, 0);
+  % Vertical coordinate axis
+  \draw[-stealth, thick, KUL-BLUE] (0, \ymin) -- (0, \ymax) node[above, black] {$\theta^3[2]$};
+  % Constraint boundary W_B = 0 (coincides with the horizontal axis; drawn as the active constraint)
+  \draw[-stealth, thick, dashed, KUL-RED] (\xmin, 0) -- (\xmax, 0) node[right, black] {$\theta^3[0]$};
+  % Origin marker
+  \fill[black] (0,0) circle (1.5pt) node[below left] {$0$};
+  % Ticks/markers for scale reference (1 \mapsto 2)
+  \draw (1, 0.05) -- (1, -0.05) node[below] {$2$};
+  \draw (-1, 0.05) -- (-1, -0.05) node[below] {$-2$};
+  \draw (0.05, 1) -- (-0.05, 1) node[left] {$2$};
+  \draw (0.05, -1) -- (-0.05, -1) node[left] {$-2$};
+
+  % Legend (top-left)
+    \node[anchor=north west, draw=black!30, fill=white, fill opacity=1.0, text opacity=1,
+      rounded corners=1pt, inner sep=2pt, align=left,
+      text=black]
+    at (-2.3, \ymin+0.5)
+    {\tikz \draw[KUL-RED, fill=KUL-RED, fill opacity=0.08] (0,0) rectangle (0.3, 0.15); \scriptsize $\theta^{(3)}_2\in A_{23}  \cap B_{\mathrm{out}}$};
+    
+\end{tikzpicture}

@@ -181,7 +181,11 @@ class CrossEntropy(ProjectionModule):
 
     def forward(self, input, target):
         if config.use_projections:
-            return CrossEntropyProjection.apply(input, target)
+            return CrossEntropyProjection.apply(
+                input, target,
+                config.cross_entropy_num_steps,
+                config.cross_entropy_lambda,
+            )
         return F.cross_entropy(input, target)
 
 class HardMarginLoss(ProjectionModule):

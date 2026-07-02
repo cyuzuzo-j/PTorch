@@ -1,0 +1,47 @@
+% TikZ snippet (no preamble): accepted region for $(\theta_b^{(3)}[0],\theta_b^{(3)}[2])$ with $h_b^{(3)}\ge \delta$ for $b\in\{3,4\}$.
+% Include from a main document that loads tikz.
+
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+\providecolor{KUL-ORANGE}{RGB}{230, 140, 0}
+
+\begin{tikzpicture}[scale=1, every node/.style={font=\small}]
+  % Define limits for the plot
+  \def\xmin{-1.5}
+  \def\xmax{2.0}
+  \def\ymin{-2.0}
+  \def\ymax{2.0}
+
+  % Visual delta (for plotting only)
+  \def\deltaval{0.5}
+
+  % Force a consistent bounding box (so paired subfigures match sizes)
+  \useasboundingbox (\xmin,\ymin) rectangle (\xmax,\ymax);
+
+  % Accepted region (h_b^{(3)} = theta_b^{(3)}[0] + theta_b^{(3)}[2] \ge \delta
+  % => theta_b^{(3)}[2] \ge -theta_b^{(3)}[0] + \delta)
+  % Fill the area above the line y = -x + delta
+  \fill[KUL-ORANGE, opacity=0.08] (\xmin, -\xmin+\deltaval) -- (\xmax, -\xmax+\deltaval) -- (\xmax, \ymax) -- (\xmin, \ymax) -- cycle;
+
+  % Axes
+  \draw[-stealth, thick, KUL-BLUE] (\xmin, 0) -- (\xmax, 0) node[right, black] {$\theta^{(3)}[0]$};
+  \draw[-stealth, thick, KUL-BLUE] (0, \ymin) -- (0, \ymax) node[above, black] {$\theta^{(3)}[2]$};
+
+  % Boundary line h_b^{(3)} = \delta (theta_b^{(3)}[2] = -theta_b^{(3)}[0] + \delta)
+  \draw[thick, dashed, KUL-ORANGE] (\xmin, -\xmin+\deltaval) -- (\xmax, -\xmax+\deltaval);
+  % Origin marker
+  \fill[black] (0,0) circle (1.5pt) node[below left] {$0$};
+
+  % Ticks (2.0 scale: plot coordinate 1 corresponds to value 2)
+  \draw (1, 0.05) -- (1, -0.05) node[below] {$2$};
+  \draw (-1, 0.05) -- (-1, -0.05) node[below] {$-2$};
+  \draw (0.05, 1) -- (-0.05, 1) node[left] {$2$};
+  \draw (0.05, -1) -- (-0.05, -1) node[left] {$-2$};
+  
+  % Legend (top-left)
+    \node[anchor=north west, draw=black!30, fill=white, fill opacity=1.0, text opacity=1,
+      rounded corners=1pt, inner sep=2pt, align=left,
+      text=KUL-BLUE!70!black]
+    at (-2.3, \ymin+0.5)
+    {\tikz \draw[KUL-ORANGE, fill=KUL-ORANGE, fill opacity=0.08] (0,0) rectangle (0.3, 0.15); \scriptsize $\theta^{(3)}_{(3,4)}\in A_{(3,4)3}  \cap B_{\mathrm{out}}$};
+
+\end{tikzpicture}

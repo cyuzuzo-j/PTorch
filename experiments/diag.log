@@ -1,0 +1,23 @@
+
+Projection policy gradient (ptorch) for continuous control, with value baseline.
+
+/rhea/scratch/brussel/vo/000/bvo00004/vsc38352/learning_with_projections/experiments/bipedal_walker.py:302: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:836.)
+  pol_acc += float(pol); val_acc += float(val); nb += 1
+epoch:   0 	 pol:    -0.76 	 val:    20.64 	 clipfrac: 0.87 	 return:  -107.51 	 ep_len:  1094.7 	 log_std: -0.783
+epoch:   1 	 pol:    -2.92 	 val:   285.07 	 clipfrac: 0.55 	 return:  -143.49 	 ep_len:   227.8 	 log_std: -0.870
+epoch:   2 	 pol:    -0.79 	 val:   223.24 	 clipfrac: 0.62 	 return:  -133.89 	 ep_len:   204.7 	 log_std: -0.918
+epoch:   3 	 pol:    -1.33 	 val:   133.09 	 clipfrac: 0.34 	 return:  -140.37 	 ep_len:   309.1 	 log_std: -0.970
+epoch:   4 	 pol:   -18.36 	 val:   100.75 	 clipfrac: 0.43 	 return:  -146.94 	 ep_len:   346.2 	 log_std: -0.989
+epoch:   5 	 pol:    -5.01 	 val:   119.37 	 clipfrac: 0.36 	 return:  -120.08 	 ep_len:   182.2 	 log_std: -1.000
+epoch:   6 	 pol: -630122.62 	 val:    19.97 	 clipfrac: 0.40 	 return:  -158.17 	 ep_len:   926.0 	 log_std: -1.000
+epoch:   7 	 pol:      nan 	 val:    53.38 	 clipfrac: 0.99 	 return:  -124.57 	 ep_len:   353.5 	 log_std: nan
+epoch:   8 	 pol:      nan 	 val:    30.63 	 clipfrac: 1.00 	 return:   -91.95 	 ep_len:   117.2 	 log_std: nan
+epoch:   9 	 pol:      nan 	 val:    24.81 	 clipfrac: 1.00 	 return:   -91.94 	 ep_len:   118.3 	 log_std: nan
+epoch:  10 	 pol:      nan 	 val:    16.21 	 clipfrac: 1.00 	 return:   -91.93 	 ep_len:   118.9 	 log_std: nan
+epoch:  11 	 pol:      nan 	 val:    10.97 	 clipfrac: 1.00 	 return:   -91.94 	 ep_len:   118.6 	 log_std: nan
+epoch:  12 	 pol:      nan 	 val:     8.80 	 clipfrac: 1.00 	 return:   -91.93 	 ep_len:   118.6 	 log_std: nan
+epoch:  13 	 pol:      nan 	 val:     6.88 	 clipfrac: 1.00 	 return:   -91.95 	 ep_len:   118.4 	 log_std: nan
+epoch:  14 	 pol:      nan 	 val:     4.90 	 clipfrac: 1.00 	 return:   -91.90 	 ep_len:   118.7 	 log_std: nan
+epoch:  15 	 pol:      nan 	 val:     3.77 	 clipfrac: 1.00 	 return:   -91.93 	 ep_len:   118.7 	 log_std: nan
+epoch:  16 	 pol:      nan 	 val:     2.72 	 clipfrac: 1.00 	 return:   -91.97 	 ep_len:   118.1 	 log_std: nan

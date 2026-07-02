@@ -1,0 +1,24 @@
+experiment_name: attention_benchmark
+random_seed: 43
+max_steps: 5000
+num_runs: 1
+eval_every: 100
+patience: 1000
+results_dir: results
+
+batch_sizes: [256]
+
+tasks:
+  - name: CIFAR10
+    patch_size: 4
+    emb_dim: 128
+    num_heads: 16
+    classes: 10
+
+norms: ["l2"]
+losses: ["CrossEntropy"]
+
+optimizers:
+  - name: ProjectionMuonV2
+    kwargs:
+      lr: 0.001

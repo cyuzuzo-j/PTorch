@@ -1,0 +1,159 @@
+\chapter{Experiments}
+\label{sec:experiments}
+% ---------------------------------------------------------------
+We evaluate $\mathcal{P}$Torch against Torch~\cite{paszke2019pytorchimperativestylehighperformance} as a gradient-based reference implementation and we use PJAX~\cite{bergmeister2025projection} as the projection-based reference. \Cref{sec:exp-mlp,sec:exp-cnn} benchmark end-to-end accuracy on the standard MNIST and CIFAR-10 classification tasks; \cref{sec:arch-init,sec:exp-memory-optimizer,sec:exp-relaxation-location} isolate choices specific to $\mathcal{P}$Torch: proximal loss, efficient matrix-multiplication projection, optimizer choice, relaxation placement and projection norm. Finally, \cref{cha:Advanced} investigates hybrid projection gradient-based training and non-differentiable activation functions.
+
+\paragraph{Shared protocol.}
+Unless explicitly overridden, all benchmarks share the configuration in \cref{tab:shared-protocol}.
+
+% =========================================================
+% Reproducibility Box (Reusable)
+% =========================================================
+
+% ---------------------------------------------------------------
+\section{Shallow MLP: MNIST and CIFAR-10}
+\label{sec:exp-mlp}
+% ---------------------------------------------------------------
+\begin{tcolorbox}[reprocard, title=Setup]\\
+A single-hidden-layer MLP with 512 ReLU units is trained on MNIST ($784 \to 512 \to 10$) and CIFAR-10 ($3072 \to 512 \to 10$).
+\end{tcolorbox}
+
+\begin{figure}[ht]
+\centering
+\begin{minipage}[t]{0.47\textwidth}
+    \centering
+    \safeincludegraphics[width=\textwidth]{images/mlp/CIFAR10_1L_STEP.pdf}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.47\textwidth}
+    \centering
+    \safeincludegraphics[width=\textwidth]{images/mlp/MNIST_1L_STEP.pdf}
+\end{minipage}
+\caption{MLP validation accuracy vs.\ optimization step for CIFAR-10 (left) and MNIST (right). Shaded bands indicate $\pm 1$ standard deviation.}
+\label{fig:shallow-mlp-step}
+\end{figure}
+
+\begin{figure}[ht]
+\centering
+\begin{minipage}[t]{0.47\textwidth}
+    \centering
+    \safeincludegraphics[width=\textwidth]{images/mlp/CIFAR10_1L_TIME.png}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.47\textwidth}
+    \centering
+    \safeincludegraphics[width=\textwidth]{images/mlp/MNIST_1L_TIME.pdf}
+\end{minipage}
+\caption{MLP validation accuracy vs.\ wall-clock time for CIFAR-10 (left) and MNIST (right).}
+\label{fig:shallow-mlp-time}
+\end{figure}
+
+\paragraph{Interpretation.}
+$\mathcal{P}$Torch performs comparable to standard gradient-based training. It demonstrates a slight advantage on a per-step basis by reaching higher validation accuracy in fewer optimization steps on CIFAR-10, while its overall execution time remains highly competitive. A logarithmic scale was required for the wall-clock time axis because the PJAX network requires significantly more time to run. Importantly, this evaluation does not claim that $\mathcal{P}$Torch is superior to Torch for training small MLPs, as the performance gap falls within the variance of standard hyperparameter tuning. Rather, it serves as an empirical proof of concept, demonstrating that projection-based training can be a competitive, practical alternative to established methods for small MLPs.% ---------------------------------------------------------------
+\section{Vanishing target signal and depth}
+\label{sec:exp-vanishing}
+% ---------------------------------------------------------------
+\begin{tcolorbox}[reprocard, title=Setup]\\
+We train linear MLPs of depth $L \in \{2, 4, 8\}$ and width $32$ to recover the identity map $f(x) = x$ on i.i.d.\ Gaussian inputs $x \sim \mathcal{N}(0, I_{32})$. Each batch contains $16$ samples. We log the per-layer target magnitude $\delta_k^{n} := \frac{\|\bar h^{(k),n} - h^{(k),n}\|_2 }{B}$ at training step $n=1$ and the final training MSE.
+\end{tcolorbox}
+
+\begin{figure}[ht]
+\centering
+\safeincludegraphics[width=0.9\textwidth]{images/deep/vanishing_combined.pdf}
+\caption{
+Target signal magnitude $\delta_k^{n}$ at
+step~$1$ for varying depths (left) Final training MSE vs.\ depth
+(right) on the identity-recovery task.
+}
+\label{fig:depth-barrier}
+\end{figure}
+
+\paragraph{Interpretation.}
+The identity-recovery task shows that $\delta_k^{n}$ decays as $k$ moves away from the output, with layers three steps from the output already reaching machine precision. This observation is consistent with the theory in \cref{sec:vanishing-target}. 
+\begin{tcolorbox}[reprocard, title=Setup] \\
+A 4-layer MLP is trained on MNIST and CIFAR-10 with the protocol of \cref{sec:exp-mlp} but with $\ell_2$ linear layers. The same architecture in Torch (Adam, $\text{lr} = 10^{-3}$, cross-entropy) serves as the gradient baseline.
+\end{tcolorbox}
+\begin{figure}[ht]
+    \centering
+    \safeincludegraphics[width=\linewidth]{"images/deep/deep_mlp_STEP (3).pdf"}
+    \caption{Validation accuracy vs. optimization steps for a 4-layer MLP on MNIST, comparing runs with and without orthogonalization applied to hidden state update. The performance gap relative to Torch widens with depth, consistent with the depth-barrier prediction of \cref{sec:vanishing-target}.}
+    \label{fig:deep_mlp_muon_comparison}
+\end{figure}
+\paragraph{Interpretation.} \cref{fig:deep_mlp_muon_comparison} illustrates in a
+practical setting what the toy example in \cref{fig:depth-barrier} suggests:
+optimization difficulty scales with network depth. This creates a counterintuitive
+dynamic where, unlike gradient-based networks that typically benefit from increased
+depth, projection-based networks experience degraded performance. As shown on the
+right of \cref{fig:deep_mlp_muon_comparison}, orthogonalizing the hidden-state
+residuals can slightly mitigate this degradation.
+
+\begin{figure}[ht]
+    \centering
+    \safeincludegraphics[width=0.9\textwidth]{images/deep/vanishing_combined_muon.pdf}
+    \caption{Applying orthogonalization on the hidden-state residuals stabilises
+    $\delta_k^{n}$ across depths.}
+    \label{fig:orthogonalization}
+\end{figure}
+
+This orthogonalization was inspired by the muon optimizer and uses the Polar Express
+orthogonalization procedure \cite{amsel2025polar}. \cref{fig:orthogonalization}
+repeats the benchmark of \cref{sec:exp-vanishing} with orthogonalization applied to
+the residuals, and the stabilised $\delta_k^{n}$ confirms that this artificially
+counteracts the vanishing targets problem. The approach is not free, however: it
+adds computational cost, and where the unmodified method benefits from shallowness,
+orthogonalization slightly degrades performance on shallow networks. Most critically,
+even with it enabled we have not observed a deep network outperform a shallower
+variant.
+% ---------------------------------------------------------------
+\section{Convolutional networks: small CNN on CIFAR-10}
+\label{sec:exp-cnn}
+% ---------------------------------------------------------------
+\begin{tcolorbox}[reprocard, title=Setup]\\
+3-layer CNN on CIFAR-10: three blocks with channel widths $\{32, 64, 128\}$ followed by a flatten operation and a linear $\ell_\infty$ classifier head. Training runs for $10{,}000$ steps. $\mathcal{P}$Torch uses \texttt{ProjectionAdam} ($\text{lr} = 10^{-3}$).
+\end{tcolorbox}
+\begin{figure}[ht]
+    \centering
+    \safeincludegraphics[width=\linewidth]{images/other_benchmarks/CIFAR10_STEP (3).pdf}
+    \caption{Validation accuracy vs.\ wall-clock time on CIFAR-10 with the
+    CNN architecture.}
+    \vfill
+    \label{fig:cnn}
+\end{figure}
+\paragraph{Interpretation.} The CNN significantly underperforms its gradient-based counterpart. This performance gap stems from the fundamental architecture of CNNs, which rely heavily on depth to extract hierarchical features from images. Because projection-based learning inherently degrades as network depth increases, this structural mismatch makes training high-performing CNNs particularly challenging. While these results demonstrate that training CNNs is computationally feasible with $\mathcal{P}$Torch, they also highlight that substantial progress is necessary before projection-based methods can serve as a viable alternative for standard convolutional architectures.
+\section{Training a ViT}
+\label{sec:exp-modern-arch}
+% ---------------------------------------------------------------
+We now examine what happens when we train a modern deep architecture by evaluating a small Vision Transformer (ViT) on CIFAR-10.
+\begin{figure}[ht]
+\centering
+\resizebox{\textwidth}{!}{\input{drawings/vit_drawing}}
+\caption{Architecture of the small ViT used for the CIFAR-10 experiment.}
+\label{fig:vit-architecture}
+\end{figure}
+
+\paragraph{Implementing residual blocks.} The residual architecture introduces two new operators. First, the branch operator clones an input $n$ times. We cannot simply copy the tensors because, by default, autograd sums the incoming targets instead of averaging them as required. Second, the add operator, $z = h_{\mathrm{skip}} + h_{\mathrm{out}}$, projects a target by distributing the displacement $\delta = z^{\star}-z$ equally between the two operands.
+\begin{tcolorbox}[reprocard, title=Setup]
+\\
+A small ViT with 4 transformer blocks, a patch size of $4$ and 16 attention heads. $\ell_2$ projection and a batch size of 256.
+\end{tcolorbox}
+
+\begin{figure}[ht]
+    \centering
+    \safeincludegraphics[width=0.9\linewidth]{images/other_benchmarks/attention_CIFAR10_STEP (2).pdf}
+    \caption{Train and validation accuracy per step for the ViT on
+CIFAR-10.}
+    \label{fig:vit-accuracy}
+    \end{figure}
+\paragraph{Interpreting the results.} Considered in isolation, the training
+accuracy of $\sim\!80\%$ appears encouraging; validation accuracy, however, plateaus near $\sim\!50\%$, matching the level of the shallow MLP and remaining
+well below that of a gradient-trained ViT. Introducing regularization or data
+augmentation reduces training accuracy to $\sim\!60\%$. An untuned gradient-based baseline is also provided. It highlights the comparative weakness of the projection-based optimizer by demonstrating that gradient descent yields substantially better results.
+ 
+\paragraph{Limitations.} 
+The reported ViT figures should be regarded as optimistic. They were obtained through
+an automated tuning procedure in which numerous configurations were executed and
+diagnosed under the guidance of a reasoning LLM until one converged, and they
+therefore do not reflect the performance that an arbitrary architecture would achieve without such tuning. Although the ability to train a
+transformer at all is a noteworthy outcome, the approach in its present form
+remains far from a compute-efficient alternative to gradient-based training, and
+we regard it primarily as a proof of computational tractability rather than as a practical method.

@@ -1,0 +1,43 @@
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+\providecolor{KUL-RED}{RGB}{170, 30, 30}
+\providecolor{KUL-ORANGE}{RGB}{230, 140, 0}
+
+\begin{tikzpicture}[scale=1.0, every node/.style={font=\small}]
+  % Define plot limits for the line
+  \def\xmin{-2.5}
+  \def\xmax{2.5}
+  \def\deltaVal{1.0}
+  \def\ymin{-2.0}
+  \def\ymax{2.0}
+
+  % 1. Accepted Region (z_out^0 \le 0) 
+  % Changed from a 2D rectangle to a thick highlighted line segment on the axis
+  \draw[line width=5pt, KUL-BLUE, opacity=0.2] (\xmin, 0) -- (0, 0);
+  \draw[-stealth, thick, KUL-BLUE, opacity=0] (0, \ymin) -- (0, \ymax);
+
+
+  % 2. Main Axis (The Line Plot)
+  \draw[-stealth, thick, KUL-BLUE] (\xmin, 0) -- (\xmax, 0) node[right, black] {$h^{(3)}$};
+
+  % 3. Origin marker (tick mark)
+  \draw[thick] (0, 0.1) -- (0, -0.1);
+  \fill[black] (0,0) circle (1.5pt) node[below=2pt] {$0$};
+
+  % 4. Data Point
+  % Corrected the coordinate to actually sit at x=-2 (previously at x=-1)
+  \fill[KUL-RED!80!black] (-2, 0) circle (2.2pt);
+  \node[above=2pt, font=\tiny, text=black!90] at (-2, 0) {$h_1^{(3)}=-2$};
+
+  % 5. Vertical line/marker at delta
+  \draw[thick, dashed, KUL-ORANGE] (\deltaVal, -0.4) -- (\deltaVal, 0.4);
+  \draw[KUL-ORANGE, fill=white] (\deltaVal, 0) circle (1.5pt) node[below right, black] {$1$};
+
+  % 6. Annotation Box
+  % Moved below the line plot to act as a legend/note without floating in empty 2D space
+  \node[anchor=north west, draw=black!30, fill=white, fill opacity=1.0, text opacity=1,
+        rounded corners=1pt, inner sep=2pt, align=left,
+        text=KUL-BLUE!70!black]
+    at (\xmin, -0.6)
+        {\tikz \draw[KUL-BLUE, fill=KUL-BLUE, fill opacity=0.08] (0,0) rectangle (0.3, 0.15);  \scriptsize $h_1^{(3)}\in A_{13} \cap B_{\mathrm{out}}$};
+BLUE
+\end{tikzpicture}

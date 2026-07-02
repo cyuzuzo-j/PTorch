@@ -189,8 +189,10 @@ class ProjectionMuonV2(torch.optim.Optimizer):
     Converts projection targets into pseudo-gradients (g = p - p_proj) 
     and applies internal Newton-Schulz orthogonalization across distributed ranks.
     """
-    def __init__(self, params, lr: float = 1e-3, momentum: float = 0.95, backend_steps: int = 5, nesterov: bool = True):
-        defaults = dict(lr=lr, momentum=momentum, backend_steps=backend_steps, nesterov=nesterov)
+    def __init__(self, params, lr: float = 1e-3, momentum: float = 0.95, backend_steps: int = 5, nesterov: bool = True,
+                 weight_decay: float = 0.0):
+        defaults = dict(lr=lr, momentum=momentum, backend_steps=backend_steps, nesterov=nesterov,
+                        weight_decay=weight_decay)
         super().__init__(params, defaults)
 
     @torch.no_grad()
@@ -225,6 +227,7 @@ class ProjectionMuonV2(torch.optim.Optimizer):
             momentum = group["momentum"]
             backend_steps = group["backend_steps"]
             nesterov = group["nesterov"]
+            weight_decay = group.get("weight_decay", 0.0)
 
             total_params = sum(int(p.numel()) for p in params)
             updates_flat = torch.zeros(total_params, device=params[0].device, dtype=torch.bfloat16)
@@ -258,6 +261,11 @@ class ProjectionMuonV2(torch.optim.Optimizer):
             curr = 0
             for p in params:
                 g = updates_flat[curr : curr + p.numel()].view_as(p).to(dtype=p.dtype)
+                if weight_decay != 0.0:
+                    # Decoupled (AdamW/Muon-style) decay. Also bounds the
+                    # ||row(A)||-growth feedback that the rel_row activation
+                    # rescale otherwise amplifies late in training.
+                    p.mul_(1.0 - lr * weight_decay)
                 p.add_(g, alpha=-lr)
                 curr += p.numel()
 

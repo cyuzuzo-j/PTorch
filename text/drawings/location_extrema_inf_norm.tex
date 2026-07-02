@@ -1,0 +1,43 @@
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+\providecolor{KUL-ORANGE}{RGB}{230, 140, 0}
+
+\begin{tikzpicture}[>=stealth,every node/.style={font=\small},scale=0.5]
+  % axes
+  \draw[thin,->,black!55] (-3.3,0)--(3.5,0) node[right,text=black]{$\Delta h_k$};
+  \draw[thin,->,black!55] (0,-3.3)--(0,3.5) node[above,text=black]{$\Delta \theta_{k}$};
+  
+  % box (matching the 'op' style fill and draw colors from KUL)
+  \fill[black!8] (-2.4,-2.4) rectangle (2.4,2.4);
+  \draw[thick,black!65] (-2.4,-2.4) rectangle (2.4,2.4);
+
+  % tick marks
+  \foreach \v/\l in {3/{$+\epsilon$},-3/{$-\epsilon$}}{
+    \draw[black!65] (\v,2pt)--(\v,-2pt) node[below,yshift=-2pt,text=black]{\l};
+    \draw[black!65] (2pt,\v)--(-2pt,\v) node[left,xshift=-2pt,text=black]{\l};
+  }
+
+  % --- same-sign pair (KUL-BLUE) ---
+  \fill[KUL-BLUE!85!black] (2.4,2.4) circle (4pt);
+  \fill[KUL-BLUE!85!black] (-2.4,-2.4) circle (4pt);
+
+  \node[KUL-BLUE!85!black,anchor=south west,align=left] at (2.5,2.3)
+    {$\epsilon(h_k+\theta_{k})+\epsilon^2$};
+  \node[KUL-BLUE!85!black,anchor=north east,align=right] at (-2.5,-2.3)
+    {$-\epsilon(h_k+\theta_{k})+\epsilon^2$};
+
+  % dashed line connecting same-sign pair
+  \draw[KUL-BLUE!85!black,dashed,thick] (2.4,2.4)--(-2.4,-2.4);
+
+  % --- opposite-sign pair (KUL-ORANGE) ---
+  \fill[KUL-ORANGE!85!black] (2.4,-2.4) circle (4pt);
+  \fill[KUL-ORANGE!85!black] (-2.4,2.4) circle (4pt);
+
+  \node[KUL-ORANGE!85!black,anchor=north west,align=left] at (2.5,-2.3)
+    {$\epsilon(\theta_{k}-h_k)-\epsilon^2$};
+  \node[KUL-ORANGE!85!black,anchor=south east,align=right] at (-2.5,2.3)
+    {$\epsilon(h_k-\theta_{k})-\epsilon^2$};
+
+  % dashed line connecting opposite-sign pair
+  \draw[KUL-ORANGE!85!black,dashed,thick] (2.4,-2.4)--(-2.4,2.4);
+
+\end{tikzpicture}

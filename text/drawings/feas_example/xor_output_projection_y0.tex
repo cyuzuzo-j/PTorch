@@ -1,0 +1,80 @@
+% XOR Example: Output-threshold projection plot (no preamble).
+% Visualizes acceptance/rejection regions for output consistency and illustrates
+% that the arrows indicate the point AFTER projection onto the constraint set.
+
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+\providecolor{KUL-RED}{RGB}{170, 30, 30}
+\providecolor{KUL-ORANGE}{RGB}{230, 140, 0}
+
+\begin{tikzpicture}[scale=1, every node/.style={font=\small}]
+  % Plot limits
+  \def\xmin{-3}
+  \def\xmax{2.5}
+  \def\ymin{-0.5}
+  \def\ymax{7}
+
+  % Threshold
+  \def\deltaVal{1.0}
+
+  % Bounding box / clip
+  \useasboundingbox (\xmin, \ymin) rectangle (\xmax, \ymax);
+
+  % --- Regions ---
+  % Accepted for negative-label samples: y \le 0
+  \fill[KUL-RED, opacity=0.08] (\xmin, \ymin) rectangle (0, \ymax);
+
+  % Accepted for positive-label samples: y \ge \delta
+  \fill[KUL-ORANGE, opacity=0.08] (\deltaVal, \ymin) rectangle (\xmax, \ymax);
+
+  % Rejected strip: 0 < y < \delta
+  \fill[gray!40, opacity=0.05] (0, \ymin) rectangle (\deltaVal, \ymax);
+
+  % --- Axes ---
+  \draw[-{Stealth}, thick] (\xmin, 0) -- (\xmax, 0) node[below, xshift=-8pt] {$h_b^3$ };
+  \draw[-{Stealth}, thick] (0, \ymin) -- (0, \ymax) node[left, yshift=-8pt] {sample $b$};
+
+  % Markers for 0 and delta
+  \fill[black] (0,0) circle (1.5pt) node[below left, font=\scriptsize] {$0$};
+  \draw[thick, dashed, KUL-ORANGE] (\deltaVal, \ymin) -- (\deltaVal, \ymax);
+  \fill[KUL-ORANGE] (\deltaVal, 0) circle (1.5pt) node[below right, font=\scriptsize] {$1$};
+
+  % Horizontal guide lines + labels
+  \foreach \k in {1,2,3,4} {
+    \draw[black!10, thin] (\xmin, \k) -- (\xmax, \k);
+    \node[left, black!45, font=\scriptsize] at (\xmin, \k) {$b=\k$};
+  }
+
+  % --- Points and projection arrows (illustrative) ---
+  % k=0, negative label: z_out=-2 already feasible, example move to z_out=-1 (still feasible)
+  \fill[KUL-RED!80!black] (-2, 1) circle (2.2pt);
+  \node[above, font=\scriptsize, text=black!70] at (-2, 1) {$h_1^3$};
+  \fill[KUL-RED!80!black] (-1, 1) circle (2.2pt);
+  \draw[-{Stealth}, thick, KUL-BLUE] (-1.85, 1) -- (-1.15, 1);
+
+  % k=1, negative label: z_out=-1 feasible (no move)
+  \fill[KUL-RED!80!black] (-1, 2) circle (2.2pt);
+  \node[left, font=\scriptsize, text=black!70] at (-1, 2) {$h_2^3$};
+
+  % k=2, positive label: z_out=0 projected to z_out=\delta
+  \fill[KUL-ORANGE!85!black] (0, 3) circle (2.2pt);
+  \node[left, font=\scriptsize, text=black!70] at (0, 3) {$h_3^3$};
+  \fill[KUL-ORANGE!85!black] (\deltaVal, 3) circle (2.2pt);
+  \draw[-{Stealth}, thick, KUL-BLUE] (0.12, 3) -- (\deltaVal-0.12, 3);
+
+  % k=3, positive label: z_out=0 projected to z_out=\delta
+  \fill[KUL-ORANGE!85!black] (0, 4) circle (2.2pt);
+  \node[left, font=\scriptsize, text=black!70] at (0, 4) {$h_4^3$};
+  \fill[KUL-ORANGE!85!black] (\deltaVal, 4) circle (2.2pt);
+  \draw[-{Stealth}, thick, KUL-BLUE] (0.12, 4) -- (\deltaVal-0.12, 4);
+
+  % --- Legend (matching style with the (W1,WB) plot) ---
+  \begin{scope}[shift={({\xmin+0.2},{\ymax-2})}]
+    \draw[fill=white, draw=gray] (0, 0) rectangle (4.0, 1.35);
+    \draw[KUL-RED, fill=KUL-RED, fill opacity=0.08] (0.1, 0.85) rectangle (0.35, 1.0);    \node[anchor=west, font=\tiny] at (0.45, 0.925) {accepted for $y_{\mathrm{data}}=0$};
+    
+    \draw[KUL-ORANGE, fill=KUL-ORANGE, fill opacity=0.08] (0.1, 0.6) rectangle (0.35, 0.75);
+    \node[anchor=west, font=\tiny] at (0.45, 0.675) {accepted for $y_{\mathrm{data}}=1$ };
+    \draw[-{Stealth}, thick, KUL-BLUE] (0.12, 0.18) -- (0.33, 0.18);
+    \node[anchor=west, font=\tiny] at (0.45, 0.18) {parameter update};
+  \end{scope}
+\end{tikzpicture}

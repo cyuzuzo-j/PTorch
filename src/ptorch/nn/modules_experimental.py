@@ -17,7 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ..config import config
-from ..core.ops import MatMulProjection, SoftmaxProjection, RMSNormProjection, Conversion as ConversionFn, SeqMaxPoolProjection, SeqAvgPoolProjection, BranchProjection
+from ..core.ops import MatMulProjection, SoftmaxProjection, RMSNormProjection, Conversion as ConversionFn, SeqMaxPoolProjection, SeqAvgPoolProjection, BranchProjection, HardtanhProjection, td_repeat_target
 from .modules import Linear, ProjectionModule
 
 class GQAConsensusProjection(torch.autograd.Function):
@@ -77,22 +77,27 @@ class Expand(nn.Module):
 
 class Branch(nn.Module):
     """Returns ``num_branches`` references of the input. In projection mode each
-    reference is wrapped with its own ``BranchProjection.apply(x, N)`` so the
-    gradient flowing back to ``x`` is the *average* of the per-branch gradients
-    instead of their sum. In non-projection mode this is a plain identity tuple
+    reference is wrapped with its own ``BranchProjection.apply(x, N, mode)``.
+    With ``mode="mean"`` (legacy default) the target flowing back to ``x`` is
+    the *average* of the per-branch targets; with ``mode="delta_sum"`` it is
+    ``x + sum_i (t_i - x)``, the backprop fan-out analog that preserves gain-1
+    skip paths in residual nets. ``mode=None`` defers to ``config.branch_mode``
+    at call time. In non-projection mode this is a plain identity tuple
     (standard summing preserved).
 
     Returning independent references (rather than a single shared one) keeps
     ``MultiheadAttention``'s ``q is k and k is v`` self-attention check inert,
     avoiding a second BranchProjection wrap inside the attention module.
     """
-    def __init__(self, num_branches: int):
+    def __init__(self, num_branches: int, mode: Optional[str] = None):
         super().__init__()
         self.num_branches = int(num_branches)
+        self.mode = mode
 
     def forward(self, x: torch.Tensor):
         if config.use_projections:
-            return tuple(BranchProjection.apply(x, self.num_branches)
+            mode = self.mode if self.mode is not None else config.branch_mode
+            return tuple(BranchProjection.apply(x, self.num_branches, mode)
                          for _ in range(self.num_branches))
         return tuple(x for _ in range(self.num_branches))
 
@@ -140,6 +145,25 @@ class RMSNorm(ProjectionModule):
         return F.rms_norm(x, (x.size(-1),), eps=self.eps)
 
 
+class DyT(ProjectionModule):
+    """Normalization-free DyT-style layer: y = clamp(alpha * x, -1, 1).
+
+    Drop-in alternative to RMSNorm whose backward is an *exact* closed-form
+    graph projection (HardtanhProjection) rather than a renormalizing
+    reconstruction — it preserves per-token magnitude information and cannot
+    amplify vanished targets. alpha is a fixed gain (learnable alpha would
+    need its own bilinear projection treatment).
+    """
+    def __init__(self, alpha: float = 0.5):
+        super().__init__(1)
+        self.alpha = float(alpha)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if config.use_projections:
+            return HardtanhProjection.apply(x, self.alpha)
+        return torch.clamp(self.alpha * x, -1.0, 1.0)
+
+
 def apply_rotary_emb(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
     """Applies the rotary embedding to the input tensor."""
     half = x.size(-1) // 2
@@ -175,11 +199,13 @@ class RotaryFunction(torch.autograd.Function):
         rt_z_target = apply_rotary_emb(z_target, cos, -sin)
         
         # 3. Exact L2 Projection onto the constraint z = R * x
-        # The optimal target for the input is the midpoint between the forward input 
+        # The optimal target for the input is the midpoint between the forward input
         # and the inversely-rotated target output.
         x_bar = (x + rt_z_target) / 2.0
-        
-        return x_bar, None, None
+
+        # Direction-pipe repeater: the midpoint halves the residual like the
+        # active ReLU branch; restore its amplitude (no-op at td_lambda=0).
+        return td_repeat_target(x, x_bar), None, None
 
 
 class Rotary(nn.Module):
@@ -247,20 +273,27 @@ class MultiheadAttention(nn.Module):
         rope_base: float,
         qk_gain_init: float,
         norm: str = "l2",
+        qk_match_g_to_omega: bool = False,
     ):
         super().__init__()
         if dim % num_heads != 0:
             raise ValueError("dim must be divisible by num_heads")
         if num_heads % num_kv_heads != 0:
             raise ValueError("num_heads must be divisible by num_kv_heads")
-        
+
         self.num_heads = num_heads
         self.num_kv_heads = num_kv_heads
         self.head_dim = dim // num_heads
-        
+        # With omega=sqrt(head_dim) and g=1, matmul_proj's target_penalty
+        # (omega/g)^2 = head_dim makes the QK^T solve dump the constraint gap
+        # into the *discarded* Z_proj instead of moving q,k. Matching g to
+        # omega restores target_penalty = 1 so the scale factor stops
+        # weakening the learning signal into the q/k projections.
+        self.qk_match_g_to_omega = qk_match_g_to_omega
+
         if self.head_dim % 2 != 0:
             raise ValueError("head_dim must be even for RoPE")
-            
+
         kv_dim = self.num_kv_heads * self.head_dim
 
         self.c_q = Linear(dim, dim, bias=False, norm=norm)
@@ -273,21 +306,22 @@ class MultiheadAttention(nn.Module):
         self.k_norm = RMSNorm()
 
     def _project_pairwise_matmul(self, left: torch.Tensor, right: torch.Tensor,
-                                  omega: float = 1.0) -> torch.Tensor:
+                                  omega: float = 1.0,
+                                  g: Optional[float] = None) -> torch.Tensor:
         if not config.use_projections:
             return (left @ right) / omega
         return MatMulProjection.apply(
             left, right, 5,
             config.projection_alpha,
-            config.projection_g,
+            g if g is not None else config.projection_g,
             omega, None, True, None,
         )
 
     def forward(
-        self, 
-        q: torch.Tensor, 
-        k: torch.Tensor, 
-        v: torch.Tensor, 
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
         attn_mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         bsz, seqlen_q, dim = q.shape
@@ -320,7 +354,10 @@ class MultiheadAttention(nn.Module):
                 v_proj = v_proj.unsqueeze(2).expand(-1, -1, group_size, -1, -1).reshape(bsz, self.num_heads, seqlen_k, self.head_dim)
 
         scale = (self.head_dim ** 0.5)
-        qk = self._project_pairwise_matmul(q_proj, k_proj.transpose(-2, -1), omega=scale)
+        qk = self._project_pairwise_matmul(
+            q_proj, k_proj.transpose(-2, -1), omega=scale,
+            g=scale if self.qk_match_g_to_omega else None,
+        )
 
         # Masking
         if attn_mask is not None:
@@ -353,6 +390,7 @@ class CausalSelfAttention(nn.Module):
         rope_base: float,
         qk_gain_init: float,
         norm: str = "l2",
+        qk_match_g_to_omega: bool = False,
     ):
         super().__init__()
         if dim % num_heads != 0:
@@ -362,6 +400,7 @@ class CausalSelfAttention(nn.Module):
         self.num_heads = num_heads
         self.num_kv_heads = num_kv_heads
         self.head_dim = dim // num_heads
+        self.qk_match_g_to_omega = qk_match_g_to_omega
         if self.head_dim % 2 != 0:
             raise ValueError("head_dim must be even for RoPE")
         kv_dim = self.num_kv_heads * self.head_dim
@@ -376,13 +415,14 @@ class CausalSelfAttention(nn.Module):
         self.k_norm = RMSNorm()
 
     def _project_pairwise_matmul(self, left: torch.Tensor, right: torch.Tensor,
-                                  omega: float = 1.0) -> torch.Tensor:
+                                  omega: float = 1.0,
+                                  g: Optional[float] = None) -> torch.Tensor:
         if not config.use_projections:
             return (left @ right) / omega
         return MatMulProjection.apply(
             left, right, 5,
             config.projection_alpha,
-            config.projection_g,
+            g if g is not None else config.projection_g,
             omega, None, True, None,
         )
 
@@ -415,7 +455,10 @@ class CausalSelfAttention(nn.Module):
                 v = v.unsqueeze(2).expand(-1, -1, group_size, -1, -1).reshape(bsz, self.num_heads, seqlen, self.head_dim)
 
         scale = (self.head_dim ** 0.5)
-        qk = self._project_pairwise_matmul(q, k.transpose(-2, -1), omega=scale)
+        qk = self._project_pairwise_matmul(
+            q, k.transpose(-2, -1), omega=scale,
+            g=scale if self.qk_match_g_to_omega else None,
+        )
 
         causal_mask = torch.triu(
             torch.full((seqlen, seqlen), float("-inf"), device=x.device, dtype=qk.dtype),

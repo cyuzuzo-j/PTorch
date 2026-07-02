@@ -1,0 +1,281 @@
+\chapter{Neural networks as a feasibility problem} \label{sec:nn_feas}
+
+\section{The Intuition}
+Conceptually, a neural network can be viewed as a sequence of interlocking constraints. Each layer imposes a precise mathematical relationship: its output must equal a transformation of its inputs. The overall goal of training is for the network to interpolate or approximate a target dataset. By fixing the network inputs to the data and the outputs to the ground-truth labels, we impose global boundary conditions that generally violate the network's internal constraints. Training therefore amounts to iteratively resolving these local inconsistencies.  Rather than computing global gradients that must be propagated through the chain rule, the algorithm solves a local optimization problem at each layer: 
+\vspace{0.5em}
+
+\textit{What is the minimal adjustment to the local weights, inputs, and outputs needed to exactly re-satisfy the layer constraint?}
+
+\vspace{0.5em}
+By repeatedly applying these local projections from the output back to the input, a learning signal is propagated naturally through the network without requiring gradients.
+
+\section{Mathematical description} \label{sec:math_desc}
+
+ %Because this is a novel radient-free paradigm may be unfamiliar in practice, a complete walkthrough is provided in \Cref{app:walk-through}.
+We first consider the deterministic case, where we have access to the full dataset $\{(x_1, y_1), \ldots, (x_B, y_B)\}$. Suppose we have a neural network with $\theta^{(1)}, \ldots, \theta^{(N)}$ as. For ease of presentation, we assume the network has a chain structure, although the extension to more complex topologies is straightforward. In particular, the forward pass for a single sample $(x_b, y_b)$ can be written as
+\begin{align*}
+    h^{(0)}_b &= x_b \\
+    h^{(i+1)}_b &= f_{i+1}(h^{(i)}_b, \theta^{(i+1)}), \quad 
+    i=0,\ldots,N-1
+\end{align*}
+for some functions $f_1, \ldots, f_N$. The output of the network is given by $h^{(N)}$.
+
+\begin{example}
+    Let $\theta^i$ be a matrix, $\Sigma$ an activation function and $h_b^{(i-1)}$ a vector. Then $f_i(h^{(i-1)}_b, \theta^{(i)}) = \theta^i h^{(i-1)}_b$ followed by $f_{i+1}(h^{(i)}_b, \theta^{(i+1)}) = \Sigma(h^{(i)}_b)$ is the standard building block of a multilayer perceptron. Note that $\theta^{(i+1)}$ is an ``empty'' variable in this case.
+\end{example}
+We now proceed to model neural network training as a feasibility problem in a high-dimensional space. Following the framework of \cite{elser2019learning, bergmeister2025projection}, we associate auxiliary variables $\Omega_b =\{h^{(0)}_b, \ldots, h^{(N)}_b, \theta^{(1)}_b, \ldots, \theta_b^{(N)}\}$ with each datapoint $(x_b, y_b)$. Such variables are also introduced in~\cite{carreira2014distributed} where a penalty-based approach is used instead. The feasibility problem consists of finding an $\omega = (\Omega_1, \ldots, \Omega_B)$ in the intersection of some well-chosen constraint sets
+\begin{equation} \label{eq:feasibility} \tag{P}
+    \textnormal{find } \omega \in \left(\bigcap_{b=1}^B\bigcap_{i=1}^N A_{bi}\right) \bigcap \left(B_{\mathrm{in}} \cap B_{\mathrm{out}}\right) \bigcap \left(\bigcap_{i=1}^N C_i\right).
+\end{equation}
+For neural network training, there are three types of constraints:
+
+\begin{enumerate}
+    \item \textbf{A}rchitectural constraints: Every layer must satisfy its corresponding input-output transformation. In particular, $\omega \in A_{bi}$ ensures that $h_b^{(i)} = f_i(h_b^{(i-1)}, \theta_b^{(i)})$ for the $b$th datapoint and the $i$th layer.
+    \item \textbf{B}atch (data) constraints: The inputs and outputs of the network are fixed to match the current training batch, i.e., $\omega \in B_{\mathrm{in}} \cap B_{\mathrm{out}}$ means that $h_b^{(0)} = x_b$ and $h_b^{(N)} = y_b$ for each $b=1,\ldots,B$.
+    \item \textbf{C}onsensus constraints: The duplicated variables must have a single consistent value. Concretely, $\omega \in C_i$ yields $\theta_1^{(i)} = \cdots = \theta_B^{(i)}$ for the $i$th layer. 
+\end{enumerate}
+
+
+If the problem is feasible, then an equivalent minimization problem is
+\begin{align*}
+    F(\omega) &\coloneqq \frac{1}{2}\left\{\sum_{b=1}^B \sum_{i=1}^N \dist^2(A_{bi}, \omega)   + \dist^2(B_{\mathrm{in}}, \omega) + \dist^2(B_{\mathrm{out}}, \omega) + \sum_{i=1}^N \dist^2(C_i, \omega)\right\} \\
+    \omega^\star &\in \argmin_{\omega\in\Omega} F(\omega)
+\end{align*}
+
+where $\dist^2(C, \omega) = \min_{\bar\omega\in C} \|\omega - \bar\omega\|^2$ for a closed set $C$. Indeed, because the squared distance to any set is nonnegative, the global minimum achieves $F(\omega^\star) = 0$ if and only if $\omega^\star$ perfectly satisfies all constraints simultaneously, meaning it lies in the intersection of all defined sets.
+\label{sec:feasibility}
+\vspace{0.5em}
+\begin{tcolorbox}[shift_card]
+To summarize, if we find an $\omega$ solving \eqref{eq:feasibility}, then the parameters $\theta^{(1)}, \ldots, \theta^{(N)}$ which are equal over all datapoints due to the consensus constraint allow the neural network to perfectly interpolate the data.
+\end{tcolorbox}
+\vspace{0.5em}
+
+Algorithms to solve feasibility problems utilize projections instead of gradients. In particular, we define the Euclidean projection of $x$ onto a set $C$ by $\Pi_C(\omega) = \argmin_{\bar \omega\in C} \|\omega - \bar\omega\|_2$. This operator is known to be related to the gradient of the squared distance $\dist^2(C,\omega)$. We will later exploit this connection to motivate a nonlinearly relaxed variant of the method we propose.
+
+\begin{example} \label{ex:consensus}
+    For the consensus set $C = \{(x_1, \ldots, x_B) : x_1 = \cdots = x_B\}$, we have that $\Pi_C((y_1, \ldots, y_B)) = (\tilde y, \ldots, \tilde y)$ where $\tilde y$ is the average $\frac{1}{B}\sum_{i=1}^B y_i$. Other well-known projections for neural networks can be found in \cref{sec:projections}.
+\end{example}
+\section{Illustrative example: feasibility-based training of XOR classifier}
+\label{sec:feas}
+\subsection{Problem definition: why XOR?}
+Inspired by the boolean classification example in \cite{elser2019learning}, we use the
+XOR classification task because it is simple to visualize yet not linearly separable,
+which makes it a convenient showcase for neural network optimization methods. We consider the dataset $\{(x_b, y_b)\}_{b=1}^B$ with $B=4$, binary inputs
+$x_b = (x_b[0], x_b[1]) \in \{0,1\}^2$ and labels
+\begin{equation*}
+y_b = x_b[0] \oplus x_b[1],
+\end{equation*}
+where $\oplus$ denotes XOR. The four
+points form the classic nonlinearly separable pattern shown in
+Figure~\ref{fig:xor-problem}.
+
+\begin{figure}[ht]
+\centering
+\input{drawings/feas_example/xot_plot}
+\caption{The XOR dataset in $\mathbb{R}^2$ is not linearly separable.}
+\label{fig:xor-problem}
+\end{figure}
+\subsection{Network architecture}
+To solve the XOR task within our feasibility-based framework, we employ a Multi-Layer Perceptron with a single hidden layer.  The forward mapping is defined as the sequence:
+\begin{align*}
+    h^{(1)} &= \theta^{(1)} \begin{bmatrix} x_b \\ 1 \end{bmatrix}, \\
+    h^{(2)} &= \Sigma(h^{(1)}), \\
+    h^{(3)} &= \theta^{(3)} \begin{bmatrix} h^{(2)} \\ 1 \end{bmatrix}.
+\end{align*}
+where $\theta^{(1)} \in \mathbb{R}^{2 \times 3}$ is the hidden layer weight matrix, step activation function $\Sigma(\cdot)$, and $\theta^{(3)} \in \mathbb{R}^{1 \times 3}$ is the output layer weight matrix. To handle bias terms uniformly a constant $1$ is appended to the input vectors and hidden activations. 
+To obtain an example that can be visualised cleanly the first layer $\theta^{(1)}$ has been fixed to its optimal value and we freeze the middle weight of the output layer at its initial value $\theta^{(3)}[1] = -2$. The two other output layer parameters, $\theta^{(3)}[0]$ and $\theta^{(3)}[2]$ are being optimized. $\theta^{(2)}$ corresponds to the activation-function layer; because this layer has no trainable weights it is left empty. The initial parameter values before training are:
+\begin{equation*}
+  \theta^{(1)}_{\mathrm{optimal}} =
+\begin{bmatrix} 1 & 1 & -1 \\ 1 & 1 & -2 \end{bmatrix}, \qquad
+\theta^{(3)}_{\mathrm{init}} =
+\begin{bmatrix} 1 & -2 & -1 \end{bmatrix}.
+\end{equation*}
+ For the output batch constraint, instead of requiring the output to equal the data exactly. We require positive-class scores to exceed $0$ by at least $\delta$ and negative cases to be smaller than $0$. 
+
+\begin{figure}[ht]
+\centering
+\begin{adjustbox}{max width=\textwidth, max totalheight=0.1\textheight, center}
+\input{drawings/feas_example/xor_forward_graph}
+\end{adjustbox}
+\caption{The neural network used in the XOR example}
+\end{figure}
+
+\subsubsection{Visualization of optimization}
+We now solve the feasibility problem, demonstrating that when all constraints are satisfied, the model perfectly interpolates the data. This also provides intuition for how constraint satisfaction leads to neural network optimization.
+\paragraph{sample $b=1$ with $x_1[0]=1$, $x_1[1]=1$ $\Rightarrow$
+$h_1^{(2)} =\begin{bmatrix} 1 \\ 1 \end{bmatrix}$.}
+
+\begin{enumerate}
+  \item \textbf{B}atch constraint: Since $x_1[0]=x_1[1]$, the XOR label $y_1=0$. Output consistency therefore requires the output to lie on the negative side of the decision boundary:
+\begin{equation*}
+h_1^{(3)} \le 0.
+\end{equation*}
+
+\item \textbf{A}rchitectural constraint: The output layer must be a valid matrix multiplication:
+\begin{equation*}
+h_1^{(3)} = \theta_1^{(3)} \begin{bmatrix} h_1^{(2)} \\ 1 \end{bmatrix}
+= \theta_1^{(3)}[0] - 2 + \theta_1^{(3)}[2],
+\end{equation*}
+where the constant $-2$ is the contribution of the artificially frozen middle weight.
+\end{enumerate}
+Intersecting the batch and architectural
+constraints gives the feasible set for the output-layer variables of
+sample~$1$:
+\begin{equation*}
+  \bigl(\theta_1^{(3)},\, h_1^{(3)}\bigr) \in A_{13}  \cap B_{\mathrm{out}} \qquad
+  A_{13}  \cap B_{\mathrm{out}} := \bigl\{(\theta,h) \,:\, h = \theta[0] - 2 + \theta[2],\; h \le 0\bigr\}.
+\end{equation*}
+The blue regions in the figures below mark the feasible sets: parameters lying inside them produce outputs consistent with the constraints.
+
+\begin{figure}[h]
+\vspace{0.5em}
+\centering
+\begin{subfigure}[t]{0.48\textwidth}
+\centering
+\input{drawings/feas_example/xor_constraints_w1_wb}
+\caption{Slice of $A_{13}  \cap B_{\mathrm{out}}$ showing the feasible parameters.}
+\label{fig:xor_output_relation_w1_wb}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.48\textwidth}
+\centering
+\input{drawings/feas_example/xor_accepted_y_neg_label}
+\caption{Slice of $A_{13}  \cap B_{\mathrm{out}}$ in the output variable $h_1^{(3)}$, showing the
+admissible region $h_1^{(3)} \le 0$.}
+\label{fig:xor_neg_y}
+\end{subfigure}
+\label{fig:xor_output_relation}
+\end{figure}
+\paragraph{sample $b=2$ with $x_2[0]=0$, $x_2[1]=0$ $\Rightarrow$
+$h_2^{(2)} =\begin{bmatrix} 0 \\ 0 \end{bmatrix}$.}
+
+\begin{enumerate}
+  \item \textbf{B}atch constraint: Since $x_2[0]=x_2[1]$, the XOR label $y_2=0$. Output consistency therefore requires the output to lie on the negative side of the decision boundary:
+\begin{equation*}
+h_2^{(3)} \le 0.
+\end{equation*}
+
+\item \textbf{A}rchitectural constraint: The output layer must still be a valid matrix multiplication.
+\begin{equation*}
+h_2^{(3)} = \theta_2^{(3)}  \begin{bmatrix} h_2^{(2)} \\ 1 \end{bmatrix}
+= \theta_2^{(3)}[2].
+\end{equation*}
+\end{enumerate}
+Intersecting the batch and architectural
+constraints gives the feasible set for the copied output-layer variables of
+sample~$2$:
+\begin{equation*}
+  \bigl(\theta_2^{(3)},\, h_2^{(3)}\bigr) \in A_{23}  \cap B_{\mathrm{out}} \qquad
+  A_{23}  \cap B_{\mathrm{out}} := \bigl\{(\theta,h) \,:\, h = \theta[2],\; h \le 0\bigr\}.
+\end{equation*}
+\begin{figure}[h]
+\centering
+\begin{subfigure}[t]{0.48\textwidth}
+\centering
+\input{drawings/feas_example/xor_constraints_wb_only}
+\caption{Slice of Solution set $A_{23}  \cap B_{\mathrm{out}}$.}
+\label{fig:xor_constraints_wb_only}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.48\textwidth}
+\centering
+\input{drawings/feas_example/xor_accepted_wb_neg_label}
+\caption{Slice of $A_{23}  \cap B_{\mathrm{out}}$ in the output variable $h_2^{(3)}$.}
+\label{fig:xor_accepted_wb_neg_label}
+\end{subfigure}
+\caption{Solution sets for the sample with $x_2[0]=0$, $x_2[1]=0$ and $y_2=0$.}
+\label{fig:xor_output_relation_wb_only}
+\end{figure}
+
+\paragraph{sample $b=3$ with $x_3[0]=0$, $x_3[1]=1$ $\Rightarrow$
+$h_3^{(2)} =\begin{bmatrix} 1 \\ 0 \end{bmatrix}$.}
+
+\begin{enumerate}
+  \item \textbf{B}atch constraint: Since $x_3[0]\ne x_3[1]$, the XOR label $y_3=1$. 
+\begin{equation*}
+h_3^{(3)} \ge \delta.
+\end{equation*}
+
+\item \textbf{A}rchitectural constraint: The output layer must be a valid matrix multiplication:
+\begin{equation*}
+h_3^{(3)} = \theta_3^{(3)} \begin{bmatrix} h_3^{(2)} \\ 1 \end{bmatrix}
+= \theta_3^{(3)}[0] + \theta_3^{(3)}[2],
+\end{equation*}
+\end{enumerate}
+Intersecting the batch and architectural constraints gives:
+\begin{equation*}
+  \bigl(\theta_3^{(3)},\, h_3^{(3)}\bigr) \in A_{33} \cap B_{\mathrm{out}} \qquad
+  A_{33} \cap B_{\mathrm{out}} := \bigl\{(\theta,h) \,:\, h = \theta[0] + \theta[2],\; h \ge \delta\bigr\}.
+\end{equation*}
+With the initial parameters $\theta_3^{(3)}[0] = 1$ and $\theta_3^{(3)}[2] = -1$,
+the prediction is $h_3^{(3)} = 0$, which violates $h_3^{(3)} \ge \delta$ and is therefore inconsistent with the data.
+\\
+\begin{figure}[h]
+\centering
+\begin{subfigure}[t]{0.48\textwidth}
+\centering
+\input{drawings/feas_example/xor_constraints_w1_wb_pos}
+\caption{Slice of Solution set $A_{33} \cap B_{\mathrm{out}}$}
+\label{fig:xor_output_relation_w1_wb_pos}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.48\textwidth}
+\centering
+\input{drawings/feas_example/xor_accepted_y_pos_label}
+\caption{Slice of $A_{(3/4)3}  \cap B_{\mathrm{out}}$ in the output variable }
+\label{fig:xor_pos_y}
+\end{subfigure}
+\label{fig:xor_output_relation_pos}
+\end{figure}
+
+\paragraph{Case $b=4$ with $x_4[0]=1$, $x_4[1]=0$ $\Rightarrow$
+$h_4^{(2)} =\begin{bmatrix} 1 \\ 0 \end{bmatrix}$.}
+
+\begin{enumerate}
+  \item \textbf{B}atch constraint: Since $x_4[0]\ne x_4[1]$, the XOR label is $y_4=1$. 
+\begin{equation*}
+h_4^{(3)} \ge \delta.
+\end{equation*}
+
+\item \textbf{A}rchitectural constraint: The output layer must be a valid matrix multiplication:
+\begin{equation*}
+h_4^{(3)} = \theta_4^{(3)}  \begin{bmatrix} h_4^{(2)} \\ 1 \end{bmatrix}
+= \theta_4^{(3)}[0] + \theta_4^{(3)}[2],
+\end{equation*}
+\end{enumerate} 
+Intersecting the batch and architectural gives:
+\begin{equation*}
+  \bigl(\theta_4^{(3)},\, h_4^{(3)}\bigr) \in A_{43} \cap B_{\mathrm{out}}, \qquad
+  A_{43} \cap B_{\mathrm{out}} := \bigl\{(\theta,h) \,:\, h = \theta[0] + \theta[2],\; h \ge \delta\bigr\}.
+\end{equation*}
+Thus $A_{43} \cap B_{\mathrm{out}} = A_{33} \cap B_{\mathrm{out}}$ up to relabelling of the per-sample weight copy.
+
+\paragraph{Consensus between samples.}
+Each $A_{b3}$ constrains its own per-sample weight copy $\theta_b^{(3)}$. The consensus constraint $C_3$ ties these copies together: a globally feasible solution is a tuple
+\begin{equation*}
+  \bigl(\theta^{(3)}[0],\, \theta^{(3)}[2],\,
+             h_1^{(3)},\, h_2^{(3)},\, h_3^{(3)},\, h_4^{(3)}\bigr)
+\in B_{\mathrm{out}}\cap C_3 \cap \bigcap_{b=1}^{4} A_{b3} ,
+\end{equation*}
+
+The figures below overlays the constraints from the previous figures. Collecting the four per-sample slices, the combined feasible region in the  is highlighted in green. Any point in the highlighted region satisfies all four per-sample constraints simultaneously and therefore corresponds to weights that perfectly interpolate the training data.
+\\
+This can be seen on figure \ref{fig:xor_constraints_combined_w1_wb} where it can be seen that when updating the parameters to the feasible region the hidden activations change in such a way that all of the constraints are satisfied.
+\begin{figure}[ht]
+\centering
+\begin{subfigure}[t]{0.35\textwidth}
+\centering
+\input{drawings/feas_example/xor_final_constraints_w1_wb}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.4\textwidth}
+\centering
+\input{drawings/feas_example/xor_output_projection_y0}
+\end{subfigure}
+\caption{Combined constraints with the feasible region highlighted.}
+\label{fig:xor_constraints_combined_w1_wb}
+
+\end{figure}
+
+While this example is highly artificial, it hopefully provides a visual intuition for the method and clarifies how we move from setting constraints to interpolating the data
+

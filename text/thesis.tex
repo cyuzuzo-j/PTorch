@@ -1,0 +1,124 @@
+\documentclass[master=ai,openany]{kulemt}
+\usepackage{silence}
+\WarningFilter{latex}{Command \showhyphens has changed}
+\setup{
+  title={\texorpdfstring{$\mathcal{P}$Torch}{��Torch}: Narrowing the Gap Between Projection and Gradient--Based Learning},
+  author={Jeff Cyuzuzo Jambé},
+  promotor={Prof.\,dr.\,ir.\,Panos Patrinos},
+  assessor={Prof.\,dr.\,ir.\,Raf Vandebril\\ Prof.\,dr.\,ir.\,Matthew Blaschko},
+  assistant={Ir.\,Jan Quan}}
+\usepackage{lmodern}
+\usepackage{mathrsfs}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[pdfusetitle,colorlinks,plainpages=false]{hyperref}
+\usepackage{url}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath,amsthm,epsfig,amssymb,amsbsy,mathrsfs,mathtools}
+\usepackage{amsfonts}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{enumerate}
+\usepackage{bbm}
+\usepackage{dsfont}
+\usepackage{algorithm}
+\usepackage{adjustbox}
+\usepackage{subcaption}
+\usepackage{algpseudocode}
+\usepackage{multirow,makecell}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage[capitalize,noabbrev]{cleveref}
+\usepackage[most]{tcolorbox}
+\usepackage[manual]{kulemtx}
+
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds}
+\DeclareMathOperator{\prox}{prox}
+
+\DeclareMathOperator*{\minimize}{minimize}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\newcommand{\dist}{\operatorname{dist}}
+\providecommand{\citet}[1]{\cite{#1}}
+\providecommand{\citep}[1]{\cite{#1}}
+\newtheorem{assumption}{Assumption}[chapter]
+\newtheorem{example}{Example}[chapter]
+
+\newcommand{\missingasset}[1]{%
+    \fbox{%
+        \parbox[c][0.18\textheight][c]{0.9\linewidth}{%
+            \centering Missing asset\\[0.35em]\path{#1}%
+        }%
+    }%
+}
+
+\newcommand{\safeinputdiagram}[2]{%
+    \IfFileExists{#1.tex}{\resizebox{#2}{!}{\input{#1}}}{\missingasset{#1.tex}}%
+}
+
+\newcommand{\safeincludegraphics}[2][]{%
+    \IfFileExists{#2}{\includegraphics[#1]{#2}}{\missingasset{#2}}%
+}
+
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+\providecolor{KUL-RED}{RGB}{170, 30, 30}
+\providecolor{KUL-ORANGE}{RGB}{230, 140, 0}
+
+\makeatletter
+\AddToHook{cmd/appendix/before}{\def\cref@chapter@alias{appendix}\def\cref@section@alias{appendix}\def\cref@subsection@alias{appendix}}
+\makeatother
+
+\begin{document}
+
+\tableofcontents*
+\begin{preface}
+Before starting to talk about projections and weird optimizers, I would like to thank Jan Quan for all of his support and ideas throughout this project, constantly supporting my weird ideas, hearing me out, providing me with incredibly valuable feedback, and formalizing the mathematics. Even more so while writing the associated paper, I am incredibly thankful for the support and working with me through the night to get it over the line; I couldn't have imagined a better assistant-supervisor. I would also like to thank Prof.\,Panos Patrinos for giving me the opportunity and supporting me in writing a NeurIPS paper, helping me understand how to write an academic paper. Naturally, I would also like to thank my family and friends for providing me with the mental support to not go crazy while writing this.
+\end{preface}
+
+\begin{abstract}
+Modern deep learning relies almost exclusively on gradient-based optimization.
+Projection-based optimization, which recasts training as a feasibility problem
+over architectural, data, and consensus constraints, offers a gradient-free
+alternative, but the existing framework suffer from high computational and memory
+costs, poor scaling with depth, and limited integration with modern deep
+learning infrastructure. We introduce $\mathcal{P}$Torch, a projection-based framework
+built directly on PyTorch's \texttt{autograd} engine by reinterpreting each node's
+backward pass as a local projection. We establish a connection between cyclic
+projections and incremental gradient descent, which lets standard first-order
+optimizers such as Adam and Muon act as nonlinear relaxation schemes, and we
+reduce peak memory through a fused linear-layer projection that eliminates the
+per-sample parameter duplication of prior methods. Together with a proximal loss
+formulation, these make $\mathcal{P}$Torch competitive with gradient-based baselines on
+shallow MLPs for MNIST and CIFAR-10. Finally, we prove a vanishing-target
+theorem showing that the layer-wise learning signal decays with depth,
+providing a projection-based analogue of the vanishing-gradient problem and
+clarifying a central barrier to scaling these methods.
+\end{abstract}
+\chapter{Samenvatting}
+Moderne deep learning steunt vrijwel uitsluitend op gradiëntgebaseerde optimalisatie. Projectiegebaseerde optimalisatie, die het trainen herformuleert als een haalbaarheidsprobleem over architecturale, data- en consensusbeperkingen, biedt een gradiëntvrij alternatief, maar de bestaande frameworks kampen met hoge reken- en geheugenkosten, slechte schaalbaarheid met de diepte, en beperkte integratie met moderne deep-learning-infrastructuur. Wij introduceren $\mathcal{P}$Torch, een projectiegebaseerd framework dat rechtstreeks op de \texttt{autograd}-engine van PyTorch is gebouwd door de backward pass van elke node te herinterpreteren als een lokale projectie. We leggen een verband tussen cyclische projecties en incrementele gradient descent, waardoor standaard eerste-orde-optimizers zoals Adam en Muon kunnen fungeren als niet-lineaire relaxatieschema's, en we verlagen het piekgeheugen door middel van een gefuseerde projecties die de per-sample parameterduplicatie van eerdere methoden elimineert. Dit maakt $\mathcal{P}
+$Torch competitief met gradiëntgebaseerde methoden op ondiepe MLP's voor MNIST en CIFAR-10. Ten slotte bewijzen we een verdwijnend-target-stelling die aantoont dat het laaggewijze leersignaal afneemt met de diepte, wat een projectiegebaseerd analoog van het verdwijnende-gradiëntprobleem oplevert en een centrale barrière voor het opschalen van deze methoden verheldert.
+\listoffiguresandtables
+
+\mainmatter
+\include{chapter-1}
+\include{chapter-2}
+\include{chapter-3}
+\include{chapter-4}
+\include{chapter-5}
+\include{chapter-6}
+\appendixpage*
+\appendix
+\include{appendix-1}
+\include{appendix-2}
+\include{appendix-3}
+\include{appendix-4}
+\include{appendix-5}
+\include{appendix-6}
+
+\backmatter
+\bibliographystyle{abbrv}
+\bibliography{references}
+\include{CoC}
+\end{document}

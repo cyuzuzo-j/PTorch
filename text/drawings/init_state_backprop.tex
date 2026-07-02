@@ -1,0 +1,48 @@
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+\providecolor{KUL-ORANGE}{RGB}{230, 140, 0}
+
+\begin{tikzpicture}[
+    scale=0.95,
+    transform shape,
+    font=\small,
+    >=Stealth,
+    op/.style={rectangle, rounded corners=1pt, draw=black!65, fill=black!8, thick, minimum width=2.2cm, minimum height=1.0cm, align=center},
+    param/.style={circle, draw=black!65, fill=black!10, text=black, thick, minimum size=1.2cm, inner sep=1pt, align=center},
+    state/.style={circle, draw=black!65, fill=black!5, text=black, thick, minimum size=1.0cm, inner sep=1pt, align=center},
+    io/.style={circle, draw=black!65, fill=black!5, text=black, thick, minimum size=0.78cm, inner sep=1pt, align=center},
+    focusState/.style={circle, draw=KUL-BLUE!85!black, fill=KUL-BLUE!12, thick, minimum size=1.4cm, inner sep=1pt, align=center},
+    focusIo/.style={circle, draw=KUL-BLUE!85!black, fill=KUL-BLUE!12, thick, minimum size=0.95cm, inner sep=1pt, align=center},
+    focusLoss/.style={rectangle, rounded corners=1pt, draw=KUL-ORANGE!85!black, fill=KUL-ORANGE!15, thick, minimum width=2.9cm, minimum height=1.1cm, align=center},
+    flow/.style={->, thick, black!55},
+    active/.style={->, thick, KUL-BLUE!85!black},
+    support/.style={->, thick, black!50}
+]
+    % Nodes defining the 1-hidden-layer MLP sequence
+    \node[state] (h0) at (10.4,0) {$h^{(0)}$};
+    \node[op] (lin1) at (13.0,0) {$\theta^{(1)}h^{(0)}$};
+    \node[state] (h1) at (15.4,0) {$h^{(1)}$};
+    \node[op] (sig) at (18.0,0) {$\Sigma(h^{(1)})$};
+    \node[state] (h2) at (20.4,0) {$h^{(2)}$};
+    \node[op] (lin3) at (23.0,0) {$\theta^{(3)}h^{(2)}$};
+
+    \node[focusState] (h3) at (25.4,0) {${h}^{(3)}$};
+    \node[focusLoss] (loss) at (29.0,0) {$\mathrm{prox}_{\lambda \mathcal{L}}\!\bigl(h^{(3)},\, y\bigr)$};
+    \node[focusIo] (y) at (32.4,0) {$y$};
+
+    \node[param] (w1) at (13.0,2.0) {$\theta^{(1)}$};
+    \node[param] (w3) at (23.0,2.0) {$\theta^{(3)}$};
+
+    % Edges connecting the computational graph
+    \draw[flow] (h0) -- (lin1);
+    \draw[flow] (lin1) -- (h1);
+    \draw[flow] (h1) -- (sig);
+    \draw[flow] (sig) -- (h2);
+    \draw[flow] (h2) -- (lin3);
+    \draw[flow] (lin3) -- (h3);
+    
+    \draw[active, line width=1.2pt] (h3) -- (loss);
+    \draw[active, line width=1.2pt] (y) -- (loss);
+
+    \draw[support] (w1) -- (lin1);
+    \draw[support] (w3) -- (lin3);
+\end{tikzpicture}

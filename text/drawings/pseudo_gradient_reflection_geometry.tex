@@ -1,0 +1,33 @@
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+\providecolor{KUL-RED}{RGB}{170, 30, 30}
+\providecolor{KUL-ORANGE}{RGB}{230, 140, 0}
+
+\begin{tikzpicture}[
+    x=2.0cm,
+    y=2.0cm,
+    >=Stealth,
+    every node/.style={font=\Large}
+]
+    \coordinate (center) at (0,0);
+    \coordinate (xt) at (3.10,1.05);
+    \coordinate (proj) at (1.70,0.58);
+    \coordinate (refl) at (0.30,0.11);
+
+    \fill[KUL-BLUE!12, draw=KUL-BLUE, thick] (center) circle (1.8);
+    \node[text=KUL-BLUE!80!black] at (-0.50,1.35) {$C_{\mathrm{sol}}$};
+
+    \fill[KUL-RED] (xt) circle (1.9pt);
+    \node[anchor=west] at (3.20,1.12) {$\theta^{(n)}$};
+
+    \fill[KUL-BLUE!85!black] (proj) circle (1.9pt);
+    \node[anchor=north west] at (1.58,0.46) {$P_C(\theta^{(n)})$};
+
+    \fill[KUL-ORANGE!90!black] (refl) circle (1.9pt);
+    \node[anchor=north east] at (0.12,0.03) {$\theta_v^{(n)} + 2\Delta \theta_v^{(n)}$};
+
+    \draw[densely dashed, black!45] (center) -- (xt);
+    \draw[densely dotted, black!45] (center) -- (proj);
+
+    \draw[->, thick, black!75] ([yshift=10pt]xt) -- ([yshift=10pt]proj)
+      node[pos=0.55, above, sloped, text=black] {$\Delta \theta_v^{(n)} = \theta^{(n)} - P_C(\theta^{(n)})$};
+\end{tikzpicture}

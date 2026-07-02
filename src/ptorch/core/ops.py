@@ -5,6 +5,23 @@ from ..config import config
 import math
 from itertools import repeat
 
+# Diagnostics sink. Scripts (e.g. experiments/attention/diag_targets.py) may
+# set `ops.DIAG` to an object exposing `record(key: str, **scalars)`; the
+# uncompiled autograd backward wrappers then emit target statistics. Must stay
+# None in production — every instrumentation site guards on `DIAG is not None`
+# so the default path is unchanged. Never read this inside @torch.compile
+# bodies.
+DIAG = None
+
+# TD(λ) eligibility trace over depth (config.td_lambda). Seeded with the
+# loss-node residual in the loss projection's backward (which autograd runs
+# first), then updated by each MatMulProjection.backward as the engine walks
+# the chain deep→shallow. Module-level state is sound only for sequential
+# chain graphs executed by a single backward at a time. "seed_norm" backs the
+# optional td_clip safeguard; "floor" is the scalar trace of norm mode
+# (Variant B).
+TD_TRACE = {"g": None, "seed_norm": None, "floor": None}
+
 
 _POLAR_COEFFS = [
     (8.28721201814563, -23.595886519098837, 17.300387312530933),
@@ -61,7 +78,6 @@ def zeropower_via_polarexpress(G: torch.Tensor, steps: int = 5, eps: float = 1e-
         
     return out.to(G.dtype)
 
-@torch.compile()
 def process_activation_target(A_det, A_proj):
     if not config.use_muon_activations:
         return A_proj
@@ -72,19 +88,98 @@ def process_activation_target(A_det, A_proj):
     if last_dim == 0 or A_det.numel() == 0:
         return A_proj
 
+    mode = config.muon_activations_mode
+    max_dim = config.muon_activations_max_dim
+
+    # Skip the head solve: its activation has |row(A)| ~ sqrt(8192*var) so a
+    # per-row rescale to lr*|row(A)| produces O(1)-magnitude head displacements
+    # that swamp the natural t~3e-2 head target the head needs to learn. The
+    # body solves are where signal vanishes, so keep the rescue there.
+    if max_dim > 0 and last_dim > max_dim and mode != "fixed":
+        return A_proj
+
     A_2d = A_det.reshape(-1, last_dim)
     A_proj_2d = A_proj.reshape(-1, last_dim)
-    g = A_2d - A_proj_2d
 
-    g_muon = zeropower_via_polarexpress(g)
-
-    A_proj_new = A_2d - config.muon_activations_lr * g_muon
-
+    # lr crosses into the compiled impl as a 0-dim tensor, not a Python float
+    # read from config: dynamo guards on Python floats, so a per-step decay of
+    # muon_activations_lr would otherwise recompile until the cache limit and
+    # then fall back to eager. mode/eps only change between runs, so static
+    # specialization on them is fine.
+    lr_t = torch.tensor(
+        config.muon_activations_lr, device=A_det.device, dtype=A_2d.dtype
+    )
+    A_proj_new = _process_activation_target_impl(
+        A_2d, A_proj_2d, lr_t, mode, config.muon_activations_eps
+    )
     return A_proj_new.reshape(orig_shape)
 
 
+@torch.compile()
+def _process_activation_target_impl(A_2d, A_proj_2d, lr, mode, eps):
+    g = A_2d - A_proj_2d
 
-        
+    if mode == "rel_row":
+        # Per-row relative magnitude: polar-orthogonalize the per-row
+        # displacement direction, then scale each row to lr * ||A_det row||.
+        # Decouples the activation-target signal magnitude from |B| (the
+        # per-layer min-norm bound) — each token's update has the same
+        # relative size across all layers, restoring usable body signal that
+        # the |B|-scaled δA = t·Bᵀ/N would otherwise lose at init.
+        g_muon = zeropower_via_polarexpress(g, eps=eps)
+        a_row_norm = A_2d.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+        g_row_norm = g_muon.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+        update = lr * (a_row_norm / g_row_norm) * g_muon
+    elif mode == "rel_frob":
+        # Whole-tensor variant: preserve direction, rescale to lr * ||A||_F.
+        g_muon = zeropower_via_polarexpress(g, eps=eps)
+        update = lr * (A_2d.norm() / g_muon.norm().clamp_min(1e-12)) * g_muon
+    elif mode == "raw_rel_row":
+        # No polar, just per-row magnitude rescale of the natural δA direction.
+        # Keeps the (presumed-correct) direction from matmul_proj; only fixes
+        # magnitude. Cheaper than polar and avoids any direction-quality risk.
+        g_row_norm = g.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+        a_row_norm = A_2d.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+        update = lr * (a_row_norm / g_row_norm) * g
+    else:
+        # "fixed" legacy: polar-orthogonalized direction × constant lr.
+        g_muon = zeropower_via_polarexpress(g, eps=eps)
+        update = lr * g_muon
+
+    return A_2d - update
+
+
+# ── TD direction-pipe repeater (non-bilinear nodes) ──────────────────────────
+def td_repeat_target(x_det, x_bar):
+    """Rescale a non-bilinear node's input-target residual up to the current
+    trace floor (capped into the solver's linear-transport window), without
+    updating the floor — λ-blending happens only at the bilinear solves, so
+    activation/pooling/norm nodes act as amplitude repeaters between them.
+    Exact no-op at td_lambda = 0 or outside norm mode."""
+    if config.td_lambda == 0.0 or config.td_mode != "norm":
+        return x_bar
+    floor = TD_TRACE.get("floor")
+    if floor is None:
+        return x_bar
+    r = x_det - x_bar
+    r_norm = float(r.norm())
+    amp = floor
+    if config.td_eps_lin > 0.0:
+        amp = min(amp, config.td_eps_lin * float(x_det.norm()))
+    scale = max(1.0, amp / (r_norm + 1e-12))
+    if scale == 1.0:
+        return x_bar
+    return x_det - scale * r
+
+
+def process_node_target(x_det, x_bar):
+    """process_activation_target followed by the TD repeater; used by every
+    non-bilinear projection backward (the bilinear matmul solves keep the raw
+    process_activation_target and run the full floor update instead)."""
+    out = process_activation_target(x_det, x_bar)
+    return td_repeat_target(x_det, out)
+# ── end TD repeater ───────────────────────────────────────────────────────────
+
 
 @torch.compile(dynamic=True)
 def matmul_proj_linf(A, B, Z, eps_init=None, g=1.0, omega=1.0, num_steps=5):
@@ -368,6 +463,19 @@ class MatMulProjection(torch.autograd.Function):
         B_det = B.detach()
         Z_det = Z_target.detach()
 
+        alpha = ctx.alpha
+        if config.projection_alpha_auto:
+            # Rescale so moving A and moving B cost comparably; one scalar
+            # sync per layer per backward. Same exact projection, computed in
+            # a per-layer-balanced metric.
+            qa_mean = A_det.square().sum(dim=-1).mean()
+            qb_mean = B_det.square().sum(dim=-2).mean()
+            ratio = float((qa_mean / qb_mean.clamp_min(1e-12)).clamp(1e-3, 1e6))
+            # Quantize to powers of two: alpha is a python-scalar argument of
+            # the compiled matmul_proj, so a fresh value every step would
+            # trigger unbounded torch.compile specializations.
+            alpha = alpha * (2.0 ** round(math.log2(ratio)))
+
         t_init = None
         if not ctx.pairwise and ctx.proj_cache is not None:
             t_init = ctx.proj_cache.get('t')
@@ -380,7 +488,7 @@ class MatMulProjection(torch.autograd.Function):
             t_init_2d = t_init.reshape(Z_2d.shape) if (t_init is not None and t_init.shape == Z_det.shape) else None
             
             A_proj_2d, B_proj_2d, Z_proj_2d, t_new = matmul_proj(
-                A_2d, B_2d, Z_2d, t_init=t_init_2d, alpha=ctx.alpha, g=ctx.g, 
+                A_2d, B_2d, Z_2d, t_init=t_init_2d, alpha=alpha, g=ctx.g,
                 omega=ctx.omega, num_steps=ctx.num_steps
             )
             
@@ -395,7 +503,7 @@ class MatMulProjection(torch.autograd.Function):
             # that may come from transpose() or other view ops
             A_proj, B_proj, Z_proj, t_new = matmul_proj(
                 A_det.contiguous().clone(), B_det.contiguous().clone(), Z_det.contiguous().clone() * ctx.omega,
-                t_init=t_init, alpha=ctx.alpha, g=ctx.g, omega=ctx.omega,
+                t_init=t_init, alpha=alpha, g=ctx.g, omega=ctx.omega,
                 num_steps=ctx.num_steps
             )
 
@@ -407,7 +515,82 @@ class MatMulProjection(torch.autograd.Function):
 
         if ctx.forward_cache is not None:
             ctx.forward_cache[0] = Z_proj
-        return process_activation_target(A_det, A_proj), B_proj, None, None, None, None, None, None, None
+
+        if DIAG is not None:
+            t_abs = t_new.abs()
+            key = ("matmul_pw_" if ctx.pairwise else "matmul_") + str(tuple(Z_det.shape))
+            DIAG.record(
+                key,
+                t_mean=float(t_abs.mean()),
+                t_max=float(t_abs.max()),
+                t_sat=float((t_abs > 0.45).float().mean()),
+                z_norm=float(Z_det.norm()),
+                a_rel_move=float((A_proj - A_det).norm() / (A_det.norm() + 1e-12)),
+            )
+
+        A_ret = process_activation_target(A_det, A_proj)
+
+        if config.td_lambda != 0.0 and TD_TRACE.get("g") is not None:
+            lam = config.td_lambda
+            if config.td_mode == "norm":
+                # Variant B: scalar floor trace — amplify the local (correctly
+                # Bᵀ-transported) direction up to a seed-coupled magnitude
+                # floor. Only a norm crosses layers, so this is frame-invariant
+                # and width-agnostic. The bias pad column is included in the
+                # rescale (its target is discarded by F.pad's backward anyway;
+                # its contribution to ‖r_local‖ is negligible).
+                floor = TD_TRACE["floor"]
+                r_local = A_det - A_ret
+                if config.td_deflate:
+                    # Strip the per-row activation-parallel artifact; keep only
+                    # the transported direction (see config.td_deflate).
+                    coef = (r_local * A_det).sum(-1, keepdim=True) \
+                        / A_det.square().sum(-1, keepdim=True).clamp_min(1e-12)
+                    r_local = r_local - coef * A_det
+                r_norm = float(r_local.norm())
+                floor = lam * floor + (1.0 - lam) * r_norm
+                if config.td_clip > 0.0 and TD_TRACE["seed_norm"] is not None:
+                    floor = min(floor, config.td_clip * float(TD_TRACE["seed_norm"]))
+                TD_TRACE["floor"] = floor
+                # Write amplitude: the seed-coupled floor, capped into the
+                # solver's linear-transport window (see config.td_eps_lin).
+                amp = floor
+                if config.td_eps_lin > 0.0:
+                    amp = min(amp, config.td_eps_lin * float(A_det.norm()))
+                scale = max(1.0, amp / (r_norm + 1e-12))
+                A_ret = A_det - scale * r_local
+                if DIAG is not None:
+                    DIAG.record(
+                        "td_trace",
+                        r_local_norm=r_norm,
+                        g_norm=scale * r_norm,
+                        scale=scale,
+                    )
+            else:
+                # Variant A: vector trace — blend the residual vector itself.
+                g = TD_TRACE["g"]
+                # Bias is folded in as a padded ones column, so A may be one
+                # column wider than the trace; the pad column's target is
+                # discarded by F.pad's backward, so only the first d columns
+                # carry signal.
+                d = g.shape[-1]
+                r_local = A_det[..., :d] - A_ret[..., :d]
+                if g.shape == r_local.shape:
+                    g_new = (lam * g + (1.0 - lam) * r_local).detach()
+                    if config.td_clip > 0.0 and TD_TRACE["seed_norm"] is not None:
+                        cap = config.td_clip * TD_TRACE["seed_norm"]
+                        g_new = g_new * (cap / g_new.norm().clamp_min(1e-12)).clamp(max=1.0)
+                    TD_TRACE["g"] = g_new
+                    A_ret = torch.cat([A_det[..., :d] - g_new, A_ret[..., d:]], dim=-1)
+                # Width mismatch: leave the target purely local (no dimension bridge).
+                if DIAG is not None:
+                    DIAG.record(
+                        "td_trace",
+                        r_local_norm=float(r_local.norm()),
+                        g_norm=float(TD_TRACE["g"].norm()),
+                    )
+
+        return A_ret, B_proj, None, None, None, None, None, None, None
 
 
 class MSEProjection(torch.autograd.Function):
@@ -424,6 +607,11 @@ class MSEProjection(torch.autograd.Function):
     def backward(ctx, z):
         predictions, targets = ctx.saved_tensors
         out = (predictions + targets) / 2
+        if config.td_lambda != 0.0:
+            seed = (predictions - out).detach()
+            TD_TRACE["g"] = seed
+            TD_TRACE["seed_norm"] = seed.norm()
+            TD_TRACE["floor"] = float(TD_TRACE["seed_norm"])
         return out, out
 
 class CrossEntropyProjection(torch.autograd.Function):
@@ -458,7 +646,107 @@ class CrossEntropyProjection(torch.autograd.Function):
         for _ in range(steps):
             x = x + lmbda * (target_probs - F.softmax(x, dim=-1))
 
+        if config.td_lambda != 0.0:
+            seed = (logits - x).detach()
+            TD_TRACE["g"] = seed
+            TD_TRACE["seed_norm"] = seed.norm()
+            TD_TRACE["floor"] = float(TD_TRACE["seed_norm"])
+
         return x, None, None, None
+
+class PolicyGradientProjection(torch.autograd.Function):
+    """
+    Projection-based REINFORCE loss (replaces Categorical(logits=...).log_prob).
+
+    Forward returns the usual pseudo-loss -(logp * weights).mean() for logging.
+    Backward ignores the incoming grad and returns a *target* for the logits:
+    a proximal / gradient-ascent step on  w * logp(a | logits),
+        logits <- logits + lambda * w * (onehot(a) - softmax(logits)),
+    iterated num_steps times. Mirrors CrossEntropyProjection, with the sampled
+    action as the target and the per-sample weight scaling the step.
+    """
+    @staticmethod
+    def forward(ctx, logits, act, weights, num_steps=5, lmbda=1.0):
+        ctx.save_for_backward(logits, act, weights)
+        ctx.num_steps = num_steps
+        ctx.lmbda = lmbda
+        logp_all = logits - torch.logsumexp(logits, dim=-1, keepdim=True)
+        logp = logp_all.gather(-1, act.long().unsqueeze(-1)).squeeze(-1)
+        return -(logp * weights).mean()
+
+    @staticmethod
+    def backward(ctx, z):
+        logits, act, weights = ctx.saved_tensors
+        onehot = F.one_hot(act.long(), num_classes=logits.size(-1)).to(logits.dtype)
+        w = weights.unsqueeze(-1)                       # (B, 1)
+        x = logits
+        for _ in range(ctx.num_steps):
+            x = x + ctx.lmbda * w * (onehot - F.softmax(x, dim=-1))
+        return x, None, None, None, None                # target logits
+
+
+class GaussianPolicyGradientProjection(torch.autograd.Function):
+    """
+    Continuous-action analog of PolicyGradientProjection: a diagonal Gaussian
+    policy a ~ N(mu, sigma) with sigma = exp(log_std) shared across the batch.
+
+    Forward returns the REINFORCE pseudo-loss -(logp * weights).mean() for
+    logging. Backward ignores the incoming grad and returns *targets* (one
+    gradient-ascent step on  w * logp(a | mu, log_std), iterated num_steps
+    times), which ProjectionAdam turns into pseudo-grads (p - p_target):
+
+        d logp / d mu       = (a - mu) / sigma^2
+        d logp / d log_std  = ((a - mu) / sigma)^2 - 1
+
+        mu       <- mu       + lambda * w * (a - mu) / sigma^2
+        log_std  <- log_std  + lambda * mean_B[ w * (((a-mu)/sigma)^2 - 1) ]
+
+    mu_target is per-sample (B, A) and flows back through the projection layers
+    like the discrete logits target. log_std is a single shared (A,) parameter,
+    so its per-sample updates are reduced over the batch (mirroring the .mean()
+    in the forward loss) and written straight into log_std.grad. Its update is
+    unbounded (unlike onehot - softmax), so log_std is clamped to keep sigma
+    sane.
+
+    The mu step carries a 1/sigma^2 factor: as sigma shrinks it explodes, so the
+    target runs away and the projection layers diverge. ``max_delta`` clamps the
+    per-step mu move element-wise, which removes that blow-up *at the source* --
+    with it, sigma can be driven low (a committed, low-noise gait) without the
+    mu target detonating, so the log_std floor no longer has to be propped up
+    high purely for stability.
+    """
+    LOG_STD_MIN = -5.0
+    LOG_STD_MAX = 2.0
+
+    @staticmethod
+    def forward(ctx, mu, log_std, act, weights, num_steps=5, lmbda=1.0, max_delta=None):
+        ctx.save_for_backward(mu, log_std, act, weights)
+        ctx.num_steps = num_steps
+        ctx.lmbda = lmbda
+        ctx.max_delta = max_delta
+        std = torch.exp(log_std)
+        logp = -0.5 * (
+            ((act - mu) / std) ** 2 + 2.0 * log_std + math.log(2.0 * math.pi)
+        ).sum(-1)
+        return -(logp * weights).mean()
+
+    @staticmethod
+    def backward(ctx, z):
+        mu, log_std, act, weights = ctx.saved_tensors
+        w = weights.unsqueeze(-1)                       # (B, 1)
+        mu_t = mu.clone()
+        ls = log_std.clone()
+        for _ in range(ctx.num_steps):
+            std = torch.exp(ls)
+            delta = ctx.lmbda * w * (act - mu_t) / std ** 2
+            if ctx.max_delta is not None:
+                delta = delta.clamp(-ctx.max_delta, ctx.max_delta)
+            mu_t = mu_t + delta
+            ls = ls + ctx.lmbda * (w * (((act - mu_t) / std) ** 2 - 1.0)).mean(0)
+            ls = ls.clamp(GaussianPolicyGradientProjection.LOG_STD_MIN,
+                          GaussianPolicyGradientProjection.LOG_STD_MAX)
+        # mu target, log_std target; trailing Nones match the extra fwd args
+        return mu_t, ls, None, None, None, None, None
 
 class HardMarginProjection(torch.autograd.Function):
     """
@@ -558,7 +846,7 @@ class ReLULInfinityProjection(torch.autograd.Function):
         result_forwards = torch.where(dist_1 < dist_2, torch.zeros_like(x), x_2)
         ctx.forward_cache[0] = result_forwards        
 
-        return process_activation_target(x, result), None
+        return process_node_target(x, result), None
     
 class ReLUProjection(torch.autograd.Function):
     """
@@ -587,12 +875,38 @@ class ReLUProjection(torch.autograd.Function):
         result_backwards = torch.where(dist_1 < dist_2, x_1, x_2)
         result_forwards = torch.where(dist_1 < dist_2, torch.zeros_like(x), x_2)
         ctx.forward_cache[0] = result_forwards        
-        return process_activation_target(x, result_backwards), None    
+        return process_node_target(x, result_backwards), None    
+
+
+def _project_simplex_sorted(z):
+    """Euclidean projection of each row of z onto the probability simplex.
+
+    Sort-based algorithm (Held et al. 1974 / Duchi et al. 2008); rows are the
+    last dimension. Cheap for attention-sized rows (T ~ 64).
+    """
+    u, _ = torch.sort(z, dim=-1, descending=True)
+    css = torch.cumsum(u, dim=-1) - 1.0
+    j = torch.arange(1, z.size(-1) + 1, device=z.device, dtype=z.dtype)
+    rho = (u - css / j > 0).to(z.dtype).sum(dim=-1, keepdim=True).clamp(min=1)
+    tau = torch.gather(css, -1, rho.long() - 1) / rho
+    return torch.clamp(z - tau, min=0.0)
 
 
 class SoftmaxProjection(torch.autograd.Function):
     """
     Softmax projection via mixed L2/KL geometry.
+
+    Backward modes (config.softmax_target_mode):
+      "legacy":     clamp(z, 1e-8) + L1 renormalize + exact log-shift. A
+                    slightly negative consensus target entry becomes a ~-18.4
+                    log-target vs logits of O(+-3), injecting huge logit
+                    displacements upstream.
+      "rel_floor":  floor the target relative to the *current* softmax output
+                    (z >= eps_rel * p), renormalize, then a damped and clipped
+                    log-space step. Bounds per-entry displacement.
+      "simplex_l2": Euclidean (sort-based) projection onto the simplex first,
+                    then the same rel_floor + damped log-space step (exact
+                    zeros from the simplex projection cannot be logged).
     """
     @staticmethod
     def forward(ctx, x, forward_cache=None):
@@ -604,27 +918,63 @@ class SoftmaxProjection(torch.autograd.Function):
     def backward(ctx, z):
         x, = ctx.saved_tensors
         eps = 1e-8
+        mode = config.softmax_target_mode
 
-        # Step 1: positivity + KL projection onto the simplex (L1 normalization).
-        z_pos = torch.clamp(z, min=eps)
-        z_bar = z_pos / z_pos.sum(dim=-1, keepdim=True)
-
-        # Step 2: shift log(z_bar) to be closest in L2 to x along the softmax-equivalence ray.
-        log_z = torch.log(z_bar)
-        
         # Handle -inf in x (e.g., from causal masking)
         mask = (x != float('-inf'))
         safe_x = torch.where(mask, x, torch.zeros_like(x))
-        diff = (safe_x - log_z) * mask
-        c = diff.sum(dim=-1, keepdim=True) / mask.sum(dim=-1, keepdim=True).clamp(min=1)
-        
-        x_bar = log_z + c
-        x_bar = torch.where(mask, x_bar, x)
+
+        if mode == "legacy":
+            # Step 1: positivity + KL projection onto the simplex (L1 normalization).
+            z_pos = torch.clamp(z, min=eps)
+            z_bar = z_pos / z_pos.sum(dim=-1, keepdim=True)
+
+            # Step 2: shift log(z_bar) to be closest in L2 to x along the
+            # softmax-equivalence ray.
+            log_z = torch.log(z_bar)
+            diff = (safe_x - log_z) * mask
+            c = diff.sum(dim=-1, keepdim=True) / mask.sum(dim=-1, keepdim=True).clamp(min=1)
+            x_bar = log_z + c
+            x_bar = torch.where(mask, x_bar, x)
+        else:
+            p = F.softmax(x, dim=-1)  # -inf entries get exactly 0 weight
+
+            z_work = z
+            if mode == "simplex_l2":
+                # Push masked entries far negative so the simplex projection
+                # assigns them 0 instead of stealing mass.
+                z_work = z.masked_fill(~mask, -1e30)
+                z_work = _project_simplex_sorted(z_work)
+
+            # Relative floor: never let a target entry fall below eps_rel of
+            # the current weight, so log(z_bar) - log(p) >= ~log(eps_rel).
+            z_pos = torch.maximum(z_work, config.softmax_target_eps_rel * p)
+            z_pos = z_pos * mask
+            z_bar = z_pos / z_pos.sum(dim=-1, keepdim=True).clamp_min(eps)
+
+            # Damped, clipped log-space step along the softmax-equivalence ray.
+            log_z = torch.log(z_bar.clamp_min(eps))
+            diff = (safe_x - log_z) * mask
+            c = diff.sum(dim=-1, keepdim=True) / mask.sum(dim=-1, keepdim=True).clamp(min=1)
+            clip = config.softmax_logit_clip
+            step = torch.clamp(log_z + c - safe_x, min=-clip, max=clip) * mask
+            x_bar = safe_x + config.softmax_target_kappa * step
+            x_bar = torch.where(mask, x_bar, x)
 
         if ctx.forward_cache is not None:
             ctx.forward_cache[0] = z_bar
 
-        return process_activation_target(x, x_bar), None
+        if DIAG is not None:
+            disp = torch.where(mask, x_bar - safe_x, torch.zeros_like(safe_x)).abs()
+            DIAG.record(
+                "softmax",
+                clamp_frac=float(((z < eps) & mask).float().mean()),
+                z_min=float(z.min()),
+                max_logit_disp=float(disp.max()),
+                mean_logit_disp=float(disp.mean()),
+            )
+
+        return process_node_target(x, x_bar), None
 
 class MaskedAddProjection(torch.autograd.Function):
     """
@@ -643,23 +993,81 @@ class MaskedAddProjection(torch.autograd.Function):
         x, mask = ctx.saved_tensors
         # If mask is -inf, replace the incoming target with x
         target_x = torch.where(mask == float('-inf'), x, target_out)
-        return process_activation_target(x, target_x), None
+        return process_node_target(x, target_x), None
 
 class BranchProjection(torch.autograd.Function):
     """
-    Projection-aware branching.
-    Averages the targets from multiple consumers to compute a consensus target.
+    Projection-aware branching for fan-out points.
+
+    `Branch` creates one BranchProjection node per consumer; autograd *sums*
+    the per-node backward outputs into the shared input. Invariant: each node
+    must have exactly one consumer (guaranteed by Branch.forward) — reusing a
+    single branch output twice would silently double-count its contribution.
+
+    Modes (resolved by the Branch module from config.branch_mode):
+      "mean":      each node returns t_i / N, so the accumulated target is the
+                   consensus average (1/N) * sum_i t_i (legacy). In residual
+                   nets this halves the skip-path delta at every sublayer
+                   split — the vanishing-targets mechanism.
+      "delta_sum": each node returns t_i - ((N-1)/N) * x; the autograd sum
+                   reproduces x_bar = x + sum_i (t_i - x) exactly — the
+                   backprop fan-out analog, keeping gain-1 skip paths.
     """
     @staticmethod
-    def forward(ctx, x, num_branches):
+    def forward(ctx, x, num_branches, mode="mean"):
         ctx.num_branches = float(num_branches)
+        ctx.mode = mode
+        if mode == "delta_sum":
+            ctx.save_for_backward(x)
         return x
 
     @staticmethod
     def backward(ctx, grad_output):
-        # grad_output is the sum of targets from all branches.
-        # We average them to get the consensus target.
-        return grad_output / ctx.num_branches, None
+        n = ctx.num_branches
+        if ctx.mode == "delta_sum":
+            (x,) = ctx.saved_tensors
+            return grad_output - x * ((n - 1.0) / n), None, None
+        return grad_output / n, None, None
+
+
+class HardtanhProjection(torch.autograd.Function):
+    """
+    Projection-aware DyT-style activation: y = clamp(alpha * x, -1, 1).
+
+    Normalization-free alternative to RMSNorm/LayerNorm ("Transformers
+    without Normalization"-style dynamic tanh, in its piecewise-linear form).
+    Backward is the exact closed-form L2 projection onto the 3-branch graph
+    (same template as LeakyReLUProjection).
+    """
+    @staticmethod
+    def forward(ctx, x, alpha=0.5):
+        ctx.save_for_backward(x)
+        ctx.alpha = float(alpha)
+        return torch.clamp(ctx.alpha * x, -1.0, 1.0)
+
+    @staticmethod
+    def backward(ctx, z):
+        (x,) = ctx.saved_tensors
+        a = ctx.alpha
+        inv_a = 1.0 / a
+
+        # Branch low: x <= -1/alpha, y = -1
+        x_1 = torch.clamp(x, max=-inv_a)
+        dist_1 = (x - x_1) ** 2 + (z + 1.0) ** 2
+
+        # Branch mid: y = alpha * x on [-1/alpha, 1/alpha]
+        x_2 = torch.clamp((x + a * z) / (1.0 + a * a), min=-inv_a, max=inv_a)
+        dist_2 = (x - x_2) ** 2 + (z - a * x_2) ** 2
+
+        # Branch high: x >= 1/alpha, y = 1
+        x_3 = torch.clamp(x, min=inv_a)
+        dist_3 = (x - x_3) ** 2 + (z - 1.0) ** 2
+
+        result = torch.where(dist_2 <= dist_1, x_2, x_1)
+        best = torch.minimum(dist_1, dist_2)
+        result = torch.where(dist_3 < best, x_3, result)
+
+        return process_node_target(x, result), None
 
 
 
@@ -694,7 +1102,7 @@ class LeakyReLUProjection(torch.autograd.Function):
         dist_2 = (x - x_2) ** 2 + (z - y_2) ** 2
 
         result = torch.where(dist_1 < dist_2, x_1, x_2)
-        return process_activation_target(x, result), None
+        return process_node_target(x, result), None
 
 
 class StepProjection(torch.autograd.Function):
@@ -718,7 +1126,7 @@ class StepProjection(torch.autograd.Function):
         # sign-agreement mask: keep x where it already produces z_target.
         agrees = (x * z_target) >= 0
         x_proj = torch.where(agrees, x, torch.zeros_like(x))
-        return process_activation_target(x, x_proj)
+        return process_node_target(x, x_proj)
 
 class QuantizeReLUProjection(torch.autograd.Function):
     """
@@ -769,7 +1177,7 @@ class QuantizeReLUProjection(torch.autograd.Function):
             best_x = torch.where(better, x_clamped, best_x)
             best_dist = torch.where(better, dist, best_dist)
 
-        return process_activation_target(x, best_x), None
+        return process_node_target(x, best_x), None
 
 class GappedStepProjection(torch.autograd.Function):
     """
@@ -811,7 +1219,7 @@ class GappedStepProjection(torch.autograd.Function):
         # Select branch with minimum distance
         result = torch.where(dist_pos <= dist_neg, x_pos, x_neg)
 
-        return process_activation_target(x, result), None
+        return process_node_target(x, result), None
 
 
 def max_proj_pt_batch(a, z):
@@ -892,7 +1300,7 @@ class SeqMaxPoolProjection(torch.autograd.Function):
         a_proj_batch = max_proj_pt_batch(a_batch, z_batch)
 
         x_proj = a_proj_batch.view(B, D, T).permute(0, 2, 1).contiguous()
-        return process_activation_target(x, x_proj)[0]
+        return process_node_target(x, x_proj)
 
 
 class SeqAvgPoolProjection(torch.autograd.Function):
@@ -913,7 +1321,7 @@ class SeqAvgPoolProjection(torch.autograd.Function):
         x, = ctx.saved_tensors
         y = x.mean(dim=1)
         x_proj = x + (z_target - y).unsqueeze(1)
-        return process_activation_target(x, x_proj)[0]
+        return process_node_target(x, x_proj)
 
 
 class MaxPool2DProjection(torch.autograd.Function):
@@ -1050,9 +1458,84 @@ class ConvPatchProjection(torch.autograd.Function):
         
         target_img = target_sum / torch.clamp(overlap_counts, min=1.0)
         
-        target = process_activation_target(input, target_img)
+        target = process_node_target(input, target_img)
         
         return target, None, None, None
+
+
+@torch.compile(dynamic=True)
+def rmsnorm_proj_exact(x, z, g: float, num_steps: int):
+    """Joint L2 projection onto the RMSNorm graph manifold.
+
+    Minimizes ||sigma*u - x||^2 + g*||sqrt(n)*u - z||^2 over sigma >= 0,
+    ||u|| = 1, rows on the last dim. The optimal u lies in span{x, z}, so with
+    an orthonormal basis (e1 = x/||x||, e2 from Gram-Schmidt on z) the problem
+    reduces to maximizing
+        J(theta) = <x,u>^2 * 1[<x,u> > 0] + 2*g*sqrt(n)*<z,u>,
+        u = cos(theta)*e1 + sin(theta)*e2,
+    solved by damped Newton from the legacy init u ∝ z (theta0 = atan2(b2,b1)).
+    By construction b2 >= 0, so the optimum has sin(theta) >= 0: theta in
+    [0, pi]. Degenerate rows (z ∥ x, or ||z|| ~ 0) collapse gracefully: r = 0
+    makes the e2 term vanish, and a vanished target gives theta -> 0, i.e.
+    x_bar -> x (no signal, no change — unlike legacy, which renormalizes pure
+    noise up to the sqrt(n)-sphere).
+    """
+    n = x.size(-1)
+    sqrt_n = math.sqrt(n)
+
+    a = torch.linalg.norm(x, dim=-1, keepdim=True).clamp_min(1e-12)
+    e1 = x / a
+    b1 = (z * e1).sum(dim=-1, keepdim=True)
+    r = z - b1 * e1
+    b2 = torch.linalg.norm(r, dim=-1, keepdim=True)
+    e2 = r / b2.clamp_min(1e-12)
+
+    c = 2.0 * g * sqrt_n
+    a2 = a.square()
+    theta0 = torch.atan2(b2, b1)
+
+    # Coarse grid init: J can have two local maxima on [0, pi]; Newton from
+    # the legacy init alone converges to the wrong one for some rows. Scan a
+    # small grid (plus theta0) and refine the best candidate.
+    grid = torch.linspace(0.0, math.pi, 33, device=x.device, dtype=x.dtype)
+    ct_g = torch.cos(grid)
+    st_g = torch.sin(grid)
+    j_grid = (a * ct_g).clamp_min(0.0).square() + c * (b1 * ct_g + b2 * st_g)
+    theta_grid = grid[j_grid.argmax(dim=-1, keepdim=True)]
+    ct0 = torch.cos(theta0)
+    st0 = torch.sin(theta0)
+    j_theta0 = (a * ct0).clamp_min(0.0).square() + c * (b1 * ct0 + b2 * st0)
+    j_best = torch.gather(j_grid, -1, j_grid.argmax(dim=-1, keepdim=True))
+    theta = torch.where(j_theta0 >= j_best, theta0, theta_grid)
+    theta_init = theta
+
+    for _ in range(num_steps):
+        ct = torch.cos(theta)
+        st = torch.sin(theta)
+        active = (ct > 0).to(x.dtype)
+        # J'(theta) and J''(theta); the cos^2 term is C^1 across cos(theta)=0.
+        j1 = -a2 * (2.0 * st * ct) * active + c * (b2 * ct - b1 * st)
+        j2 = -2.0 * a2 * (ct * ct - st * st) * active - c * (b1 * ct + b2 * st)
+        # Newton ascent where curvature is negative; small gradient-ascent
+        # step elsewhere. Step clamp keeps the iterate inside [0, pi].
+        step = torch.where(j2 < -1e-6,
+                           j1 / torch.clamp(j2, max=-1e-6),
+                           -0.2 * torch.sign(j1))
+        theta = (theta - torch.clamp(step, min=-0.5, max=0.5)).clamp(0.0, math.pi)
+
+    # Safeguard: never end below the init candidate.
+    ct = torch.cos(theta)
+    st = torch.sin(theta)
+    j_final = (a * ct).clamp_min(0.0).square() + c * (b1 * ct + b2 * st)
+    ct_i = torch.cos(theta_init)
+    st_i = torch.sin(theta_init)
+    j_init = (a * ct_i).clamp_min(0.0).square() + c * (b1 * ct_i + b2 * st_i)
+    use_final = j_final >= j_init
+    ct = torch.where(use_final, ct, ct_i)
+    st = torch.where(use_final, st, st_i)
+
+    sigma = (a * ct).clamp_min(0.0)
+    return sigma * (ct * e1 + st * e2)
 
 
 class RMSNormProjection(torch.autograd.Function):
@@ -1062,11 +1545,16 @@ class RMSNormProjection(torch.autograd.Function):
     Forward:
         z = x / RMS(x)
 
-    Backward (target -> projected input):
-        Given an incoming target z_target for the output:
+    Backward modes (config.rmsnorm_backward_mode):
+      "legacy": sequential two-step reconstruction —
             z_bar = sqrt(n) * z_target / ||z_target||_2
             sigma_bar = mean(x * z_bar)
             x_bar = sigma_bar * z_bar
+        Fully trusts the target direction; sigma_bar < 0 silently inverts the
+        token, and a near-zero (vanished) target is renormalized to full
+        sqrt(n) magnitude.
+      "exact": joint projection onto the graph manifold via
+        rmsnorm_proj_exact (weighted by config.rmsnorm_g).
     """
     @staticmethod
     def forward(ctx, x, eps=1e-5):
@@ -1077,20 +1565,34 @@ class RMSNormProjection(torch.autograd.Function):
     def backward(ctx, z_target):
         x, = ctx.saved_tensors
         n = x.size(-1)
+        sigma_bar = None
 
-        # Step 1: Output projection
-        # \bar{z} = \sqrt{n} z^+ / ||z^+||_2
-        z_target_norm = torch.linalg.norm(z_target, dim=-1, keepdim=True)
-        z_bar = math.sqrt(n) * (z_target / (z_target_norm + 1e-8))
+        if config.rmsnorm_backward_mode == "exact":
+            x_bar = rmsnorm_proj_exact(
+                x, z_target, config.rmsnorm_g, config.rmsnorm_newton_steps
+            )
+        else:
+            # Step 1: Output projection
+            # \bar{z} = \sqrt{n} z^+ / ||z^+||_2
+            z_target_norm = torch.linalg.norm(z_target, dim=-1, keepdim=True)
+            z_bar = math.sqrt(n) * (z_target / (z_target_norm + 1e-8))
 
-        # Step 2: Input projection
-        # \bar{\sigma} = mean(x * \bar{z})
-        sigma_bar = (x * z_bar).mean(dim=-1, keepdim=True)
-        
-        # \bar{x} = \bar{\sigma} \bar{z}
-        x_bar = sigma_bar * z_bar
+            # Step 2: Input projection
+            # \bar{\sigma} = mean(x * \bar{z})
+            sigma_bar = (x * z_bar).mean(dim=-1, keepdim=True)
 
-        return process_activation_target(x, x_bar), None
+            # \bar{x} = \bar{\sigma} \bar{z}
+            x_bar = sigma_bar * z_bar
+
+        if DIAG is not None:
+            stats = {
+                "rel_delta": float((x_bar - x).norm() / (x.norm() + 1e-12)),
+            }
+            if sigma_bar is not None:
+                stats["sigma_flip"] = float((sigma_bar < 0).float().mean())
+            DIAG.record("rmsnorm", **stats)
+
+        return process_node_target(x, x_bar), None
 
 
 

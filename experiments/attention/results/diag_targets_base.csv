@@ -1,0 +1,46 @@
+step_bucket,key,metric,count,mean,max
+300,layer/block0,rel_delta,300,6.17301e-08,6.6244e-08
+300,layer/block0.attn,rel_delta,300,6.81598e-08,7.23701e-08
+300,layer/block0.mlp,rel_delta,300,7.65566e-08,8.21155e-08
+300,layer/block1,rel_delta,300,6.20702e-08,6.58745e-08
+300,layer/block1.attn,rel_delta,300,6.63971e-08,7.2136e-08
+300,layer/block1.mlp,rel_delta,300,7.48227e-08,7.99955e-08
+300,layer/block2,rel_delta,300,5.38424e-08,5.56454e-08
+300,layer/block2.attn,rel_delta,300,5.76649e-08,6.21515e-08
+300,layer/block2.mlp,rel_delta,300,6.8637e-08,7.17074e-08
+300,layer/block3,rel_delta,300,4.0146e-08,4.04174e-08
+300,layer/block3.attn,rel_delta,300,4.81502e-08,5.06107e-08
+300,layer/block3.mlp,rel_delta,300,5.08572e-08,5.22719e-08
+300,layer/head,rel_delta,300,0.0314338,0.0456496
+300,layer/patch_embed,rel_delta,300,6.0451e-08,6.37597e-08
+300,"matmul_(256, 10)",a_rel_move,300,4.0146e-08,4.04174e-08
+300,"matmul_(256, 10)",t_max,300,2.61719e-07,9.13514e-07
+300,"matmul_(256, 10)",t_mean,300,5.79867e-09,1.34852e-08
+300,"matmul_(256, 10)",t_sat,300,0,0
+300,"matmul_(256, 10)",z_norm,300,4104.7,11299.2
+300,"matmul_(256, 64, 128)",a_rel_move,6300,3.41268e-13,8.55432e-12
+300,"matmul_(256, 64, 128)",t_max,6300,1.0738e-08,1.77688e-07
+300,"matmul_(256, 64, 128)",t_mean,6300,2.00693e-10,1.64698e-09
+300,"matmul_(256, 64, 128)",t_sat,6300,0,0
+300,"matmul_(256, 64, 128)",z_norm,6300,41594.8,273750
+300,"matmul_(256, 64, 512)",a_rel_move,1200,1.03932e-15,7.86707e-15
+300,"matmul_(256, 64, 512)",t_max,1200,2.60142e-09,1.10018e-08
+300,"matmul_(256, 64, 512)",t_mean,1200,3.35674e-11,1.01297e-10
+300,"matmul_(256, 64, 512)",t_sat,1200,0,0
+300,"matmul_(256, 64, 512)",z_norm,1200,142181,490828
+300,"matmul_pw_(256, 16, 64, 64)",a_rel_move,1200,1.5474e-08,1.9975e-08
+300,"matmul_pw_(256, 16, 64, 64)",t_max,1200,1.3648e-07,1.64744e-07
+300,"matmul_pw_(256, 16, 64, 64)",t_mean,1200,2.72729e-08,2.93408e-08
+300,"matmul_pw_(256, 16, 64, 64)",t_sat,1200,0,0
+300,"matmul_pw_(256, 16, 64, 64)",z_norm,1200,4156.56,4273.82
+300,"matmul_pw_(256, 16, 64, 8)",a_rel_move,1200,0,0
+300,"matmul_pw_(256, 16, 64, 8)",t_max,1200,1.7713e-12,4.55598e-11
+300,"matmul_pw_(256, 16, 64, 8)",t_mean,1200,1.99207e-18,7.55447e-17
+300,"matmul_pw_(256, 16, 64, 8)",t_sat,1200,0,0
+300,"matmul_pw_(256, 16, 64, 8)",z_norm,1200,31198.7,109723
+300,rmsnorm,rel_delta,2400,1.0441e-07,1.07281e-07
+300,rmsnorm,sigma_flip,2400,0,0
+300,softmax,clamp_frac,1200,0,0
+300,softmax,max_logit_disp,1200,1.00935e-06,1.19209e-06
+300,softmax,mean_logit_disp,1200,2.28969e-07,2.45706e-07
+300,softmax,z_min,1200,0.000281082,0.00049463

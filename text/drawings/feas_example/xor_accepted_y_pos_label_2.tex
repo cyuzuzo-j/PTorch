@@ -1,0 +1,39 @@
+% TikZ snippet (no preamble): positive-label z_out^2>=delta accepted region
+
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+\providecolor{KUL-RED}{RGB}{170, 30, 30}
+\providecolor{KUL-ORANGE}{RGB}{230, 140, 0}
+
+\begin{tikzpicture}[scale=1, every node/.style={font=\scriptsize}]
+  % Plot limits (match other XOR accepted plots)
+  \def\xmin{-1.5}
+  \def\xmax{2.0}
+  \def\ymin{-2.0}
+  \def\ymax{2.0}
+
+  % Visual delta (for plotting only)
+  \def\deltaval{0.8}
+
+  \useasboundingbox (\xmin,\ymin) rectangle (\xmax,\ymax);
+
+  % Accepted Region (z_out^2 >= delta)
+  \fill[KUL-ORANGE, opacity=0.08] (\deltaval, \ymin) rectangle (\xmax, \ymax);
+
+  % Axes
+  \draw[->, thick, KUL-BLUE] (\xmin, 0) -- (\xmax, 0) node[right, black] {$z_{\mathrm{out}}^{2,3}$};
+  \draw[-, thick, KUL-BLUE] (0, \ymin) -- (0, \ymax);
+
+  % Threshold line z_out^2 = delta
+  \draw[thick, dashed, KUL-ORANGE] (\deltaval, \ymin) -- (\deltaval, \ymax);
+  \draw[KUL-ORANGE, fill=white] (\deltaval, 0) circle (1.5pt) node[below right, black] {$\delta$};
+
+  % Legend (top-left)
+  \node[anchor=north west, draw=black!30, fill=white, fill opacity=0.85, text opacity=1,
+        rounded corners=1pt, inner sep=1pt, font=\fontsize{5}{6}\selectfont, align=left]
+    at (\xmin+0.05, \ymax-0.05)
+    {$z_{\mathrm{out}}^{2,3}\in C^{2,3}_{z_{\mathrm{out}}}$\\
+     $C^{2,3}_{z_{\mathrm{out}}}:=\{z_{\mathrm{out}}^{2,3}:\; z_{\mathrm{out}}^{2,3}\ge \delta\}$};
+
+  % Origin marker
+  \fill[black] (0,0) circle (1pt) node[below left] {$0$};
+\end{tikzpicture}

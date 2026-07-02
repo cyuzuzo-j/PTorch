@@ -1,0 +1,47 @@
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+\providecolor{KUL-ORANGE}{RGB}{230, 140, 0}
+
+\begin{tikzpicture}[>=Stealth,every node/.style={font=\small},scale=1.05]
+  % axes
+  \draw[thin,->] (-3.3,0)--(3.5,0) node[right]{$\Delta x_k$};
+  \draw[thin,->] (0,-3.3)--(0,3.5) node[above]{$\Delta w_k$};
+  
+  % box
+  \fill[black!8] (-2.4,-2.4) rectangle (2.4,2.4);
+  \draw[thick] (-2.4,-2.4) rectangle (2.4,2.4);
+
+  % tick marks
+  \foreach \v/\l in {2.4/{$+\epsilon$},-2.4/{$-\epsilon$}}{
+    \draw (\v,2pt)--(\v,-2pt) node[below,yshift=-2pt]{\l};
+    \draw (2pt,\v)--(-2pt,\v) node[left,xshift=-2pt]{\l};
+  }
+
+  % --- same-sign pair (blue) ---
+  \fill[KUL-BLUE] (2.4,2.4) circle (4pt);
+  \fill[KUL-BLUE] (-2.4,-2.4) circle (4pt);
+
+  \node[KUL-BLUE,anchor=south west,align=left] at (2.5,2.3)
+    {$\Delta P_k=\epsilon(x_k{+}w_k)+\epsilon^2$};
+  \node[KUL-BLUE,anchor=north east,align=right] at (-2.5,-2.3)
+    {$\Delta P_k=-\epsilon(x_k{+}w_k)+\epsilon^2$};
+
+  % dashed line connecting same-sign pair
+  \draw[KUL-BLUE,dashed,thick] (2.4,2.4)--(-2.4,-2.4);
+
+  % --- opposite-sign pair (orange instead of red) ---
+  \fill[KUL-ORANGE] (2.4,-2.4) circle (4pt);
+  \fill[KUL-ORANGE] (-2.4,2.4) circle (4pt);
+
+  \node[KUL-ORANGE,anchor=north west,align=left] at (2.5,-2.3)
+    {$\Delta P_k=\epsilon(w_k{-}x_k)-\epsilon^2$};
+  \node[KUL-ORANGE,anchor=south east,align=right] at (-2.5,2.3)
+    {$\Delta P_k=\epsilon(x_k{-}w_k)-\epsilon^2$};
+
+  % dashed line connecting opposite-sign pair
+  \draw[KUL-ORANGE,dashed,thick] (2.4,-2.4)--(-2.4,2.4);
+
+  % legend
+  \node[KUL-BLUE,font=\footnotesize] at (0,-3.15) {%
+    \textbf{---}~same-sign pair $\{(++),(--)\}$
+  };
+\end{tikzpicture}

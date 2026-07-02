@@ -1,0 +1,63 @@
+% Define domain-specific colors based on the ViT example
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+\providecolor{KUL-ORANGE}{RGB}{230, 140, 0}
+\providecolor{CONV-GRAY}{RGB}{120, 120, 120}
+
+  \begin{tikzpicture}[>=Stealth, every node/.style={font=\small, align=center}, scale=0.85, transform shape]
+
+    % --- STYLES ---
+    \tikzset{
+      torchlayer/.style={rectangle, draw=KUL-BLUE, thick, fill=KUL-BLUE!10, text=KUL-BLUE, text centered, rounded corners=2pt, minimum width=3.4cm, minimum height=1.3cm, align=center},
+      ptorchlayer/.style={rectangle, draw=KUL-ORANGE, thick, fill=KUL-ORANGE!10, text=KUL-ORANGE, text centered, rounded corners=2pt, minimum width=3.4cm, minimum height=1.3cm, align=center},
+      bridge/.style={rectangle, draw=CONV-GRAY, thick, fill=CONV-GRAY!10, text=black, text centered, rounded corners=2pt, minimum width=3.4cm, minimum height=1.3cm, align=center}
+    }
+
+    % --- NODES ---
+    
+    % PyTorch Backbone (Gradient-Based)
+    \node[torchlayer] (conv1) at (0, 0) {Conv Block 1 \\[-0.5ex] \scriptsize \textit{Conv2d $\rightarrow$ Pool $\rightarrow$ LReLU} \\[-0.5ex] \scriptsize \textit{32 filters}};
+    \node[torchlayer] (conv2) at (4.0, 0) {Conv Block 2 \\[-0.5ex] \scriptsize \textit{Conv2d $\rightarrow$ Pool $\rightarrow$ LReLU} \\[-0.5ex] \scriptsize \textit{64 filters}};
+    \node[torchlayer] (conv3) at (8.0, 0) {Conv Block 3 \\[-0.5ex] \scriptsize \textit{Conv2d $\rightarrow$ Pool $\rightarrow$ LReLU} \\[-0.5ex] \scriptsize \textit{128 filters}};
+    \node[torchlayer] (flatten) at (12.0, 0) {Flatten \& $l_2$ Norm \\[-0.5ex] \scriptsize \textit{x.flatten(1)} \\[-0.5ex] \scriptsize \textit{F.normalize()}};
+
+    % Conversion Boundary (now inline)
+    \node[bridge] (conversion) at (16.0, 0) {Conversion Layer \\[-0.5ex] \scriptsize \textit{Gradient $\leftrightarrow$ Target} \\[-0.5ex] \scriptsize \textit{Boundary}};
+    
+    % PTorch Head (Projection-Based, now inline)
+    \node[ptorchlayer] (head) at (20.0, 0) {Classification Head \\[-0.5ex] \scriptsize \textit{pnn.Linear(..., classes)}};
+
+
+
+    % --- PATHS ---
+    
+    % Forward Backbone
+    \draw[->, thick, KUL-BLUE] (conv1) -- (conv2);
+    \draw[->, thick, KUL-BLUE] (conv2) -- (conv3);
+    \draw[->, thick, KUL-BLUE] (conv3) -- (flatten);
+    
+    % Into Conversion
+    \draw[->, thick, KUL-BLUE] (flatten) -- (conversion);
+    
+    % Out of Conversion into PTorch
+    \draw[->, thick, KUL-ORANGE] (conversion) -- (head);
+    
+
+
+    % --- BACKGROUND HIGHLIGHTS ---
+    \begin{scope}[on background layer]
+      
+      % PyTorch Domain Box
+      \path (conv1.north west) ++(-0.4, 0.7) coordinate (torch_tl);
+      \path (flatten.south east) ++(0.4, -0.4) coordinate (torch_br);
+      \node[rectangle, draw=KUL-BLUE, thick, dashed, fill=KUL-BLUE!4, inner sep=0pt, fit=(torch_tl) (torch_br)] (torch_box) {};
+      \node[anchor=north west, font=\footnotesize\bfseries, text=KUL-BLUE, inner sep=6pt] at (torch_box.north west) {PyTorch Backbone};
+
+      % PTorch Domain Box (repositioned)
+      \path (head.north west) ++(-0.4, 0.7) coordinate (ptorch_tl);
+      \path (head.south east) ++(0.4, -0.4) coordinate (ptorch_br);
+      \node[rectangle, draw=KUL-ORANGE, thick, dashed, fill=KUL-ORANGE!4, inner sep=0pt, fit=(ptorch_tl) (ptorch_br)] (ptorch_box) {};
+      \node[anchor=north west, font=\footnotesize\bfseries, text=KUL-ORANGE, inner sep=6pt] at (ptorch_box.north west) {PTorch Classifier};
+
+    \end{scope}
+
+  \end{tikzpicture}

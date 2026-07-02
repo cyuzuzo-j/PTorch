@@ -1,0 +1,39 @@
+
+Projection policy gradient (ptorch) for continuous control, with value baseline.
+
+Saved rollout gif -> bipedal_walker_gifs/epoch_0000.gif
+epoch:   0 	 pol:     0.05 	 val:     0.54 	 clipfrac: 0.87 	 return:  -103.77 	 ep_len:    64.9 	 log_std: -0.696
+epoch:   1 	 pol:     0.13 	 val:     1.08 	 clipfrac: 0.69 	 return:  -104.00 	 ep_len:    59.3 	 log_std: -0.703
+epoch:   2 	 pol:     0.12 	 val:     0.78 	 clipfrac: 0.60 	 return:  -103.32 	 ep_len:    60.4 	 log_std: -0.707
+epoch:   3 	 pol:     0.01 	 val:     0.47 	 clipfrac: 0.66 	 return:  -103.02 	 ep_len:    58.6 	 log_std: -0.708
+epoch:   4 	 pol:     0.04 	 val:     0.34 	 clipfrac: 0.56 	 return:  -103.35 	 ep_len:    59.5 	 log_std: -0.722
+epoch:   5 	 pol:     0.19 	 val:     0.26 	 clipfrac: 0.45 	 return:  -103.30 	 ep_len:    60.7 	 log_std: -0.747
+epoch:   6 	 pol:     0.30 	 val:     0.23 	 clipfrac: 0.41 	 return:  -102.77 	 ep_len:    59.0 	 log_std: -0.773
+epoch:   7 	 pol:     0.27 	 val:     0.27 	 clipfrac: 0.37 	 return:  -103.30 	 ep_len:    60.6 	 log_std: -0.805
+epoch:   8 	 pol:     0.29 	 val:     0.21 	 clipfrac: 0.39 	 return:  -103.05 	 ep_len:    59.0 	 log_std: -0.841
+epoch:   9 	 pol:     0.30 	 val:     0.19 	 clipfrac: 0.37 	 return:  -102.44 	 ep_len:    59.1 	 log_std: -0.878
+epoch:  10 	 pol:     0.34 	 val:     0.17 	 clipfrac: 0.37 	 return:  -102.35 	 ep_len:    61.2 	 log_std: -0.918
+epoch:  11 	 pol:     0.35 	 val:     0.20 	 clipfrac: 0.36 	 return:  -102.83 	 ep_len:    61.8 	 log_std: -0.964
+epoch:  12 	 pol:     0.18 	 val:     0.33 	 clipfrac: 0.40 	 return:  -106.73 	 ep_len:    84.0 	 log_std: -0.990
+epoch:  13 	 pol:     0.20 	 val:     0.28 	 clipfrac: 0.45 	 return:  -108.18 	 ep_len:    85.7 	 log_std: -1.026
+epoch:  14 	 pol:     0.22 	 val:     0.20 	 clipfrac: 0.41 	 return:  -105.55 	 ep_len:    83.9 	 log_std: -1.076
+epoch:  15 	 pol:     0.22 	 val:     0.21 	 clipfrac: 0.39 	 return:  -105.56 	 ep_len:    85.1 	 log_std: -1.123
+epoch:  16 	 pol:     0.20 	 val:     0.20 	 clipfrac: 0.42 	 return:  -106.42 	 ep_len:    82.9 	 log_std: -1.172
+epoch:  17 	 pol:     0.17 	 val:     0.21 	 clipfrac: 0.39 	 return:  -106.56 	 ep_len:    90.2 	 log_std: -1.217
+epoch:  18 	 pol:     0.19 	 val:     0.20 	 clipfrac: 0.41 	 return:  -106.72 	 ep_len:    86.2 	 log_std: -1.263
+epoch:  19 	 pol:     0.21 	 val:     0.21 	 clipfrac: 0.39 	 return:  -106.42 	 ep_len:    85.2 	 log_std: -1.303
+epoch:  20 	 pol:     0.18 	 val:     0.20 	 clipfrac: 0.41 	 return:  -107.11 	 ep_len:    90.4 	 log_std: -1.348
+epoch:  21 	 pol:     0.17 	 val:     0.17 	 clipfrac: 0.40 	 return:  -105.88 	 ep_len:    86.1 	 log_std: -1.387
+epoch:  22 	 pol:     0.22 	 val:     0.18 	 clipfrac: 0.37 	 return:  -104.27 	 ep_len:    83.4 	 log_std: -1.425
+epoch:  23 	 pol:     0.16 	 val:     0.17 	 clipfrac: 0.47 	 return:  -104.15 	 ep_len:    82.9 	 log_std: -1.450
+epoch:  24 	 pol:     0.06 	 val:     0.17 	 clipfrac: 0.38 	 return:  -104.35 	 ep_len:    84.6 	 log_std: -1.473
+Saved rollout gif -> bipedal_walker_gifs/epoch_0025.gif
+epoch:  25 	 pol:     0.13 	 val:     0.14 	 clipfrac: 0.37 	 return:  -103.48 	 ep_len:    83.4 	 log_std: -1.496
+epoch:  26 	 pol:     0.01 	 val:     0.15 	 clipfrac: 0.38 	 return:  -105.32 	 ep_len:    88.9 	 log_std: -1.512
+epoch:  27 	 pol:     0.10 	 val:     0.19 	 clipfrac: 0.38 	 return:  -103.93 	 ep_len:    89.4 	 log_std: -1.519
+epoch:  28 	 pol:    -0.03 	 val:     0.16 	 clipfrac: 0.38 	 return:  -104.34 	 ep_len:    92.1 	 log_std: -1.525
+epoch:  29 	 pol:    -0.06 	 val:     0.15 	 clipfrac: 0.40 	 return:  -109.06 	 ep_len:   101.2 	 log_std: -1.530
+epoch:  30 	 pol:    -0.40 	 val:     0.17 	 clipfrac: 0.41 	 return:  -112.37 	 ep_len:   107.8 	 log_std: -1.534
+epoch:  31 	 pol:    -0.31 	 val:     0.12 	 clipfrac: 0.41 	 return:  -107.86 	 ep_len:   107.7 	 log_std: -1.539
+epoch:  32 	 pol:    -0.06 	 val:     0.14 	 clipfrac: 0.37 	 return:  -108.86 	 ep_len:   114.7 	 log_std: -1.544
+epoch:  33 	 pol:    -0.12 	 val:     0.14 	 clipfrac: 0.38 	 return:  -106.25 	 ep_len:   106.8 	 log_std: -1.550

@@ -1,0 +1,152 @@
+
+\chapter{Advanced Architectural Evaluations}
+\label{cha:Advanced}
+\section{Hybrid architecture}
+To demonstrate the flexibility and interoperability of $\mathcal{P}$Torch, we evaluate a hybrid architecture that combines projection-based and gradient-based layers within a computational graph.
+\begin{figure}[ht]
+\centering
+\resizebox{\textwidth}{!}{\input{drawings/hybrid}}
+\caption{Architecture of the CNN with a Torch based feature extractor and $\mathcal{P}$Torch head.}
+\label{fig:hybrid-architecture}
+\end{figure}
+\begin{tcolorbox}[reprocard, title=Setup]\\
+We construct a hybrid Convolutional Neural Network (CNN) (\cref{fig:hybrid-architecture}) for the MNIST and CIFAR-10 image classification tasks, comprising a standard PyTorch backbone and a  $\mathcal{P}$Torch classification head. 
+\end{tcolorbox}
+
+\begin{figure}[ht]
+\centering
+\safeincludegraphics[width=0.9\textwidth]{images/other_benchmarks/hybrid_arch_CIFAR10.pdf}
+\caption{Training dynamics of the hybrid CNN architecture. The integration of
+$\mathcal{P}$Torch projection modules with standard PyTorch
+gradient-based layers demonstrates that hybrid architectures can be trained
+effectively.}
+\label{fig:hybrid-cnn}
+\end{figure}
+This architectural interoperability represents a highly promising capability of $\mathcal{P}$Torch. We can optimize a deep feature extractor using standard gradients while natively enforcing rigid constraints at the output layer via projections. Consequently, this hybrid paradigm allows us to bypass the chain rule entirely for specialized components. An example application could be the integration of a sorting output head (e.g., using the PAVA projection \cite{best1990active}), directly into an otherwise gradient-optimized network.
+
+\section{Hybrid optimization}
+  Because the projection / gradient distinction is toggled by a single flag, we can train a network with both signals sequentially: $K$
+  projection steps, then $K$ gradient steps, and so on. This is useful when an architecture contains non-differentiable components that are
+  merely approximated in the gradient regime but can be optimized exactly through projections. We provide a proof of
+  concept: the goal is to show that the two regimes can be interleaved within a single training run without destabilizing optimization, not
+  to demonstrate a regime in which the hybrid schedule outperforms either training mode in isolation.
+
+  \begin{tcolorbox}[reprocard, title=Setup]\\
+  We use a network similar to \cref{fig:hybrid-cnn} but with RMS-normalization layers inserted between every conv block, and a
+  $\mathcal{P}$Torch backbone in place of the gradient one.
+  \end{tcolorbox}
+
+  \begin{figure}[ht]
+  \centering
+  \safeincludegraphics[width=1.0\textwidth]{images/other_benchmarks/hybrid_step.pdf}
+  \caption{Training dynamics on CIFAR-10 (left) and MNIST (right) under hybrid optimization.}
+  \label{fig:hybrid-optimization}
+  \end{figure}
+\section{Non-differentiable activation functions}
+Gradient-based optimization imposes a strict assumption: every component of the computational graph must admit a tractable subgradient, projection-based optimization  bypasses this limitation. To demonstrate this capability, we evaluate $\mathcal{P}$Torch classification's capacity to optimize architectures containing fundamentally non-differentiable or discontinuous activation functions.
+\providecolor{PLOT-BLUE}{HTML}{3B528B}
+\providecolor{PLOT-TEAL}{HTML}{21918C}
+\providecolor{PLOT-GREEN}{HTML}{5EC962}
+\providecolor{PLOT-YELLOW}{RGB}{230, 140, 0}
+
+\begin{tikzpicture}[scale=0.66, every node/.style={font=\small}]
+
+  % --- 1. ReLU ---
+  \begin{scope}[shift={(0,0)}]
+    % Axes
+    \draw[-{Stealth}, thick] (-2.2,0) -- (2.2,0) node[below] {$x$};
+    \draw[-{Stealth}, thick] (0,-1.5) -- (0,2.5) node[left] {$y$};
+    
+    % Function
+    \draw[PLOT-BLUE, very thick] (-2,0) -- (0,0) -- (2,2);
+    
+    % Label
+    \node[PLOT-BLUE, font=\bfseries] at (0,-2.2) {ReLU};
+  \end{scope}
+
+  % --- 2. Step ---
+  \begin{scope}[shift={(5,0)}]
+    % Axes
+    \draw[-{Stealth}, thick] (-2.2,0) -- (2.2,0) node[below] {$x$};
+    \draw[-{Stealth}, thick] (0,-1.5) -- (0,2.5) node[left] {$y$};
+ 
+    % Function
+    \draw[PLOT-TEAL, very thick] (-2,-1) -- (0,-1);
+    \draw[PLOT-TEAL, very thick] (0,1) -- (2,1);
+    \draw[PLOT-TEAL, dashed, opacity=0.4] (0,-1) -- (0,1);
+
+    % Discontinuity nodes
+    \fill[white, draw=PLOT-TEAL, thick] (0,-1) circle (1.5pt);
+    \fill[PLOT-TEAL] (0,1) circle (1.5pt);
+    
+    % Label
+    \node[PLOT-TEAL, font=\bfseries] at (0,-2.2) {Step};
+  \end{scope}
+
+  % --- 3. GappedStep ---
+  \begin{scope}[shift={(10,0)}]
+    % Axes
+    \draw[-{Stealth}, thick] (-2.2,0) -- (2.2,0) node[below] {$x$};
+    \draw[-{Stealth}, thick] (0,-1.5) -- (0,2.5) node[left] {$y$};
+    
+
+    % Exaggerated gap for visual clarity (delta/2 = 0.4 visually)
+    \def\d{0.4} 
+    
+    % Function
+    \draw[PLOT-GREEN, very thick] (-2,-1) -- (-\d,-1);
+    \draw[PLOT-GREEN, dashed] (-\d,0) -- (\d,0);
+    \draw[PLOT-GREEN, very thick] (\d,1) -- (2,1);
+    \draw[PLOT-GREEN, dashed, opacity=0.4] (-\d,-1) -- (-\d,0);
+    \draw[PLOT-GREEN, dashed, opacity=0.4] (\d,0) -- (\d,1);
+
+    % Discontinuity nodes
+    \fill[white, draw=PLOT-GREEN, thick] (-\d,-1) circle (1.5pt);
+    \fill[white, draw=PLOT-GREEN, thick] (\d,1) circle (1.5pt);
+
+    % Annotation for true \delta
+    \draw[<->, PLOT-GREEN, very thin] (-\d, 0.4) -- (\d, 0.4) node[midway, above] {};
+ 
+    % Label
+    \node[PLOT-GREEN, font=\bfseries] at (0,-2.2) {GappedStep};
+  \end{scope}
+
+  % --- 4. QuantizedReLU ---
+  \begin{scope}[shift={(15,0)}]
+    % Axes
+    \draw[-{Stealth}, thick] (-2.2,0) -- (2.2,0) node[below] {$x$};
+    \draw[-{Stealth}, thick] (0,-1.5) -- (0,2.5) node[left] {$y$};
+    
+
+    % Function (Step size 1.0 logic from ops.py -> round(clamp(x, min=0)))
+    \draw[PLOT-YELLOW, very thick] (-2,0) -- (0.5,0);
+    \draw[PLOT-YELLOW, very thick] (0.5,1) -- (1.5,1);
+    \draw[PLOT-YELLOW, very thick] (1.5,2) -- (2.2,2);
+
+    \draw[PLOT-YELLOW, dashed, opacity=0.4] (0.5,0) -- (0.5,1);
+    \draw[PLOT-YELLOW, dashed, opacity=0.4] (1.5,1) -- (1.5,2);
+
+    % Discontinuity nodes
+    \fill[PLOT-YELLOW] (0.5,0) circle (1.5pt);
+    \fill[white, draw=PLOT-YELLOW, thick] (0.5,1) circle (1.5pt);
+    \fill[white, draw=PLOT-YELLOW, thick] (1.5,1) circle (1.5pt);
+    \fill[PLOT-YELLOW] (1.5,2) circle (1.5pt);
+
+    % Label
+    \node[PLOT-YELLOW, font=\scriptsize] at (1, 2.2) {};
+    \node[PLOT-YELLOW, font=\bfseries] at (0,-2.2) {QuantizedReLU};
+  \end{scope}
+
+\end{tikzpicture} 
+\begin{tcolorbox}[reprocard, title=Setup]\\
+We train a three-hidden-layer multilayer perceptron of width 256 on the MNIST dataset ($784\rightarrow256\rightarrow256\rightarrow256\rightarrow10$), training the architecture for 2,000 steps utilizing a batch size of 512. We evaluate a suite of activation functions: a continuous \texttt{ReLU} baseline, alongside \texttt{Step}, \texttt{GappedStep}, and \texttt{QuantizedReLU}.
+\end{tcolorbox}
+
+\begin{figure}[ht]
+\centering
+\safeincludegraphics[width=0.9\textwidth]{images/other_benchmarks/non_diff_activations_MNIST.pdf}
+\caption{Validation accuracy versus optimization step for networks equipped with continuous and discontinuous activation functions evaluated on MNIST.}
+\label{fig:non-diff-activations}
+\end{figure}
+
+This experiment demonstrates that training these functions natively in $\mathcal{P}$Torch is feasible. As expected, they underperform compared to ReLU. Their performance can be improved by tuning the step/gap size to effectively make them less discontinuous. In gradient-based frameworks, it is practically possible to train networks with these activation functions; however, they require heuristics such as the straight-through estimator to do so. Straight-through estimators \cite{bengio2013estimating} work by using the true function on the forward pass and a proxy continuous variant on the backward pass, thus bypassing the non-differentiability issue.

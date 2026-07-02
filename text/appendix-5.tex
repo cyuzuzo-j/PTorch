@@ -1,0 +1,209 @@
+\chapter{Useful Projections}
+\label{sec:projections}
+\section{Linear layers}
+\label{sec:linear_layer}
+% -------------------------
+\begin{tcolorbox}[projectioncard, title=Linear Layer]\\
+\textbf{Constraint Set}
+\[
+C_{\mathrm{dot}} = \{(h, \theta, h^+) \mid \theta^\top h = h^+\}
+\]
+ 
+\textbf{Projection $\ell_2$ ($\alpha=1$)}
+\[
+\begin{aligned}
+\overline{h} &= \frac{h + t\,\theta}{1-t^2}, \\
+\overline{\theta} &= \frac{\theta + t\,h}{1-t^2}, \\
+\overline{h}^+ &= h^+ - \frac{t}{\gamma^2}
+\end{aligned}
+\]
+\textbf{Derivation Source}
+\cite{bauschke_bilinear, elser2019learning, bergmeister2025projection}
+\textit{The scalar $t$ is computed via Newton's method.}
+\vspace{1.0em}
+\\
+\textbf{Projection $\ell_\infty$}
+\[
+\sigma := \operatorname{sign}\!\bigl(h^{+}-\theta^\top h\bigr),\qquad
+a_k=|h_k+\theta_k|,\quad b_k=|h_k-\theta_k|.
+\]
+The optimal box radius $\epsilon^*$ is the unique root of $F(\epsilon)=0$:
+\[
+F(\epsilon)=\sum_{k=1}^{n} M_k(\epsilon)+\frac{\epsilon}{\gamma^2}-\bigl|h^{+}-\theta^\top h\bigr|,
+\]
+\[
+M_k(\epsilon)=m_k(\epsilon)\bigl(a_k\epsilon+\sigma\epsilon^2\bigr)
+            +\bigl(1-m_k(\epsilon)\bigr)\bigl(b_k\epsilon-\sigma\epsilon^2\bigr),
+\quad
+m_k(\epsilon)=\mathbf{1}\!\left[2\sigma\epsilon \ge b_k-a_k\right].
+\]
+The projected coordinates are reconstructed as
+\[
+\overline{h}^{+}=h^{+}-\sigma\,\frac{\epsilon^*}{\gamma^2},\qquad
+\begin{cases}
+\Delta h_k=\Delta\theta_k=\sigma\,\mathrm{sgn}(h_k+\theta_k)\,\epsilon^* & m_k=1\\[2pt]
+\Delta\theta_k=-\Delta h_k=\sigma\,\mathrm{sgn}(h_k-\theta_k)\,\epsilon^* & m_k=0
+\end{cases}
+\\
+\\
+\]
+\end{tcolorbox}
+\paragraph{$\ell_2$ derivation}
+We are looking for the closest point in the feasibility set under a weighted $\ell_2$ norm:
+\[
+\Pi_{C_{\mathrm{dot}}}^{\alpha, \gamma}(h, \theta, h^+) \in \operatorname*{arg\,min}_{(\overline{h}, \overline{\theta}, \overline{h}^+) \in C_{\mathrm{dot}}} \left( \lVert \overline{h}-h \rVert^2 + \alpha\lVert \overline{\theta}-\theta \rVert^2 + \gamma^2(\overline{h}^+ - h^+)^2 \right).
+\]
+Introduce a Lagrangian multiplier $\lambda$ and define
+\[
+  \mathcal{L} = \lVert \overline{h}-h\rVert^2 + \alpha\lVert \overline{\theta}-\theta\rVert^2 + \gamma^2(\overline{h}^+-h^+)^2 + \lambda\,(\overline{h}^+ - \overline{\theta}^\top \overline{h}).
+\]
+\[
+ \nabla \mathcal{L} = 0 \implies
+  \overline{h} = h + t\,\overline{\theta},\qquad \overline{\theta} = \theta + \frac{t}{\alpha}\,\overline{h},\qquad \overline{h}^+ = h^+ - \frac{t}{\gamma^2} \quad (t:=\lambda/2)
+\]
+Solving the coupled system gives
+\[
+  \overline{h} = \frac{\alpha}{\alpha-t^2}(h + t\,\theta),\qquad \overline{\theta} = \frac{\alpha\theta }{\alpha-t^2} +  \frac{t\,h}{\alpha-t^2} .
+\]
+Substituting $\overline{h}^+=\overline{\theta}^\top \overline{h}$  into the constraint leads to a scalar equation $f(t)=0$:
+\[
+  h^+ - \frac{t}{\gamma^2}
+  = \frac{(\alpha\theta+t h)^\top \alpha(h+t \theta)}{(\alpha-t^2)^2}
+  = \alpha \frac{p(\alpha+t^2)+q t}{(\alpha-t^2)^2},
+\]
+where $p:=\theta^\top h$ and $q:=\lVert h\rVert^2 + \alpha\lVert \theta\rVert^2$.
+The root can be found efficiently with Newton's method, after which $\overline{h}, \overline{\theta}, \overline{h}^+$ are reconstructed from the expressions above.
+
+\section{Functional layers}
+\begin{tcolorbox}[projectioncard, title= Add Layer]
+ 
+\textbf{Constraint}
+\[
+C_{\mathrm{add}} = \{(h_1, h_2, h^+) \mid h_1 + h_2 = h^+\}
+\]
+ 
+\textbf{Projection $\ell_2$}
+ 
+Let the residual be $r = h_1 + h_2 - h^+$. The displacement is
+shared in thirds:
+\[
+\begin{aligned}
+\overline{h}_1 &= h_1 - \tfrac{r}{3}, \\
+\overline{h}_2 &= h_2 - \tfrac{r}{3}, \\
+\overline{h}^+ &= h^+ + \tfrac{r}{3}.
+\end{aligned}
+\]
+If the output target is fixed, projecting $(h_1, h_2)$ onto the constraint $h_1 + h_2 = h^+$ splits this residual evenly between the two branches
+\[
+\overline{h}_1 = h_1 - \tfrac{r}{2}, \qquad \overline{h}_2 = h_2 - \tfrac{r}{2}.
+\]
+\end{tcolorbox}
+ 
+\begin{tcolorbox}[projectioncard, title=Branch Layer]
+ 
+\textbf{Constraint}
+\[
+C_{\mathrm{copy}} = \{(h, h^+_1, \dots, h^+_N) \mid h^+_1 = h^+_2 = \cdots = h^+_N = h\}
+\]
+ 
+\textbf{Projection $\ell_2$}\\
+all $N$ copies must agree with the source. 
+\[
+(\overline{h}-h)^2 + \sum_{i=1}^{N} (\overline{h}^+_i - h^+_i)^2
+\quad\text{s.t.}\quad \overline{h}^+_i = \overline{h}
+\]
+gives the average of all $N+1$ coordinates
+\[
+\overline{h} = \overline{h}^+_i = \frac{h + \sum_{i=1}^{N} h^+_i}{N+1}.
+\]
+\end{tcolorbox}
+
+\section{Activation functions}
+ \begin{tcolorbox}[projectioncard, title=Softmax (heuristic)]
+\\
+Unlike the other projections, this is not the joint projection: we project onto
+the two sides of the constraint sequentially.
+\\
+\textbf{Constraint}
+\[
+C_{\mathrm{smax}} = \left\{(h, h^+) \in \mathbb{R}^n \times \mathbb{R}^n \middle|
+h^+_i = \frac{e^{h_i}}{\sum_{j} e^{h_j}}\right\}
+\]
+
+Feasible outputs satisfy $h^+_i > 0$ and $\sum_i h^+_i = 1$, and the input is
+determined only up to a constant shift: $h$ and $h + c\mathbf{1}$ produce the
+same $h^+$.
+\\
+\\
+\textbf{Sequential projection} \\
+A target $h^+$ is projected onto the simplex by clamping to positivity and re normalizing:
+\[
+\overline{h}^+ = \frac{\max(h^+,\, \varepsilon)}{\sum_{j} \max(h^+_j,\, \varepsilon)}.
+\]
+
+ By softmax's shift invariance, any feasible input has the form $\log \overline{h}^+ + c\mathbf{1}$
+for some scalar $c$. Choosing $c$ to minimize
+$\lVert \overline{h} - h \rVert_2^2$ projects $h$ onto that ray:
+\[
+c = \frac{1}{n}\sum_{i=1}^{n}\bigl(h_i - \log \overline{h}^+_i\bigr)
+  = \operatorname{mean}\!\bigl(h - \log \overline{h}^+\bigr),
+\qquad
+\overline{h} = \log \overline{h}^+ + c\,\mathbf{1}.
+\]
+\end{tcolorbox}
+\newpage
+\begin{tcolorbox}[projectioncard, title=ReLU Layer ($\ell_2$)]
+ 
+\textbf{Constraint}
+\[
+C_{\mathrm{ReLU}} = \{(h, h^+) \mid h^+ = \max(0, h)\}
+\]
+ 
+\textbf{Projection $\ell_2$}
+ 
+Let the projection onto the inactive branch be $h_1 = \min(h, 0)$:
+\[
+d_1^2 = (h - h_1)^2 + (h^+)^2
+\]
+Let the projection onto the active branch be $h_2 = \max\left(\frac{h + h^+}{2}, 0\right)$:
+\[
+d_2^2 = (h - h_2)^2 + (h^+ - h_2)^2
+\]
+The projected coordinates $(\bar{h}, \bar{h}^+)$ :
+\[
+(\bar{h}, \bar{h}^+) =
+\begin{cases}
+(h_1, 0) & \text{if } d_1^2 < d_2^2\\
+(h_2, h_2) & \text{otherwise}
+\end{cases}
+\]
+\textbf{Derivation Source}
+\cite{ elser2019learning}\\
+\end{tcolorbox}
+\begin{tcolorbox}[projectioncard, title=ReLU Layer ($\ell_{\infty}$)]\\
+\textbf{Constraint}
+\[
+C_{\mathrm{ReLU}} = \{(h, h^+) \mid h^+ = \max(0, h)\}
+\]
+\\
+\textbf{Projection $\ell_\infty$}
+ 
+ 
+Let the projection onto the inactive branch be $h_1 = \min(h, 0)$:
+\[
+d_1 = \max(|h - h_1|, |h^+|)
+\]
+Let the projection onto the active branch be $h_2 = \max\left(\frac{h + h^+}{2}, 0\right)$:
+\[
+d_2 = \max(|h - h_2|, |h^+ - h_2|)
+\]
+The projected coordinates $(\bar{h}, \bar{h}^+)$ :
+\[
+(\bar{h}, \bar{h}^+) =
+\begin{cases}
+(h_1, 0) & \text{if } d_1 < d_2 \\
+(h_2, h_2) & \text{otherwise}
+\end{cases}
+\]
+\end{tcolorbox}
+

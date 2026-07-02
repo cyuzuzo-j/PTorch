@@ -1,0 +1,35 @@
+\chapter{Details Experiments}
+Unless overridden in a per-experiment paragraph, all benchmarks share the configuration in \cref{tab:shared-protocol}. The configurations underlying every figure is released alongside the code in
+\texttt{experiments/\{mlp,deep,cnn\_benchmarks,attention\}/*.yaml}; the entry
+points are \texttt{bench\_ptorch.py}, \texttt{bench\_torch.py}
+\begin{table}[h]
+\centering
+\caption{Default experimental protocol. Per-experiment overrides
+(maximum step budget, early-stopping patience, network width/depth,
+loss function, projection norm, and optimizer) are stated in the
+corresponding paragraphs and reflect the released YAML
+configs.}
+\small
+\renewcommand{\arraystretch}{1.0}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Component} & \textbf{Default value} \\
+\midrule
+Frameworks compared      & $\mathcal{P}$Torch, PJAX~\cite{bergmeister2025projection}, Torch~\cite{paszke2019pytorchimperativestylehighperformance} \\
+Random seed              & 43 (per-run seed $= 43 + r$ for $r=0,1,2$) \\
+Batch size               & 32 \\
+Evaluation interval      & every 200 optimization steps on the held-out validation split \\
+Train/val     & 90\%/10\% of the train set; \\
+Initialization           & Kaiming-normal \\
+$\mathcal{P}$Torch optimizer  & \texttt{ProjectionMuon}, lr $=10^{-3}$ \\
+$\mathcal{P}$Torch projection norm & $\ell_\infty$ \\
+$\mathcal{P}$Torch projection scales & $\alpha = \gamma = 1$ (default) \\
+$\mathcal{P}$Torch loss       & \texttt{CrossEntropy} \\
+PJAX optimizer  & \texttt{DouglasRachford}, 50 inner projection steps per batch \\
+Torch optimizer & \texttt{Adam}, lr $=10^{-3}$, $\beta_1{=}0.9,\beta_2{=}0.999$ \\
+Torch loss      & \texttt{CrossEntropyLoss} \\
+Hardware / software      & 1$\times$ NVIDIA L40S (46\,GB); 16 cores; 188\,GB RAM\\
+\bottomrule
+\end{tabular}
+\label{tab:shared-protocol}
+\end{table}

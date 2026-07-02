@@ -1,0 +1,14 @@
+% XOR dataset plot (no preamble) to be included via \input
+\begin{tikzpicture}[scale=1.5, every node/.style={font=\scriptsize}]
+  \draw[->, thick, KUL-BLUE] (-0.5,0) -- (1.5,0) node[right, black] {$x[0]$};
+  \draw[->, thick, KUL-BLUE] (0,-0.5) -- (0,1.5) node[above, black] {$x[1]$};
+
+  % Class 0 (gray) and class 1 (KU Leuven blue)
+  \fill[gray!70] (0,0) circle (2pt) node[below left, black] {$0$};
+  \fill[KUL-BLUE] (1,0) circle (2pt) node[below right, black] {$1$};
+  \fill[KUL-BLUE] (0,1) circle (2pt) node[above left, black] {$1$};
+  \fill[gray!70] (1,1) circle (2pt) node[above right, black] {$0$};
+
+  % Example separating line (cannot separate XOR)
+  \draw[dashed, gray] (-0.5, 1.2) -- (1.2, -0.5);
+\end{tikzpicture}

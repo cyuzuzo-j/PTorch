@@ -1,0 +1,51 @@
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+\providecolor{KUL-ORANGE}{RGB}{230, 140, 0}
+
+\begin{tikzpicture}[
+    scale=0.95,
+    transform shape,
+    font=\small,
+    >=stealth,
+    op/.style={rectangle, rounded corners=1pt, draw=black!65, fill=black!8, thick, minimum width=2.8cm, minimum height=1.0cm, align=center},
+    param/.style={circle, draw=black!65, fill=black!10, text=black, thick, minimum size=1.2cm, inner sep=1pt, align=center},
+    state/.style={circle, draw=black!65, fill=black!5, text=black, thick, minimum size=1.0cm, inner sep=1pt, align=center},
+    io/.style={circle, draw=black!65, fill=black!5, text=black, thick, minimum size=0.9cm, inner sep=1pt, align=center},
+    focusState/.style={circle, draw=KUL-BLUE!85!black, fill=KUL-BLUE!12, thick, minimum size=1.4cm, inner sep=1pt, align=center},
+    focusIo/.style={circle, draw=KUL-BLUE!85!black, fill=KUL-BLUE!12, thick, minimum size=0.95cm, inner sep=1pt, align=center},
+    focusOp/.style={rectangle, rounded corners=1pt, draw=KUL-ORANGE!85!black, fill=KUL-ORANGE!15, thick, minimum width=3.2cm, minimum height=1.1cm, align=center},
+    focusParam/.style={circle, draw=KUL-BLUE!85!black, fill=KUL-BLUE!12, text=black, thick, minimum size=1.2cm, inner sep=1pt, align=center},
+    flow/.style={->, thick, black!55},
+    active/.style={->, thick, KUL-BLUE!85!black},
+    support/.style={->, thick, black!50}
+]
+
+    % Inactive layers (Forward pass history)
+    \node[state] (h0) at (0,0) {$h^{(0)}$};
+    \node[op] (lin1) at (3.5,0) {$\theta^{(1)}h^{(0)}$};
+    \node[state] (h1) at (6.5,0) {$h^{(1)}$};
+    \node[op] (sig) at (9.5,0) {$\Sigma(h^{(1)})$};
+
+    % Active projection nodes for the output linear layer
+    \node[focusState] (h2) at (12.5,0) {$h^{(2)}$};
+    \node[focusOp] (lin3) at (16.0,0) {$\theta^{(3)}h^{(2)}$};
+    \node[focusIo] (h3) at (19.0,0) {${h}^{(3)}$};
+
+    % Parameters
+    \node[param] (w1) at (3.5,2.0) {$\theta^{(1)}$};
+    \node[focusParam] (w3) at (16.0,2.0) {$\theta^{(3)}$};
+
+    % Flow connections for the inactive parts
+    \draw[flow] (h0) -- (lin1);
+    \draw[flow] (lin1) -- (h1);
+    \draw[flow] (h1) -- (sig);
+    \draw[flow] (sig) -- (h2);
+
+    % Parameter support for inactive layer
+    \draw[support] (w1) -- (lin1);
+
+    % Active connections converging on the local projection step
+    \draw[active] (h2) -- (lin3);
+    \draw[active] (w3) -- (lin3);
+    \draw[active] (h3) -- (lin3); % Target flowing backwards into the projection
+
+\end{tikzpicture}

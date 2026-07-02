@@ -1,0 +1,12 @@
+
+Using simplest formulation of policy gradient (ptorch projections).
+
+Saved rollout gif -> pg_ptorch_gifs/epoch_0000.gif
+/rhea/scratch/brussel/vo/000/bvo00004/vsc38352/learning_with_projections/experiments/pg_ptorch.py:206: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:836.)
+  print('epoch: %3d \t loss: %.3f \t return: %.3f \t ep_len: %.3f'%
+epoch:   0 	 loss: 0.006 	 return: -28.484 	 ep_len: 1000.000
+epoch:   1 	 loss: 0.006 	 return: -16.568 	 ep_len: 1000.000
+epoch:   2 	 loss: 0.006 	 return: -14.157 	 ep_len: 1000.000
+epoch:   3 	 loss: 0.010 	 return: -57.506 	 ep_len: 947.333
+epoch:   4 	 loss: -0.004 	 return: -39.486 	 ep_len: 988.333

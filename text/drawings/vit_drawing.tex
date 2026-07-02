@@ -1,0 +1,75 @@
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+\providecolor{KUL-ORANGE}{RGB}{230, 140, 0}
+
+
+\begin{tikzpicture}[>=Stealth, every node/.style={font=\small}, scale=0.6, transform shape]
+
+  % --- Styles ---
+  \tikzstyle{basebox} = [rectangle, draw=black, thick, fill=black!8, text centered, rounded corners=2pt, minimum width=2.6cm, minimum height=0.9cm, align=center]
+  \tikzstyle{layer} = [rectangle, draw=KUL-BLUE, thick, fill=KUL-BLUE!10, text=KUL-BLUE, text centered, minimum width=3.2cm, minimum height=0.9cm, align=center]
+  \tikzstyle{norm}  = [rectangle, draw=KUL-ORANGE, thick, fill=KUL-ORANGE!10, text=KUL-ORANGE, text centered, minimum width=2.2cm, minimum height=0.9cm, align=center]
+  \tikzstyle{add}   = [circle, draw=black, thick, fill=black!8, inner sep=2pt, font=\large]
+
+
+  % Patchify & Embed
+  \node[basebox] (embed) at (0,0) {Patchify \& Embed \\[-0.5ex] \scriptsize \textit{Linear(patch\_dim, emb\_dim)}};
+
+  % Attention Sublayer
+  \node[norm, right=1.5cm of embed] (norm1) {RMSNorm};
+  \node[layer, right=0.7cm of norm1] (mha) {MultiheadAttention};
+  \node[add, right=0.7cm of mha] (add1) {$+$};
+  \node[above=0.1cm of add1, font=\footnotesize\bfseries] {ResidualAdd};
+
+  % MLP Sublayer
+  \node[norm, right=1.5cm of add1] (norm2) {RMSNorm};
+  \node[layer, right=0.7cm of norm2] (mlp) {MLP \\[-0.5ex] \scriptsize \textit{Linear $\rightarrow$ Act $\rightarrow$ Linear}};
+  \node[add, right=0.7cm of mlp] (add2) {$+$};
+  \node[above=0.1cm of add2, font=\footnotesize\bfseries] {ResidualAdd};
+  
+  % Readout / Head
+  \node[basebox, right=1.4cm of add2] (pool) {Flatten};
+  \node[basebox, right=0.8cm of pool] (head) {Classification Head \\[-0.5ex] \scriptsize \textit{Linear(..., num\_classes)}};
+  
+  
+  % Branch 1: Attention Residual
+  \path (embed) -- (norm1) coordinate[midway] (split1);
+  \draw[thick] (embed) -- (split1);
+  \draw[->, thick] (split1) -- (norm1);
+  
+  \draw[->, thick, KUL-BLUE] (norm1) -- (mha);
+  \draw[->, thick, KUL-BLUE] (mha) -- (add1);
+  
+  % Attention Skip Connection
+  \draw[->, thick, KUL-ORANGE, dashed] (split1) -- ++(0, -1.4) -| (add1);
+  
+  % Branch 2: MLP Residual
+  \path (add1) -- (norm2) coordinate[midway] (split2);
+  \draw[thick] (add1) -- (split2);
+  \draw[->, thick] (split2) -- (norm2);
+
+  \draw[->, thick, KUL-BLUE] (norm2) -- (mlp);
+  \draw[->, thick, KUL-BLUE] (mlp) -- (add2);
+
+  % MLP Skip Connection
+  \draw[->, thick, KUL-ORANGE, dashed] (split2) -- ++(0, -1.4) -| (add2);
+
+  % Top routing (after block)
+  \draw[->, thick] (add2) -- (pool);
+  \draw[->, thick] (pool) -- (head);
+
+  % Draw shaded background for the Transformer Block
+  \begin{scope}[on background layer]
+    % Coordinate calculations for bounding box
+    \path (split1) ++(-0.4, -1.8) coordinate (bbox_bottom_left);
+    \path (add2) ++(1.0, 1.2) coordinate (bbox_top_right);
+    \node[
+      rectangle, draw=black, thick, dashed, fill=black!4,
+      inner sep=0pt,
+      fit=(bbox_bottom_left) (bbox_top_right)
+    ] (block_box) {};
+    \node[anchor=north west, font=\footnotesize\bfseries, inner sep=6pt] 
+      at (block_box.north west) {Transformer Block $\times$ 4};
+  \end{scope}
+
+
+\end{tikzpicture}

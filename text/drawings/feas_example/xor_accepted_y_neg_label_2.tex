@@ -1,0 +1,40 @@
+\providecolor{KUL-BLUE}{RGB}{29, 55, 104}
+\providecolor{KUL-RED}{RGB}{170, 30, 30}
+\providecolor{KUL-ORANGE}{RGB}{230, 140, 0}
+
+\begin{tikzpicture}[scale=1, every node/.style={font=\scriptsize}]
+  % Plot limits (match other XOR accepted plots)
+  \def\xmin{-2.0}
+  \def\xmax{2.0}
+  \def\ymin{-2.0}
+  \def\ymax{2.0}
+
+  % Define coordinates for delta
+  \def\deltaVal{1.0}
+
+  \useasboundingbox (\xmin,\ymin) rectangle (\xmax,\ymax);
+
+  % Accepted Region (z_out^0 \le 0)
+  \fill[KUL-BLUE, opacity=0.05] (\xmin, \ymin) rectangle (0, \ymax);
+
+  % Axes
+  \draw[->, thick, KUL-BLUE] (\xmin, 0) -- (\xmax, 0) node[right, black] {$z_{\mathrm{out}}^0$};
+  \draw[-, thick, KUL-BLUE] (0, \ymin) -- (0, \ymax) node[above, black] {};
+
+  \fill[KUL-RED!80!black] (-1, 0) circle (2.2pt);
+  \node[below, font=\tiny, text=black!70] at (-1, -0.2) {$z_{\mathrm{out,init}}^0=-2$};
+
+  % Vertical line at delta
+  \draw[thick, dashed, KUL-ORANGE] (\deltaVal, \ymin) -- (\deltaVal, \ymax);
+  \draw[KUL-ORANGE, fill=white] (\deltaVal, 0) circle (1.5pt) node[below right, black] {$\delta$};
+
+  % Legend (top-left)
+  \node[anchor=north west, draw=black!30, fill=white, fill opacity=1.0, text opacity=1,
+        rounded corners=1pt, inner sep=0.5pt, font=\fontsize{4}{4.2}\selectfont, align=left,
+        text=KUL-BLUE!70!black]
+    at (\xmin+0.05, \ymax-0.05)
+    {$z_{\mathrm{out}}^0\in C^0_{z_{\mathrm{out}}}$\\[-1pt]
+     $C^0_{z_{\mathrm{out}}}:=\{z_{\mathrm{out}}^0:\; z_{\mathrm{out}}^0\le 0\}$};
+  % Origin marker
+  \fill[black] (0,0) circle (1pt) node[below left] {$0$};
+\end{tikzpicture}

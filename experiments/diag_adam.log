@@ -1,0 +1,25 @@
+
+Projection policy gradient (ptorch) for continuous control, with value baseline.
+
+/rhea/scratch/brussel/vo/000/bvo00004/vsc38352/learning_with_projections/experiments/bipedal_walker.py:302: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:836.)
+  pol_acc += float(pol); val_acc += float(val); nb += 1
+epoch:   0 	 pol:    -0.10 	 val:   497.66 	 clipfrac: 0.84 	 return:  -103.26 	 ep_len:   112.5 	 log_std: -0.696
+epoch:   1 	 pol:    -0.23 	 val:   303.07 	 clipfrac: 0.73 	 return:  -105.71 	 ep_len:    73.1 	 log_std: -0.700
+epoch:   2 	 pol:     0.32 	 val:   153.35 	 clipfrac: 0.56 	 return:  -107.60 	 ep_len:    75.1 	 log_std: -0.704
+epoch:   3 	 pol:     0.06 	 val:   185.87 	 clipfrac: 0.40 	 return:  -109.21 	 ep_len:    79.8 	 log_std: -0.705
+epoch:   4 	 pol:     0.06 	 val:   147.97 	 clipfrac: 0.48 	 return:  -108.39 	 ep_len:    78.6 	 log_std: -0.705
+epoch:   5 	 pol:    -1.72 	 val:   138.85 	 clipfrac: 0.50 	 return:  -109.75 	 ep_len:    80.7 	 log_std: -0.710
+epoch:   6 	 pol:     0.15 	 val:   101.46 	 clipfrac: 0.47 	 return:  -107.49 	 ep_len:    70.6 	 log_std: -0.711
+epoch:   7 	 pol:     0.13 	 val:    84.13 	 clipfrac: 0.55 	 return:  -106.52 	 ep_len:    64.3 	 log_std: -0.711
+epoch:   8 	 pol:     0.07 	 val:    65.92 	 clipfrac: 0.51 	 return:  -106.44 	 ep_len:    63.5 	 log_std: -0.713
+epoch:   9 	 pol:    -0.36 	 val:    59.52 	 clipfrac: 0.44 	 return:  -107.07 	 ep_len:    64.1 	 log_std: -0.718
+epoch:  10 	 pol:     0.05 	 val:    56.38 	 clipfrac: 0.43 	 return:  -106.54 	 ep_len:    63.1 	 log_std: -0.720
+epoch:  11 	 pol:     0.08 	 val:    58.32 	 clipfrac: 0.44 	 return:  -106.31 	 ep_len:    65.1 	 log_std: -0.722
+epoch:  12 	 pol:     0.03 	 val:    47.43 	 clipfrac: 0.47 	 return:  -105.82 	 ep_len:    60.4 	 log_std: -0.725
+epoch:  13 	 pol:     0.14 	 val:    47.14 	 clipfrac: 0.38 	 return:  -105.91 	 ep_len:    63.4 	 log_std: -0.727
+epoch:  14 	 pol:     0.13 	 val:    37.57 	 clipfrac: 0.43 	 return:  -105.99 	 ep_len:    63.0 	 log_std: -0.730
+epoch:  15 	 pol:     0.14 	 val:    41.60 	 clipfrac: 0.44 	 return:  -105.12 	 ep_len:    58.9 	 log_std: -0.732
+epoch:  16 	 pol:     0.08 	 val:    42.88 	 clipfrac: 0.46 	 return:  -105.89 	 ep_len:    62.9 	 log_std: -0.735
+epoch:  17 	 pol:     0.08 	 val:    38.66 	 clipfrac: 0.41 	 return:  -105.95 	 ep_len:    61.7 	 log_std: -0.739
+epoch:  18 	 pol:     0.04 	 val:    37.65 	 clipfrac: 0.36 	 return:  -105.90 	 ep_len:    62.2 	 log_std: -0.743
