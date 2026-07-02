@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "projtorch"
+version = "0.1.0"
+description = "Train neural networks with cyclic projections instead of backpropagation, on top of PyTorch."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Cyuzuzo Jambe", email = "cyuzuzo.jambe@gmail.com" },
+]
+keywords = [
+    "pytorch",
+    "deep-learning",
+    "projections",
+    "gradient-free",
+    "optimization",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.0",
+    "numpy",
+]
+
+[project.optional-dependencies]
+# Extras needed to run the benchmark/experiment scripts, not the core library.
+experiments = [
+    "pandas",
+    "tqdm",
+    "pyyaml",
+]
+test = [
+    "pytest",
+]
+
+[project.urls]
+Homepage = "https://github.com/cyuzuzo-j/PTorch"
+Repository = "https://github.com/cyuzuzo-j/PTorch"
+
+[tool.setuptools.packages.find]
+where = ["frameworks"]
+include = ["ptorch*"]
+exclude = ["ptorch.tests*", "ptorch.*.tests*"]

@@ -11,23 +11,32 @@ ptorch: `loss.backward()` propagates *projection targets* — each layer project
 
 ## Installation
 
+Requires Python 3.9+.
+
 ```bash
+# From PyPI
+pip install projtorch
 
-# Install dependencies (Python 3.10+)
-pip install torch numpy pandas tqdm pyyaml
-
-cd frameworks
-git clone https://github.com/AndreasBergmeister/pjax.git pjax_orr # download pjax
+# Or from source
+git clone https://github.com/cyuzuzo-j/PTorch.git
+cd PTorch
+pip install .
 ```
 
-The `frameworks/` directory is used directly from source — no `pip install` needed. Scripts add it to `sys.path` automatically.
+The distribution is named `projtorch`; the import name is `ptorch` (core
+dependencies: `torch`, `numpy`).
+
+To run the benchmark/experiment scripts under `experiments/`, install the extra
+dependencies too:
+
+```bash
+pip install "projtorch[experiments]"   # pandas, tqdm, pyyaml
+# add [test] for the pytest suite:    pip install "projtorch[experiments,test]"
+```
 
 ## Quick start
 
 ```python
-import sys
-sys.path.insert(0, "frameworks")
-
 import ptorch                          # applies projection overrides to torch
 import ptorch.nn.modules as pnn
 import ptorch.optim_static as poptim
