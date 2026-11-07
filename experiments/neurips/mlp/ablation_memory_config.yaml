@@ -1,0 +1,75 @@
+# Peak MB column of table:ablation. Same model and variants as ablation_config.yaml,
+# run eagerly for a few steps (1 seed): under reduce-overhead the training runs'
+# allocator peak is unreliable, eager runs report it exactly. Data is excluded (see Loop).
+#   TORCHDYNAMO_DISABLE=1 python -m experiments.neurips.mlp.bench_ptorch --config experiments/neurips/mlp/ablation_memory_config.yaml --fresh
+#   python -m experiments.neurips.mlp.bench_torch --config experiments/neurips/mlp/ablation_memory_config.yaml --fresh
+# Generated from ablation_config.yaml; keep the variants in sync.
+random_seed: 2026             # run r uses seed 2026 + r
+batch_sizes:
+- 256
+tasks:
+- name: CIFAR10_1024
+  dataset: CIFAR10
+  in_features: 3072
+  classes: 10
+  hidden:
+  - 1024
+ptorch:
+  defaults:
+    optimizer:
+      name: ProjectionMuon
+      kwargs:
+        lr: 0.001
+        weight_decay: 0.1
+    loss: CrossEntropy
+  variants:
+  - name: R1_plain_unfused
+    impl: unfused
+    loss: HardMarginLoss
+    optimizer:
+      name: ProjectionSGD
+      kwargs:
+        lr: 1.0
+  - name: R2_fused_l2
+    loss: HardMarginLoss
+    optimizer:
+      name: ProjectionSGD
+      kwargs:
+        lr: 1.0
+  - name: R3_prox_ce
+    optimizer:
+      name: ProjectionSGD
+      kwargs:
+        lr: 1.0
+  - name: R4_muon
+  - name: R5_linf
+    norm: linf
+  - name: R6_linf_no_muon
+    norm: linf
+    optimizer:
+      name: ProjectionSGD
+      kwargs:
+        lr: 1.0
+  - name: hybrid
+    head_norm: linf
+torch:
+  name: torch
+  optimizer:
+    name: Adam
+    kwargs:
+      lr: 0.001
+labels:
+  torch: Torch (Adam)
+  pjax: PJAX (DR, 50 passes/step)
+  R1_plain_unfused: 'R1: plain cyclic proj'
+  R2_fused_l2: 'R2: + fused $\ell_2$'
+  R3_prox_ce: 'R3: + proximal CE loss'
+  R4_muon: 'R4: + Muon'
+  R5_linf: 'R5: + $\ell_\infty$ geometry'
+  R6_linf_no_muon: 'R6: - Muon'
+  hybrid: $\mathcal{P}$Torch-hybrid
+num_runs: 1
+max_steps: 50
+eval_every: 1000
+patience: 1000
+results_dir: results/ablation_memory

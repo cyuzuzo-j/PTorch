@@ -1,0 +1,56 @@
+# 8-hidden-layer MLP: Experiment 1 (config.yaml) with 8 hidden layers instead of 1
+# (paper fig:deep-mlp, tab:test-results). Same seeds, optimizer, loss and variants.
+#   python -m experiments.neurips.mlp.bench_ptorch --config experiments/neurips/mlp/deep8_config.yaml --fresh
+#   python -m experiments.neurips.mlp.bench_torch  --config experiments/neurips/mlp/deep8_config.yaml --fresh
+#   python -m experiments.neurips.plot_curves --config experiments/neurips/mlp/deep8_config.yaml
+#   python -m experiments.neurips.make_tables --config experiments/neurips/mlp/deep8_config.yaml
+
+random_seed: 2026             # run r uses seed 2026 + r
+num_runs: 3
+batch_sizes: [32]
+max_steps: 5000
+eval_every: 200               # steps between validation evaluations
+patience: 100                 # evaluations without improvement before stopping (100 > 5000/200: off)
+
+results_dir: results/deep8_mlp
+figures_dir: ../../../images/deep
+
+tasks:
+  - name: MNIST_8L
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024]
+  - name: CIFAR10_8L
+    dataset: CIFAR10
+    in_features: 3072
+    classes: 10
+    hidden: [1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024]
+
+ptorch:
+  defaults:
+    optimizer: {name: ProjectionMuon, kwargs: {lr: 0.001, weight_decay: 0.1}}
+    loss: CrossEntropy        # proximal CE, lambda = 10, 1 step (the defaults)
+  variants:
+    - name: ptorch_l2
+    - name: ptorch_linf
+      norm: linf
+    - name: ptorch_hybrid     # l2 body + l_inf head
+      head_norm: linf
+
+torch:
+  name: torch
+  optimizer: {name: Adam, kwargs: {lr: 0.001}}
+
+labels:
+  ptorch_l2: $\mathcal{P}$Torch
+  ptorch_linf: $\mathcal{P}$Torch ($\ell_\infty$)
+  ptorch_hybrid: $\mathcal{P}$Torch hybrid
+  torch: Torch
+
+# Figures show only l2 and Torch (l_inf collapses at depth; see the tables).
+plots:
+  - {file: MNIST_8L_STEP.pdf, task: MNIST_8L, x: step, where: {variant: [ptorch_l2, torch]}, title: MNIST 8-Layer MLP — Accuracy vs. Step}
+  - {file: MNIST_8L_TIME.pdf, task: MNIST_8L, x: time, where: {variant: [ptorch_l2, torch]}, title: MNIST 8-Layer MLP — Accuracy vs. Time, time_bins: 50}
+  - {file: CIFAR10_8L_STEP.pdf, task: CIFAR10_8L, x: step, where: {variant: [ptorch_l2, torch]}, title: 8-Layer MLP — Accuracy vs. Step}
+  - {file: CIFAR10_8L_TIME.pdf, task: CIFAR10_8L, x: time, where: {variant: [ptorch_l2, torch]}, title: CIFAR10 8-Layer MLP — Accuracy vs. Time, time_bins: 50}

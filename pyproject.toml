@@ -1,0 +1,93 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ptorch"
+version = "0.1.0"
+description = "PyTorch-based framework for training neural networks via cyclic projections instead of backpropagation."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Jeff Cyuzuzo Jambe", email = "cyuzuzo.jambe@gmail.com" },
+]
+keywords = ["pytorch", "projections", "deep-learning", "optimization"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    # >=2.14: torch.optim.Muon (ProjectionMuon) needs >=2.9, and Inductor/Triton
+    # in 2.9-2.11 miscompiles the TD floor kernel on GPU ("operand does not dominate").
+    "torch>=2.14",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+experiments = [
+    "torchvision>=0.29",
+    "pandas>=2.0",
+    "tqdm>=4.66",
+    "pyyaml>=6.0",
+    "matplotlib>=3.8",
+    "seaborn>=0.13",
+    "requests>=2.31",
+    "sentencepiece>=0.2",
+]
+# Policy-gradient / control experiments (experiments/pg*.py, lunar_lander*, bipedal_walker, walker)
+rl = [
+    "gymnasium[box2d,mujoco]>=1.0",
+    "imageio>=2.34",
+    "pillow>=10.0",
+]
+jax = [
+    "jax",
+    "jaxlib",
+]
+dev = [
+    "pytest>=7",
+    "ruff>=0.5",
+    "build",
+]
+
+[project.urls]
+Homepage = "https://github.com/cyuzuzo-j/PTorch"
+Issues = "https://github.com/cyuzuzo-j/PTorch/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ptorch"]
+exclude = [
+    "src/ptorch/core/tests",
+    "src/ptorch/nn/tests",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/ptorch",
+    "tests",
+    "README.md",
+    "LICENSE",
+    "CITATION.cff",
+    "pyproject.toml",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [".venv", "wandb", "logs", "dataset", "images", ".python_prefix", ".python_tmp"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"

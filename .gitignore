@@ -1,0 +1,57 @@
+# Large dataset files (match at any depth)
+**/dataset/*.pt
+**/dataset/*.tar.gz
+**/dataset/*.tar
+**/dataset/*.zip
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pycache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Ignore large datasets
+dataset/**/*.pt
+dataset/**/*.tar.gz
+experiments/**/dataset/
+
+# Local Python launcher/temp directories
+.python_prefix/
+.python_tmp/
+
+# Editor settings
+.vscode/
+
+# Weights & Biases local runs and logs
+wandb/
+
+# Local experiment debug artifacts
+experiments/attention/attention_debug/
+
+# LaTeX build intermediates
+*.aux
+*.fdb_latexmk
+*.fls
+
+# Python packaging build artifacts
+build/
+dist/
+*.egg-info/
+.ruff_cache/
+
+# Wiki working tree (when cloned alongside this repo by tools/wiki/publish.sh)
+PTorch.wiki/
+
+# Regenerated wiki figures (re-runnable via tools/wiki/build_figures.py)
+docs_src/images/
+
+# Downloaded training corpora (parameter-golf / fineweb) — regenerable, multi-GB
+experiments/parameter-golf/data/

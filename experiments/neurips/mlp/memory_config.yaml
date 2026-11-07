@@ -1,0 +1,24 @@
+# Peak memory of one linear-layer projection vs input dimension (paper fig:memory-k)
+#   python -m experiments.neurips.mlp.bench_memory --config experiments/neurips/mlp/memory_config.yaml
+#   python -m experiments.neurips.mlp.plot_memory  --config experiments/neurips/mlp/memory_config.yaml
+
+out_dim: 500                  # M, held fixed
+batch_size: 256               # B, held fixed
+in_dims: [100, 250, 500, 1000, 2000, 4000, 8000]   # K, swept
+plot_max_k: 2000              # the figure stops here (the CSV has every K)
+frameworks: [torch, ptorch, pjax]
+device: cuda                  # cuda measures the allocator peak (the paper column); cpu only RSS/tracemalloc
+metric: device                # column plotted: device | rss | tracemalloc
+
+# Optimizer and loss of each framework: the same as the training runs
+# (config.yaml), so optimizer state is part of the measured peak.
+torch:
+  optimizer: {name: Adam, kwargs: {lr: 0.001}}
+ptorch:
+  optimizer: {name: ProjectionMuon, kwargs: {lr: 0.001, weight_decay: 0.1}}
+  loss: CrossEntropy          # proximal CE, as in bench_ptorch
+pjax:
+  optimizer: {name: DouglasRachford, kwargs: {steps_per_update: 50}}
+
+results_dir: results/memory
+figures_dir: ../../../images

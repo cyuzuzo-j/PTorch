@@ -1,0 +1,61 @@
+# Shallow MLP on MNIST and CIFAR-10 (paper fig:shallow-mlp, tab:test-results)
+#   python -m experiments.neurips.mlp.bench_ptorch --config experiments/neurips/mlp/config.yaml --fresh
+#   python -m experiments.neurips.mlp.bench_torch  --config experiments/neurips/mlp/config.yaml --fresh
+#   python -m experiments.neurips.mlp.bench_pjax   --config experiments/neurips/mlp/config.yaml --fresh
+#   python -m experiments.neurips.plot_curves --config experiments/neurips/mlp/config.yaml
+#   python -m experiments.neurips.make_tables --config experiments/neurips/mlp/config.yaml
+
+random_seed: 2026             # run r uses seed 2026 + r
+num_runs: 3
+batch_sizes: [32]
+max_steps: 5000
+eval_every: 200               # steps between validation evaluations
+patience: 100                 # evaluations without improvement before stopping (100 > 5000/200: off)
+
+results_dir: results/shallow_mlp
+figures_dir: ../../../images/mlp
+
+tasks:
+  - name: CIFAR10_1L
+    dataset: CIFAR10
+    in_features: 3072         # 32x32x3 flattened
+    classes: 10
+    hidden: [1024]
+  - name: MNIST_1L
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [1024]
+
+ptorch:
+  defaults:
+    optimizer: {name: ProjectionMuon, kwargs: {lr: 0.001, weight_decay: 0.1}}
+    loss: CrossEntropy        # proximal CE, lambda = 10, 1 step (the defaults)
+  variants:
+    - name: ptorch_l2
+    - name: ptorch_linf
+      norm: linf
+    - name: ptorch_hybrid     # l2 body + l_inf head
+      head_norm: linf
+
+torch:
+  name: torch
+  optimizer: {name: Adam, kwargs: {lr: 0.001}}
+
+pjax:
+  name: pjax
+  optimizer: {name: DouglasRachford, kwargs: {steps_per_update: 50}}
+
+labels:
+  ptorch_l2: $\mathcal{P}$Torch
+  ptorch_linf: $\mathcal{P}$Torch ($\ell_\infty$)
+  ptorch_hybrid: $\mathcal{P}$Torch hybrid
+  torch: Torch
+  pjax: PJAX
+
+# Figures leave out the hybrid (it is in the tables).
+plots:
+  - {file: MNIST_1L_STEP.pdf, task: MNIST_1L, x: step, where: {variant: [ptorch_l2, ptorch_linf, torch, pjax]}, title: MNIST — Accuracy vs. Step, ylim: [0.9, 1.0]}
+  - {file: MNIST_1L_TIME.pdf, task: MNIST_1L, x: time, where: {variant: [ptorch_l2, ptorch_linf, torch, pjax]}, title: MNIST — Accuracy vs. Time, xscale: log, time_bins: 500}
+  - {file: CIFAR10_1L_STEP.pdf, task: CIFAR10_1L, x: step, where: {variant: [ptorch_l2, ptorch_linf, torch, pjax]}, title: CIFAR10 — Accuracy vs. Step}
+  - {file: CIFAR10_1L_TIME.pdf, task: CIFAR10_1L, x: time, where: {variant: [ptorch_l2, ptorch_linf, torch, pjax]}, title: CIFAR10 — Accuracy vs. Time, xscale: log, time_bins: 500}

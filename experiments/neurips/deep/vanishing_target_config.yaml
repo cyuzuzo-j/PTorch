@@ -1,0 +1,16 @@
+# Identity-recovery probe for vanishing targets (paper fig:depth-barrier)
+# Bias-free linear MLPs of each depth learn f(x) = x on x ~ N(0, I_width). After
+# training, computes the target signal magnitude delta^(i), i = 0..L, on a fresh
+# batch and saves it with the final training MSE to results_dir/vanishing_deltas.csv.
+#   python -m experiments.neurips.deep.vanishing_target --config experiments/neurips/deep/vanishing_target_config.yaml
+
+random_seed: 2026             # run r uses seed 2026 + r
+num_runs: 3
+depths: [2, 4, 8]
+width: 32
+batch_size: 16
+steps: 5000
+optimizer: {name: ProjectionMuon, kwargs: {lr: 0.001, weight_decay: 0.1}}
+
+results_dir: results/vanishing_target
+figures_dir: ../../../images/deep

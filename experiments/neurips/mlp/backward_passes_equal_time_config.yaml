@@ -1,0 +1,29 @@
+# Backward passes per batch K, equal time (the "equal-time 0.3 s" column of tab:backward-passes)
+# Every run trains for 0.3 s (evaluation excluded) instead of a fixed step count.
+#   python -m experiments.neurips.mlp.bench_ptorch --config experiments/neurips/mlp/backward_passes_equal_time_config.yaml --fresh
+#   python -m experiments.neurips.make_tables --config experiments/neurips/mlp/backward_passes_equal_time_config.yaml
+
+random_seed: 2026             # run r uses seed 2026 + r
+num_runs: 3
+batch_sizes: [32]
+time_budget_s: 0.3            # seconds of training per run; no max_steps
+eval_every: 100
+patience: 1000
+
+results_dir: results/backward_passes_equal_time
+
+tasks:
+  - name: MNIST_1L
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [1024]
+
+ptorch:
+  defaults:
+    optimizer: {name: ProjectionMuon, kwargs: {lr: 0.001, weight_decay: 0.1}}
+    loss: CrossEntropy
+  variants:
+    - {name: K1, passes: 1}
+    - {name: K2, passes: 2}
+    - {name: K10, passes: 10}

@@ -1,0 +1,23 @@
+# Paper fig:mem-cnn. Peak GPU memory of one training step of a 1-block CNN (conv kxk, F filters -> ReLU -> 2x2 max-pool -> flatten ->
+# linear 10) on 32x32x3 inputs at batch 64, with the conv layer grown in kernel size and filters together.
+# Optimizers as in mlp/memory_config.yaml. Run on the paper's L40S; PJAX runs out of memory at the largest sizes.
+#   python -m experiments.neurips.cnn_benchmarks.bench_memory --config experiments/neurips/cnn_benchmarks/memory_config.yaml
+#   python -m experiments.neurips.cnn_benchmarks.plot_memory  --config experiments/neurips/cnn_benchmarks/memory_config.yaml
+network: {size: 32, in_channels: 3, classes: 10}
+batch_size: 64
+conv_sizes: [[3, 16], [5, 32], [7, 64], [9, 128], [11, 256]]   # [kernel, filters]
+frameworks: [torch, ptorch, pjax]
+device: cuda
+
+torch:
+  optimizer: {name: Adam, kwargs: {lr: 0.001}}
+ptorch:
+  optimizer: {name: ProjectionMuon, kwargs: {lr: 0.001, weight_decay: 0.1}}
+  loss: CrossEntropy
+  head_norm: l2
+pjax:
+  optimizer: {name: DouglasRachford, kwargs: {steps_per_update: 50}}
+
+gpu_memory_gb: 48             # for the out-of-memory label
+results_dir: results/memory
+figures_dir: ../../../images

@@ -1,0 +1,53 @@
+# Paper fig:resnet-8. CIFAR-10, 8-layer residual CNN (ResNet-8 topology, models.py: ResNet8_PTorch / ResNet8_Torch): 3x3 stem conv,
+# three basic blocks of widths 64 / 128 / 256 (the last two stride 2, 1x1 conv shortcut), LeakyReLU(0.1), no
+# normalization layers, flatten readout (no global average pooling) and a linear head (l2-projected in PTorch).
+# Both frameworks: Adam (ProjectionAdam in PTorch), lr 1e-3, batch 32, 5000 steps, strict fp32 (no TF32), and the
+# lr is halved, after a rewind to the best checkpoint, when validation accuracy drops 2 points below its best.
+#   python -m experiments.neurips.cnn_benchmarks.bench_ptorch --config experiments/neurips/cnn_benchmarks/resnet8_config.yaml --fresh
+#   python -m experiments.neurips.cnn_benchmarks.bench_torch  --config experiments/neurips/cnn_benchmarks/resnet8_config.yaml --fresh
+#   python -m experiments.neurips.plot_curves --config experiments/neurips/cnn_benchmarks/resnet8_config.yaml
+
+random_seed: 2026             # run r uses seed 2026 + r
+num_runs: 3
+batch_sizes: [32]
+max_steps: 5000
+eval_every: 200
+patience: 1000                # no early stopping
+lr_on_regression: {drop: 0.02, factor: 0.5, min_lr: 1.0e-5}
+precision: highest
+
+results_dir: results/resnet8
+figures_dir: ../../../images/other_benchmarks
+
+tasks:
+  - name: CIFAR10
+    dataset: CIFAR10
+    in_channels: 3
+    classes: 10
+
+ptorch:
+  defaults:
+    model: resnet8
+    widths: [64, 128, 256]
+    act: leaky
+    head_norm: l2
+    branch_mode: delta_sum
+    optimizer: {name: ProjectionAdam, kwargs: {lr: 0.001}}
+    loss: CrossEntropy
+  variants:
+    - name: ptorch_resnet8
+
+torch:
+  name: torch_resnet8
+  model: resnet8
+  widths: [64, 128, 256]
+  act: leaky
+  optimizer: {name: Adam, kwargs: {lr: 0.001}}
+
+labels:
+  ptorch_resnet8: $\mathcal{P}$Torch
+  torch_resnet8: Torch
+
+plots:
+  - {file: CIFAR10_CONV.pdf, task: CIFAR10, x: step, title: CIFAR10 ResNet-8}
+  - {file: CIFAR10_CONV_TIME.pdf, task: CIFAR10, x: time, title: CIFAR10 ResNet-8, time_bins: 50}

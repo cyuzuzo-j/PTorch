@@ -1,0 +1,38 @@
+# Hard target assignment vs proximal loss (paper fig:effect-of-loss):
+# Experiment 1 (config.yaml, l2, MNIST) with the loss changed and hidden width 64.
+#   python -m experiments.neurips.mlp.bench_ptorch --config experiments/neurips/mlp/effect_of_loss_config.yaml --fresh
+#   python -m experiments.neurips.plot_curves --config experiments/neurips/mlp/effect_of_loss_config.yaml
+
+random_seed: 2026             # run r uses seed 2026 + r
+num_runs: 3
+batch_sizes: [32]
+max_steps: 5000
+eval_every: 200               # steps between validation evaluations
+patience: 100                 # evaluations without improvement before stopping (100 > 5000/200: off)
+
+results_dir: results/loss_comparison
+figures_dir: ../../../images
+
+tasks:
+  - name: MNIST_1L
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [64]
+
+ptorch:
+  defaults:
+    optimizer: {name: ProjectionMuon, kwargs: {lr: 0.001, weight_decay: 0.1}}
+  variants:
+    - {name: hard_margin, loss: HardMarginLoss}
+    - {name: prox_margin, loss: ProximalHingeMarginLoss}
+    - {name: prox_ce, loss: CrossEntropy}
+
+labels:
+  hard_margin: Hard Margin
+  prox_margin: Proximal Margin
+  prox_ce: Proximal Cross Entropy
+
+plots:
+  - {file: effect_of_loss.pdf, x: step, title: Effect of Loss Formulation, legend_title: Loss Formulation,
+     ylim: [0.9, 1.0]}

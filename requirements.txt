@@ -1,0 +1,33 @@
+# Full environment for ptorch + every experiment in experiments/.
+#   pip install -r requirements.txt
+# CPU-only machine (avoids the multi-GB CUDA wheels):
+#   pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+# CUDA machine: the cu128 index stops at torch 2.11, so use PyPI or the cu130 index:
+#   pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu130
+# Version floors mirror pyproject.toml; tested with the versions noted on the right.
+
+# core
+torch>=2.14           # Muon needs >= 2.9; 2.9-2.11 Inductor miscompiles the TD floor kernel on GPU
+numpy>=1.24           # 2.x
+
+# experiments
+torchvision>=0.29
+pandas>=2.0
+tqdm>=4.66
+pyyaml>=6.0
+matplotlib>=3.8
+seaborn>=0.13
+requests>=2.31
+sentencepiece>=0.2    # GPT / tokenizer probes
+
+# RL experiments (pg, lunar_lander, bipedal_walker, walker)
+gymnasium[box2d,mujoco]>=1.0
+imageio>=2.34
+pillow>=10.0
+
+# dev
+pytest>=7
+ruff>=0.5
+
+# ptorch itself, editable, so `import ptorch` works from anywhere
+-e .

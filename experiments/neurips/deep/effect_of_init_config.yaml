@@ -1,0 +1,55 @@
+# Effect of the weight init at depth (paper fig:effect-of-init): Experiment 1
+# (mlp/config.yaml, l2) for 200 steps on MNIST with 1, 3 and 7 hidden layers (depth 2, 4, 8
+# counts weight layers), for three inits of every Linear weight.
+#   python -m experiments.neurips.mlp.bench_ptorch --config experiments/neurips/deep/effect_of_init_config.yaml --fresh
+#   python -m experiments.neurips.plot_curves --config experiments/neurips/deep/effect_of_init_config.yaml
+#   python -m experiments.neurips.make_tables --config experiments/neurips/deep/effect_of_init_config.yaml
+
+random_seed: 2026             # run r uses seed 2026 + r
+num_runs: 3
+batch_sizes: [32]
+max_steps: 200                # the original notebook budget
+eval_every: 10                # steps between validation evaluations
+patience: 100                 # evaluations without improvement before stopping (100 > 200/10: off)
+
+results_dir: results/effect_of_init
+figures_dir: ../../../images/deep
+
+tasks:
+  - name: MNIST_D2
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [1024]
+  - name: MNIST_D4
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [1024, 1024, 1024]
+  - name: MNIST_D8
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [1024, 1024, 1024, 1024, 1024, 1024, 1024]
+
+ptorch:
+  defaults:
+    optimizer: {name: ProjectionMuon, kwargs: {lr: 0.001, weight_decay: 0.1}}
+    loss: CrossEntropy        # proximal CE, lambda = 10, 1 step (the defaults)
+  variants:
+    - name: init_normal       # N(0, 0.01^2)
+      init: normal
+    - name: init_he           # He normal, the library default
+      init: he
+    - name: init_orthogonal   # orthogonal x sqrt(2)
+      init: orthogonal
+
+labels:
+  init_normal: Normal (std 0.01)
+  init_he: He normal
+  init_orthogonal: Orthogonal ($\times\sqrt{2}$)
+
+plots:
+  - {file: INIT_D2.pdf, task: MNIST_D2, x: step, title: Depth = 2, legend_title: Initialization}
+  - {file: INIT_D4.pdf, task: MNIST_D4, x: step, title: Depth = 4, legend_title: Initialization}
+  - {file: INIT_D8.pdf, task: MNIST_D8, x: step, title: Depth = 8, legend_title: Initialization}

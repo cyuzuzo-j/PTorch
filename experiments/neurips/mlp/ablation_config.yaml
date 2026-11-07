@@ -1,0 +1,79 @@
+# Unified ablation (paper table:ablation)
+# CIFAR-10, 3072-1024-10 MLP, batch size 256.
+# One process per variant: compiled optimizer steps count towards recompile_limit across a process.
+#   for v in R2_fused_l2 R3_prox_ce R4_muon R5_linf R6_linf_no_muon hybrid; do
+#     python -m experiments.neurips.mlp.bench_ptorch --config experiments/neurips/mlp/ablation_config.yaml --variants $v --fresh
+#   done
+#   python -m experiments.neurips.mlp.bench_torch  --config experiments/neurips/mlp/ablation_config.yaml --fresh
+#   python -m experiments.neurips.mlp.bench_pjax   --config experiments/neurips/mlp/ablation_config.yaml --fresh
+# Eager ms/step column (writes *_eager CSVs next to the compiled ones):
+#   TORCHDYNAMO_DISABLE=1 python -m experiments.neurips.mlp.bench_ptorch \
+#       --config experiments/neurips/mlp/ablation_config.yaml --variants R1_plain_unfused,R2_fused_l2,R3_prox_ce,R4_muon,hybrid --fresh
+# Peak MB column: short eager runs (no cudagraph pools, so the allocator peak is exact):
+#   TORCHDYNAMO_DISABLE=1 python -m experiments.neurips.mlp.bench_ptorch \
+#       --config experiments/neurips/mlp/ablation_memory_config.yaml --fresh
+#   python -m experiments.neurips.mlp.bench_torch --config experiments/neurips/mlp/ablation_memory_config.yaml --fresh
+#   python -m experiments.neurips.make_tables --config experiments/neurips/mlp/ablation_config.yaml
+#
+# Rows are cumulative. R1 = unfused per-pair projection + consensus (unfused_linear.py), run eager
+# only (the compiled command skips it); R5 and R6 run compiled only. "Plain" projections = ProjectionSGD(lr=1), exact cyclic projections.
+
+random_seed: 2026             # run r uses seed 2026 + r
+num_runs: 3
+batch_sizes: [256]
+max_steps: 3000
+eval_every: null             # validate once, at the end: the test row scores the final weights
+patience: 1000                # no early stopping
+
+results_dir: results/ablation
+memory_results_dir: results/ablation_memory   # written by ablation_memory_config.yaml
+table: ablation               # make_tables prints the table:ablation layout
+
+tasks:
+  - name: CIFAR10_1024
+    dataset: CIFAR10
+    in_features: 3072         # 32x32x3 flattened
+    classes: 10
+    hidden: [1024]
+
+ptorch:
+  defaults:
+    optimizer: {name: ProjectionMuon, kwargs: {lr: 0.001, weight_decay: 0.1}}
+    loss: CrossEntropy
+  variants:
+    - name: R1_plain_unfused
+      impl: unfused
+      loss: HardMarginLoss
+      optimizer: {name: ProjectionSGD, kwargs: {lr: 1.0}}
+    - name: R2_fused_l2
+      loss: HardMarginLoss
+      optimizer: {name: ProjectionSGD, kwargs: {lr: 1.0}}
+    - name: R3_prox_ce
+      optimizer: {name: ProjectionSGD, kwargs: {lr: 1.0}}
+    - name: R4_muon
+    - name: R5_linf
+      norm: linf
+    - name: R6_linf_no_muon
+      norm: linf
+      optimizer: {name: ProjectionSGD, kwargs: {lr: 1.0}}
+    - name: hybrid
+      head_norm: linf
+
+torch:
+  name: torch
+  optimizer: {name: Adam, kwargs: {lr: 0.001}}
+
+pjax:
+  name: pjax
+  optimizer: {name: DouglasRachford, kwargs: {steps_per_update: 50}}
+
+labels:
+  torch: Torch (Adam)
+  pjax: PJAX (DR, 50 passes/step)
+  R1_plain_unfused: "R1: plain cyclic proj"
+  R2_fused_l2: "R2: + fused $\\ell_2$"
+  R3_prox_ce: "R3: + proximal CE loss"
+  R4_muon: "R4: + Muon"
+  R5_linf: "R5: + $\\ell_\\infty$ geometry"
+  R6_linf_no_muon: "R6: - Muon"
+  hybrid: $\mathcal{P}$Torch-hybrid

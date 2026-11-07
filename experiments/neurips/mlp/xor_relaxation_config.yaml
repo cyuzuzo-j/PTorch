@@ -1,0 +1,13 @@
+# Where to apply the first-order relaxation, on XOR (paper fig:relaxation-location).
+# 2-8-1 bias-free MLP, LeakyReLU(0.1), margin output constraint, full batch of the 4 XOR
+# points. Relaxation = SGD(lr 1, momentum 0.9) on the projection residuals.
+#   python -m experiments.neurips.mlp.xor_relaxation --config experiments/neurips/mlp/xor_relaxation_config.yaml
+
+random_seed: 2026             # run r uses seed 2026 + r
+num_runs: 3
+hidden: 8
+iterations: 1000
+optimizer: {lr: 1.0, momentum: 0.9}
+
+results_dir: results/xor_relaxation
+figures_dir: ../../../images/other_benchmarks

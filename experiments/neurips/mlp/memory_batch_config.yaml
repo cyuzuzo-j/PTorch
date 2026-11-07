@@ -1,0 +1,27 @@
+# Peak memory of one linear-layer projection vs batch size (paper fig:memory-batch)
+#   python -m experiments.neurips.mlp.bench_memory --config experiments/neurips/mlp/memory_batch_config.yaml
+#   python -m experiments.neurips.mlp.plot_memory  --config experiments/neurips/mlp/memory_batch_config.yaml
+# Fused l2 should grow like torch (activations, ~B*K); pjax/DR and l_inf like B*K*M
+# (l_inf unchunked here; the library default caps it at 2**26 elements per chunk).
+# Run on a 48 GB L40/L40S (sets where pjax and l_inf run out of memory).
+
+sweep: batch
+out_dim: 500                  # M, held fixed
+in_dim: 1000                  # K, held fixed
+batch_sizes: [32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384]   # B, swept; 16384 OOMs pjax and l_inf on a 48 GB L40/L40S
+frameworks: [torch, ptorch_l2, ptorch_linf, pjax]
+device: cuda
+metric: device
+
+# Same optimizers/losses as memory_config.yaml.
+torch:
+  optimizer: {name: Adam, kwargs: {lr: 0.001}}
+ptorch:
+  optimizer: {name: ProjectionMuon, kwargs: {lr: 0.001, weight_decay: 0.1}}
+  loss: CrossEntropy
+  linf_chunk_elems: null     # no row-chunking cap: show l_inf's true O(B*K*M) footprint
+pjax:
+  optimizer: {name: DouglasRachford, kwargs: {steps_per_update: 50}}
+
+results_dir: results/memory
+figures_dir: ../../../images

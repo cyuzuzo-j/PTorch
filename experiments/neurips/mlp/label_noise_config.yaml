@@ -1,0 +1,47 @@
+# Label-noise robustness (paper appendix "What about the robustness"): Experiment 1 (config.yaml) on 10 seeds
+# A fraction of the TRAIN labels is replaced by a uniformly random class
+# (seeded per run, may equal the true class). Validation and test labels stay clean.
+#   python -m experiments.neurips.mlp.bench_ptorch --config experiments/neurips/mlp/label_noise_config.yaml --fresh
+#   python -m experiments.neurips.mlp.bench_torch  --config experiments/neurips/mlp/label_noise_config.yaml --fresh
+#   python -m experiments.neurips.make_tables --config experiments/neurips/mlp/label_noise_config.yaml
+
+random_seed: 2026             # run r uses seed 2026 + r
+num_runs: 10
+batch_sizes: [32]
+label_noise: [0.0, 0.1, 0.2]
+max_steps: 5000
+eval_every: 200
+patience: 100
+
+results_dir: results/label_noise
+table_by: label_noise         # one table column group per noise level
+
+tasks:
+  - name: CIFAR10_1L
+    dataset: CIFAR10
+    in_features: 3072
+    classes: 10
+    hidden: [1024]
+  - name: MNIST_1L
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [1024]
+
+ptorch:
+  defaults:
+    optimizer: {name: ProjectionMuon, kwargs: {lr: 0.001, weight_decay: 0.1}}
+    loss: CrossEntropy
+  variants:
+    - name: ptorch_l2
+    - name: ptorch_hybrid
+      head_norm: linf
+
+torch:
+  name: torch
+  optimizer: {name: Adam, kwargs: {lr: 0.001}}
+
+labels:
+  ptorch_l2: $\mathcal{P}$Torch $\ell_2$ (Muon)
+  ptorch_hybrid: $\mathcal{P}$Torch hybrid (Muon)
+  torch: Torch

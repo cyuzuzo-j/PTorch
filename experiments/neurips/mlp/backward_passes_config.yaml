@@ -1,0 +1,31 @@
+# Backward passes per batch K, equal compute (paper tab:backward-passes)
+# K projection sweeps (forward + backward + optimizer step) on each batch;
+# 3000 sweeps in total, so each variant gets max_steps = 3000 / K.
+# The equal-time column is backward_passes_equal_time_config.yaml.
+#   python -m experiments.neurips.mlp.bench_ptorch --config experiments/neurips/mlp/backward_passes_config.yaml --fresh
+#   python -m experiments.neurips.make_tables --config experiments/neurips/mlp/backward_passes_config.yaml
+# The paper states no architecture here, so this is Experiment 1's MNIST MLP (mlp/config.yaml).
+
+random_seed: 2026             # run r uses seed 2026 + r
+num_runs: 3
+batch_sizes: [32]
+eval_every: 100
+patience: 1000                # no early stopping
+
+results_dir: results/backward_passes
+
+tasks:
+  - name: MNIST_1L
+    dataset: MNIST
+    in_features: 784
+    classes: 10
+    hidden: [1024]
+
+ptorch:
+  defaults:
+    optimizer: {name: ProjectionMuon, kwargs: {lr: 0.001, weight_decay: 0.1}}
+    loss: CrossEntropy
+  variants:
+    - {name: K1, passes: 1, max_steps: 3000}
+    - {name: K2, passes: 2, max_steps: 1500}
+    - {name: K10, passes: 10, max_steps: 300}
